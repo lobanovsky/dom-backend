@@ -94,6 +94,17 @@ func TestAPIRequiresSession(t *testing.T) {
 	}
 }
 
+func TestAuthMe(t *testing.T) {
+	h := newTestRouter(t)
+	if rec := do(h, "GET", "/api/v1/auth/me", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without session: status = %d, want 401", rec.Code)
+	}
+	rec := do(h, "GET", "/api/v1/auth/me", "", login(t, h))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"username":"admin"`) {
+		t.Fatalf("with session: status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
 func TestOrganizationStatusCodes(t *testing.T) {
 	h := newTestRouter(t)
 	c := login(t, h)

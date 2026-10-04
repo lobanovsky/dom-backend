@@ -27,6 +27,8 @@ func New(username, passwordHash, secret string, ttl time.Duration) *Auth {
 
 func (a *Auth) TTL() time.Duration { return a.ttl }
 
+func (a *Auth) Username() string { return a.username }
+
 // Check сверяет логин и пароль; время работы не зависит от того, неверен логин или пароль.
 func (a *Auth) Check(username, password string) bool {
 	passOK := bcrypt.CompareHashAndPassword(a.hash, []byte(password)) == nil

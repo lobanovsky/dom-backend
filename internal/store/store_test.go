@@ -62,6 +62,16 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	}
 	cleanup(t, persons.Delete, person.ID)
 
+	// поиск по подстроке ФИО без учёта регистра
+	found, err := persons.List(ctx, model.PersonFilter{Q: ptr("тестов т")}, 50, 0)
+	if err != nil || !containsPerson(found, person.ID) {
+		t.Errorf("search q: found = %+v, err = %v", found, err)
+	}
+	found, err = persons.List(ctx, model.PersonFilter{Q: ptr("%")}, 50, 0)
+	if err != nil || containsPerson(found, person.ID) {
+		t.Errorf("search %%: must be literal, found = %+v, err = %v", found, err)
+	}
+
 	if pr.TotalArea == nil || *pr.TotalArea != 50.5 {
 		t.Errorf("total_area round trip = %v", pr.TotalArea)
 	}
@@ -137,6 +147,15 @@ func cleanup(t *testing.T, del func(context.Context, int64) error, id int64) {
 			t.Errorf("cleanup id %d: %v", id, err)
 		}
 	})
+}
+
+func containsPerson(items []model.Person, id int64) bool {
+	for _, p := range items {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func isKind(err error, kind error) bool {

@@ -26,13 +26,14 @@ func (h personHandlers) register(mux *http.ServeMux) {
 }
 
 func (h personHandlers) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, nil, []string{"last_name", "phone"})
+	p, ok := parseList(w, r, nil, []string{"last_name", "phone", "q"})
 	if !ok {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.PersonFilter{
 		LastName: p.Text("last_name"),
 		Phone:    p.Text("phone"),
+		Q:        p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)

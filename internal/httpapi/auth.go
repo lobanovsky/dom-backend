@@ -43,6 +43,11 @@ func (h *authHandlers) logout(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// me отвечает текущим пользователем; вызывается за require, поэтому сессия уже проверена.
+func (h *authHandlers) me(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"username": h.auth.Username()})
+}
+
 // require пропускает только запросы с действующей сессией.
 func (h *authHandlers) require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

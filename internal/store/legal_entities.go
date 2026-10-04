@@ -16,7 +16,8 @@ func (s *LegalEntities) List(ctx context.Context, f model.LegalEntityFilter, lim
 	return collect[model.LegalEntity](s.pool.Query(ctx,
 		`SELECT id, name, inn, kpp, ogrn, created_at, updated_at FROM legal_entities
 		 WHERE ($1::text IS NULL OR inn = $1)
-		 ORDER BY id LIMIT $2 OFFSET $3`, f.INN, limit, offset))
+		   AND ($2::text IS NULL OR name ILIKE $2 OR inn ILIKE $2)
+		 ORDER BY name, id LIMIT $3 OFFSET $4`, f.INN, likePattern(f.Q), limit, offset))
 }
 
 func (s *LegalEntities) Get(ctx context.Context, id int64) (model.LegalEntity, error) {

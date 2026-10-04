@@ -102,6 +102,7 @@ docker compose up -d --build
 
 - `GET /healthz` без авторизации.
 - `POST /api/v1/auth/login` с телом `{"username","password"}` ставит cookie `dom_session` (HttpOnly). `POST /api/v1/auth/logout` её сбрасывает. Остальные пути требуют cookie, иначе 401.
+- `GET /api/v1/auth/me` возвращает `{"username":"admin"}` при действующей сессии, иначе 401. Фронтенд вызывает его при загрузке страницы.
 
 Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`.
 
@@ -119,8 +120,8 @@ docker compose up -d --build
 - `organizations`: `kind`
 - `buildings`: `organization_id`, `kind`
 - `premises`: `building_id`, `kind`, `number`
-- `persons`: `last_name`, `phone`
-- `legal-entities`: `inn`
+- `persons`: `last_name`, `phone`, `q` (подстрока в ФИО или телефоне, без учёта регистра; сортировка по фамилии)
+- `legal-entities`: `inn`, `q` (подстрока в названии или ИНН; сортировка по названию)
 - `ownerships`: `premises_id`, `person_id`, `legal_entity_id`
 - `residencies`: `premises_id`, `person_id`, `related_owner_id`
 - `accounts`: `premises_id`, `number`, `status`, `purpose`

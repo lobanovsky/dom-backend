@@ -20,10 +20,12 @@ type PremisesFilter struct {
 type PersonFilter struct {
 	LastName *string
 	Phone    *string
+	Q        *string // подстрока в ФИО или телефоне
 }
 
 type LegalEntityFilter struct {
 	INN *string
+	Q   *string // подстрока в названии или ИНН
 }
 
 type OwnershipFilter struct {

@@ -26,12 +26,13 @@ func (h legalEntityHandlers) register(mux *http.ServeMux) {
 }
 
 func (h legalEntityHandlers) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, nil, []string{"inn"})
+	p, ok := parseList(w, r, nil, []string{"inn", "q"})
 	if !ok {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.LegalEntityFilter{
 		INN: p.Text("inn"),
+		Q:   p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)

@@ -34,6 +34,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
 
 	api := http.NewServeMux()
+	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	organizationHandlers{d.Organizations}.register(api)
 	buildingHandlers{d.Buildings}.register(api)
 	premisesHandlers{d.Premises}.register(api)

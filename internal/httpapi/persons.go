@@ -60,6 +60,7 @@ func (h personHandlers) create(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	in.Normalize()
 	if err := in.Validate(); err != nil {
 		writeErr(w, err)
 		return
@@ -81,6 +82,7 @@ func (h personHandlers) update(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	in.Normalize()
 	if err := in.Validate(); err != nil {
 		writeErr(w, err)
 		return

@@ -56,7 +56,10 @@ func TestOwnershipsAndPremises(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup(t, premises.Delete, pr.ID)
-	person, err := persons.Create(ctx, model.Person{LastName: "Тестов", FirstName: "Тест", BirthDate: ptr(date(1980, 5, 1))})
+	person, err := persons.Create(ctx, model.Person{
+		LastName: "Тестов", FirstName: "Тест", BirthDate: ptr(date(1980, 5, 1)),
+		Phones: []string{"+7 900 123 45 67", "+7 495 765 43 21"}, Emails: []string{"Test.Person@Example.com"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +70,31 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil || !containsPerson(found, person.ID) {
 		t.Errorf("search q: found = %+v, err = %v", found, err)
 	}
+	if len(person.Phones) != 2 || person.Phones[1] != "+7 495 765 43 21" || len(person.Emails) != 1 {
+		t.Errorf("contacts round trip: phones = %q, emails = %q", person.Phones, person.Emails)
+	}
+	// поиск по любому из телефонов, по email, точный фильтр по телефону
+	for name, f := range map[string]model.PersonFilter{
+		"second phone": {Q: ptr("765 43")},
+		"email":        {Q: ptr("test.person@example")},
+		"exact phone":  {Phone: ptr("+7 495 765 43 21")},
+	} {
+		found, err = persons.List(ctx, f, 50, 0)
+		if err != nil || !containsPerson(found, person.ID) {
+			t.Errorf("search by %s: found = %+v, err = %v", name, found, err)
+		}
+	}
+	found, err = persons.List(ctx, model.PersonFilter{Phone: ptr("+7 495")}, 50, 0)
+	if err != nil || containsPerson(found, person.ID) {
+		t.Errorf("exact phone filter must not match a prefix: found = %+v, err = %v", found, err)
+	}
+	// пустые списки сохраняются как пустые массивы, а не NULL
+	bare, err := persons.Create(ctx, model.Person{LastName: "Безконтактов", FirstName: "Тест", Phones: []string{}, Emails: []string{}})
+	if err != nil || bare.Phones == nil || len(bare.Phones) != 0 {
+		t.Errorf("person without contacts: %+v, err = %v", bare, err)
+	}
+	cleanup(t, persons.Delete, bare.ID)
+
 	found, err = persons.List(ctx, model.PersonFilter{Q: ptr("%")}, 50, 0)
 	if err != nil || containsPerson(found, person.ID) {
 		t.Errorf("search %%: must be literal, found = %+v, err = %v", found, err)

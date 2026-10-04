@@ -26,6 +26,12 @@ func TestValidate(t *testing.T) {
 		{"building bad year", Building{OrganizationID: 1, Kind: "parking", Address: "a", YearBuilt: ptr(1500)}.Validate(), "year_built"},
 		{"premises living > total", Premises{BuildingID: 1, Kind: "apartment", Number: "1", TotalArea: ptr(40.0), LivingArea: ptr(50.0)}.Validate(), "living_area"},
 		{"person no first name", Person{LastName: "Иванов"}.Validate(), "first_name"},
+		{"person contacts ok", Person{LastName: "И", FirstName: "И", Phones: []string{"+7 (495) 123-45-67", "8 903 111 22 33 доб. 4"}, Emails: []string{"a@b.ru"}}.Validate(), ""},
+		{"person phone too short", Person{LastName: "И", FirstName: "И", Phones: []string{"12-34"}}.Validate(), "phones"},
+		{"person phone text", Person{LastName: "И", FirstName: "И", Phones: []string{"позвонить"}}.Validate(), "phones"},
+		{"person bad email", Person{LastName: "И", FirstName: "И", Emails: []string{"не-email"}}.Validate(), "emails"},
+		{"person email with name", Person{LastName: "И", FirstName: "И", Emails: []string{"Иван <a@b.ru>"}}.Validate(), "emails"},
+		{"person too many phones", Person{LastName: "И", FirstName: "И", Phones: manyPhones(11)}.Validate(), "phones"},
 		{"ownership ok", validOwnership().Validate(), ""},
 		{"ownership share > 1", func() error { o := validOwnership(); o.ShareNum, o.ShareDen = 3, 2; return o.Validate() }(), "share_num"},
 		{"ownership both owners", func() error { o := validOwnership(); o.LegalEntityID = ptr(int64(2)); return o.Validate() }(), "person_id"},
@@ -46,6 +52,28 @@ func TestValidate(t *testing.T) {
 		case tc.field != "" && ve.Field != tc.field:
 			t.Errorf("%s: field = %q, want %q", tc.name, ve.Field, tc.field)
 		}
+	}
+}
+
+func manyPhones(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "+7 900 000 00 " + string(rune('0'+i/10)) + string(rune('0'+i%10))
+	}
+	return out
+}
+
+func TestPersonNormalize(t *testing.T) {
+	p := Person{
+		Phones: []string{" +7 900 111 22 33 ", "", "+7 900 111 22 33", "8 495 000 00 00"},
+		Emails: nil,
+	}
+	p.Normalize()
+	if len(p.Phones) != 2 || p.Phones[0] != "+7 900 111 22 33" || p.Phones[1] != "8 495 000 00 00" {
+		t.Errorf("phones = %q, want trimmed, deduplicated, order kept", p.Phones)
+	}
+	if p.Emails == nil || len(p.Emails) != 0 {
+		t.Errorf("emails = %#v, want empty non-nil slice", p.Emails)
 	}
 }
 

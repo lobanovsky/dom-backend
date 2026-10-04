@@ -32,7 +32,7 @@ erDiagram
 | `organizations` | УК или ТСН/ТСЖ (`kind`: uk / tsn / tszh), ИНН, КПП, ОГРН |
 | `buildings` | Дом: `apartment_building`, `parking`, `common_premises`, `other` |
 | `premises` | Объект недвижимости: `apartment`, `non_residential`, `commercial`, `parking_space`, `storage`. Уникален по (дом, вид, номер) |
-| `persons` | Физлица. Один человек может быть и собственником, и жителем |
+| `persons` | Физлица: фамилия, имя, отчество отдельными полями, дата рождения, списки телефонов (`phones`) и email (`emails`). Один человек может быть и собственником, и жителем |
 | `legal_entities` | Юрлица-собственники |
 | `ownerships` | Владение: помещение, владелец (физлицо **или** юрлицо), доля `share_num/share_den`, период, основание |
 | `residencies` | Жители: прописан или фактически проживает, период, родство (`relation`, `related_owner_id`; родство необязательно) |
@@ -120,12 +120,14 @@ docker compose up -d --build
 - `organizations`: `kind`
 - `buildings`: `organization_id`, `kind`
 - `premises`: `building_id`, `kind`, `number`
-- `persons`: `last_name`, `phone`, `q` (подстрока в ФИО или телефоне, без учёта регистра; сортировка по фамилии)
+- `persons`: `last_name`, `phone` (точное совпадение с одним из телефонов), `q` (подстрока в ФИО, любом телефоне или email, без учёта регистра; сортировка по фамилии)
 - `legal-entities`: `inn`, `q` (подстрока в названии или ИНН; сортировка по названию)
 - `ownerships`: `premises_id`, `person_id`, `legal_entity_id`
 - `residencies`: `premises_id`, `person_id`, `related_owner_id`
 - `accounts`: `premises_id`, `number`, `status`, `purpose`
 - `account-holders`: `account_id`, `person_id`, `legal_entity_id`
+
+Контакты физлица: `phones` и `emails` — массивы строк, первый элемент основной. Значения обрезаются по краям, пустые и повторы убираются, не больше 10 каждого. В телефоне должно быть не меньше 5 цифр (формат любой: `+7 (495) 123-45-67`, `8 903 111 22 33 доб. 4`), email проверяется как адрес. Не переданное поле и `null` считаются пустым списком.
 
 Значения по умолчанию при создании: у `ownerships` доля 1/1, у `residencies` `relation = other`, у `accounts` `purpose = utilities` и `status = active`. Даты передаются строкой `YYYY-MM-DD`. Поля `id`, `created_at`, `updated_at` выставляет сервер, а неизвестные поля в теле дают 400.
 

@@ -13,6 +13,7 @@ type BuildingStore interface {
 	Create(ctx context.Context, in model.Building) (model.Building, error)
 	Update(ctx context.Context, id int64, in model.Building) (model.Building, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Building, error)
 }
 
 type buildingHandlers struct{ s BuildingStore }
@@ -23,6 +24,7 @@ func (h buildingHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/buildings/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/buildings/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/buildings/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/buildings/{id}/restore", h.restore)
 }
 
 func (h buildingHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h buildingHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.BuildingFilter{
+		Deleted:        p.Deleted,
 		OrganizationID: p.Int("organization_id"),
 		Kind:           p.Text("kind"),
 	}, p.Limit, p.Offset)
@@ -102,4 +105,17 @@ func (h buildingHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h buildingHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

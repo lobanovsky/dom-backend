@@ -9,11 +9,11 @@ import (
 
 // PremisesOwnershipsStore и PremisesAccountsStore отдают вложенные данные помещения.
 type PremisesOwnershipsStore interface {
-	ListByPremises(ctx context.Context, premisesID int64) ([]model.OwnershipView, error)
+	ListByPremises(ctx context.Context, premisesID int64, deleted bool) ([]model.OwnershipView, error)
 }
 
 type PremisesAccountsStore interface {
-	ListByPremises(ctx context.Context, premisesID int64) ([]model.AccountView, error)
+	ListByPremises(ctx context.Context, premisesID int64, deleted bool) ([]model.AccountView, error)
 }
 
 type premisesNestedHandlers struct {
@@ -31,7 +31,11 @@ func (h premisesNestedHandlers) listOwnerships(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	items, err := h.ownerships.ListByPremises(r.Context(), id)
+	deleted, ok := deletedParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.ownerships.ListByPremises(r.Context(), id, deleted)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -44,7 +48,11 @@ func (h premisesNestedHandlers) listAccounts(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	items, err := h.accounts.ListByPremises(r.Context(), id)
+	deleted, ok := deletedParam(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.accounts.ListByPremises(r.Context(), id, deleted)
 	if err != nil {
 		writeErr(w, err)
 		return

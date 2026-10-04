@@ -13,6 +13,7 @@ type LegalEntityStore interface {
 	Create(ctx context.Context, in model.LegalEntity) (model.LegalEntity, error)
 	Update(ctx context.Context, id int64, in model.LegalEntity) (model.LegalEntity, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.LegalEntity, error)
 }
 
 type legalEntityHandlers struct{ s LegalEntityStore }
@@ -23,6 +24,7 @@ func (h legalEntityHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/legal-entities/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/legal-entities/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/legal-entities/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/legal-entities/{id}/restore", h.restore)
 }
 
 func (h legalEntityHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,8 +33,9 @@ func (h legalEntityHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.LegalEntityFilter{
-		INN: p.Text("inn"),
-		Q:   p.Text("q"),
+		Deleted: p.Deleted,
+		INN:     p.Text("inn"),
+		Q:       p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)
@@ -102,4 +105,17 @@ func (h legalEntityHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h legalEntityHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

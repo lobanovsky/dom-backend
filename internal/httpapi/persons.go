@@ -13,6 +13,7 @@ type PersonStore interface {
 	Create(ctx context.Context, in model.Person) (model.Person, error)
 	Update(ctx context.Context, id int64, in model.Person) (model.Person, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Person, error)
 }
 
 type personHandlers struct{ s PersonStore }
@@ -23,6 +24,7 @@ func (h personHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/persons/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/persons/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/persons/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/persons/{id}/restore", h.restore)
 }
 
 func (h personHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h personHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.PersonFilter{
+		Deleted:  p.Deleted,
 		LastName: p.Text("last_name"),
 		Phone:    p.Text("phone"),
 		Q:        p.Text("q"),
@@ -105,4 +108,17 @@ func (h personHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h personHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

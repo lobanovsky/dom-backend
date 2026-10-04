@@ -13,6 +13,7 @@ type PremisesStore interface {
 	Create(ctx context.Context, in model.Premises) (model.Premises, error)
 	Update(ctx context.Context, id int64, in model.Premises) (model.Premises, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Premises, error)
 }
 
 type premisesHandlers struct{ s PremisesStore }
@@ -23,6 +24,7 @@ func (h premisesHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/premises/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/premises/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/premises/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/premises/{id}/restore", h.restore)
 }
 
 func (h premisesHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h premisesHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.PremisesFilter{
+		Deleted:    p.Deleted,
 		BuildingID: p.Int("building_id"),
 		Kind:       p.Text("kind"),
 		Number:     p.Text("number"),
@@ -103,4 +106,17 @@ func (h premisesHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h premisesHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

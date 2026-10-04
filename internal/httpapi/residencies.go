@@ -13,6 +13,7 @@ type ResidencyStore interface {
 	Create(ctx context.Context, in model.Residency) (model.Residency, error)
 	Update(ctx context.Context, id int64, in model.Residency) (model.Residency, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Residency, error)
 }
 
 type residencyHandlers struct{ s ResidencyStore }
@@ -23,6 +24,7 @@ func (h residencyHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/residencies/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/residencies/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/residencies/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/residencies/{id}/restore", h.restore)
 }
 
 func (h residencyHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h residencyHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.ResidencyFilter{
+		Deleted:        p.Deleted,
 		PremisesID:     p.Int("premises_id"),
 		PersonID:       p.Int("person_id"),
 		RelatedOwnerID: p.Int("related_owner_id"),
@@ -105,4 +108,17 @@ func (h residencyHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h residencyHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

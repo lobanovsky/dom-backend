@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -45,17 +46,17 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, orgs.Delete, org.ID)
+	cleanup(t, pool, "organizations", org.ID)
 	b, err := buildings.Create(ctx, model.Building{OrganizationID: org.ID, Kind: "apartment_building", Address: "store-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, buildings.Delete, b.ID)
+	cleanup(t, pool, "buildings", b.ID)
 	pr, err := premises.Create(ctx, model.Premises{BuildingID: b.ID, Kind: "apartment", Number: "1", TotalArea: ptr(50.5)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, premises.Delete, pr.ID)
+	cleanup(t, pool, "premises", pr.ID)
 	person, err := persons.Create(ctx, model.Person{
 		LastName: "Тестов", FirstName: "Тест", BirthDate: ptr(date(1980, 5, 1)),
 		Phones: []string{"+7 900 123 45 67", "+7 495 765 43 21"}, Emails: []string{"Test.Person@Example.com"},
@@ -63,7 +64,7 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, persons.Delete, person.ID)
+	cleanup(t, pool, "persons", person.ID)
 
 	// поиск по подстроке ФИО без учёта регистра
 	found, err := persons.List(ctx, model.PersonFilter{Q: ptr("тестов т")}, 50, 0)
@@ -93,7 +94,7 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil || bare.Phones == nil || len(bare.Phones) != 0 {
 		t.Errorf("person without contacts: %+v, err = %v", bare, err)
 	}
-	cleanup(t, persons.Delete, bare.ID)
+	cleanup(t, pool, "persons", bare.ID)
 
 	found, err = persons.List(ctx, model.PersonFilter{Q: ptr("%")}, 50, 0)
 	if err != nil || containsPerson(found, person.ID) {
@@ -120,12 +121,12 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, owns.Delete, o1.ID)
+	cleanup(t, pool, "ownerships", o1.ID)
 	o2, err := owns.Create(ctx, newOwn(1, 2, date(2021, 1, 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, owns.Delete, o2.ID)
+	cleanup(t, pool, "ownerships", o2.ID)
 
 	// сумма долей > 1 -> ErrInvalid, запись откатывается
 	if _, err = owns.Create(ctx, newOwn(1, 3, date(2022, 1, 1))); !isKind(err, ErrInvalid) {
@@ -145,9 +146,9 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil {
 		t.Fatalf("share after closed ownership: %v", err)
 	}
-	cleanup(t, owns.Delete, o3.ID)
+	cleanup(t, pool, "ownerships", o3.ID)
 
-	view, err := owns.ListByPremises(ctx, pr.ID)
+	view, err := owns.ListByPremises(ctx, pr.ID, false)
 	if err != nil || len(view) != 3 || view[0].OwnerName != "Тестов Тест" || view[0].OwnerKind != "person" {
 		t.Errorf("ListByPremises = %+v, err = %v", view, err)
 	}
@@ -156,23 +157,24 @@ func TestOwnershipsAndPremises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup(t, accounts.Delete, acc.ID)
+	cleanup(t, pool, "personal_accounts", acc.ID)
 	if _, err := accounts.Get(ctx, acc.ID+1000000); !isKind(err, ErrNotFound) {
 		t.Errorf("get missing: err = %v, want not found", err)
 	}
 
-	// удаление помещения с зависимостями запрещено
+	// удаление помещения с действующими зависимостями запрещено
 	if err := premises.Delete(ctx, pr.ID); !isKind(err, ErrInvalid) {
 		t.Errorf("delete with dependents: err = %v, want invalid", err)
 	}
 }
 
-// cleanup удаляет запись в конце теста и сообщает, если удалить не удалось.
-func cleanup(t *testing.T, del func(context.Context, int64) error, id int64) {
+// cleanup физически удаляет тестовую запись в конце теста (Delete хранилищ мягкий и
+// оставил бы в БД мусор). Таблицы идут в обратном порядке создания благодаря LIFO t.Cleanup.
+func cleanup(t *testing.T, pool *pgxpool.Pool, table string, id int64) {
 	t.Helper()
 	t.Cleanup(func() {
-		if err := del(context.Background(), id); err != nil {
-			t.Errorf("cleanup id %d: %v", id, err)
+		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, table), id); err != nil {
+			t.Errorf("cleanup %s %d: %v", table, id, err)
 		}
 	})
 }

@@ -48,6 +48,8 @@ func mapErr(err error) error {
 			return &Error{ErrInvalid, "required field is missing: " + pg.ColumnName}
 		case pg.Code == "23514":
 			return &Error{ErrInvalid, "constraint violated: " + pg.ConstraintName}
+		case pg.Code == "P0001": // RAISE EXCEPTION из триггеров целостности (см. миграцию 0003)
+			return &Error{ErrInvalid, pg.Message}
 		case strings.HasPrefix(pg.Code, "22"):
 			return &Error{ErrInvalid, "invalid value: " + pg.Message}
 		}

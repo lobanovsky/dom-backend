@@ -41,6 +41,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 // listParams — разобранные параметры списка: пагинация и фильтры.
 type listParams struct {
 	Limit, Offset int
+	Deleted       bool // ?deleted=only — показать только удалённые
 	ints          map[string]int64
 	texts         map[string]string
 }
@@ -80,7 +81,14 @@ func parseList(w http.ResponseWriter, r *http.Request, intFilters, textFilters [
 			return fail("offset must be a non-negative integer")
 		}
 	}
-	known := map[string]bool{"limit": true, "offset": true}
+	known := map[string]bool{"limit": true, "offset": true, "deleted": true}
+	switch q.Get("deleted") {
+	case "":
+	case "only":
+		p.Deleted = true
+	default:
+		return fail(`deleted must be "only"`)
+	}
 	for _, name := range intFilters {
 		known[name] = true
 		if v := q.Get(name); v != "" {
@@ -137,4 +145,17 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	slog.Error("internal error", "err", err)
 	writeError(w, http.StatusInternalServerError, "internal error")
+}
+
+// deletedParam разбирает ?deleted=only у вложенных списков без пагинации.
+func deletedParam(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	switch r.URL.Query().Get("deleted") {
+	case "":
+		return false, true
+	case "only":
+		return true, true
+	default:
+		writeError(w, http.StatusBadRequest, `deleted must be "only"`)
+		return false, false
+	}
 }

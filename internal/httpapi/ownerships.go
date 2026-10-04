@@ -13,6 +13,7 @@ type OwnershipStore interface {
 	Create(ctx context.Context, in model.Ownership) (model.Ownership, error)
 	Update(ctx context.Context, id int64, in model.Ownership) (model.Ownership, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Ownership, error)
 }
 
 type ownershipHandlers struct{ s OwnershipStore }
@@ -23,6 +24,7 @@ func (h ownershipHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ownerships/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/ownerships/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/ownerships/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/ownerships/{id}/restore", h.restore)
 }
 
 func (h ownershipHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h ownershipHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.OwnershipFilter{
+		Deleted:       p.Deleted,
 		PremisesID:    p.Int("premises_id"),
 		PersonID:      p.Int("person_id"),
 		LegalEntityID: p.Int("legal_entity_id"),
@@ -105,4 +108,17 @@ func (h ownershipHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h ownershipHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

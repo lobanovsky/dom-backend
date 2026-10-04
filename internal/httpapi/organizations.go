@@ -13,6 +13,7 @@ type OrganizationStore interface {
 	Create(ctx context.Context, in model.Organization) (model.Organization, error)
 	Update(ctx context.Context, id int64, in model.Organization) (model.Organization, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Organization, error)
 }
 
 type organizationHandlers struct{ s OrganizationStore }
@@ -23,6 +24,7 @@ func (h organizationHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/organizations/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/organizations/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/organizations/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/organizations/{id}/restore", h.restore)
 }
 
 func (h organizationHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +33,8 @@ func (h organizationHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.OrganizationFilter{
-		Kind: p.Text("kind"),
+		Deleted: p.Deleted,
+		Kind:    p.Text("kind"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)
@@ -101,4 +104,17 @@ func (h organizationHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h organizationHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

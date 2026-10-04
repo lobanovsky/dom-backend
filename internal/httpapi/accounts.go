@@ -13,6 +13,7 @@ type AccountStore interface {
 	Create(ctx context.Context, in model.Account) (model.Account, error)
 	Update(ctx context.Context, id int64, in model.Account) (model.Account, error)
 	Delete(ctx context.Context, id int64) error
+	Restore(ctx context.Context, id int64) (model.Account, error)
 }
 
 type accountHandlers struct{ s AccountStore }
@@ -23,6 +24,7 @@ func (h accountHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/accounts/{id}", h.get)
 	mux.HandleFunc("PUT /api/v1/accounts/{id}", h.update)
 	mux.HandleFunc("DELETE /api/v1/accounts/{id}", h.delete)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/restore", h.restore)
 }
 
 func (h accountHandlers) list(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,7 @@ func (h accountHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.AccountFilter{
+		Deleted:    p.Deleted,
 		PremisesID: p.Int("premises_id"),
 		Number:     p.Text("number"),
 		Status:     p.Text("status"),
@@ -106,4 +109,17 @@ func (h accountHandlers) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h accountHandlers) restore(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.Restore(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }

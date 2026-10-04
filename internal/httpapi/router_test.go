@@ -41,6 +41,16 @@ func (fakeOrganizations) Update(_ context.Context, _ int64, in model.Organizatio
 
 func (fakeOrganizations) Delete(context.Context, int64) error { return nil }
 
+func (fakeOrganizations) Restore(_ context.Context, id int64) (model.Organization, error) {
+	if id == 404 {
+		return model.Organization{}, &store.Error{Kind: store.ErrNotFound, Msg: "not found"}
+	}
+	if id == 422 {
+		return model.Organization{}, &store.Error{Kind: store.ErrInvalid, Msg: "cannot save: building is deleted"}
+	}
+	return model.Organization{Name: "ТСН"}, nil
+}
+
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	h, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
@@ -127,6 +137,12 @@ func TestOrganizationStatusCodes(t *testing.T) {
 		{"PUT", "/api/v1/organizations/1", `{"kind":"uk","name":"УК"}`, 200},
 		{"PUT", "/api/v1/organizations/1", `{"kind":"uk"}`, 422},
 		{"DELETE", "/api/v1/organizations/1", "", 204},
+		{"GET", "/api/v1/organizations?deleted=only", "", 200},
+		{"GET", "/api/v1/organizations?deleted=all", "", 400},
+		{"POST", "/api/v1/organizations/1/restore", "", 200},
+		{"POST", "/api/v1/organizations/404/restore", "", 404},
+		{"POST", "/api/v1/organizations/422/restore", "", 422},
+		{"POST", "/api/v1/organizations/abc/restore", "", 400},
 	}
 	for _, tc := range cases {
 		if rec := do(h, tc.method, tc.path, tc.body, c); rec.Code != tc.want {

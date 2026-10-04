@@ -139,7 +139,7 @@ curl -b cj -H 'Content-Type: application/json' -d '{"kind":"tsn","name":"ТСН 
 
 ## CI/CD
 
-Workflow `.github/workflows/build-and-deploy-backend.yml` запускается при PR и push в `main` и вручную:
+Workflow `.github/workflows/build-and-deploy-backend.yml` запускается при PR и push в `master` и вручную:
 1. `test`: `gofmt`, `go vet`, `go test -race`, сборка.
 2. `publish` (push и ручной запуск): образ в Docker Hub с тегами `sha-<commit>` и `latest`.
 3. `deploy`: по SSH на сервер, в каталог из секрета `DEPLOY_HOST_PROJECT_PATH`. Копирует `.env` и `docker-compose.yml`, делает `docker compose pull && up -d`, ждёт `/healthz`, при неудаче откатывает прошлую версию.

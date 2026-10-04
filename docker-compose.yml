@@ -1,0 +1,20 @@
+name: dom-backend
+
+services:
+  backend:
+    build: .
+    image: dom-backend
+    container_name: dom-backend
+    restart: unless-stopped
+    env_file: .env
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "1"
+    networks:
+      - dom-network
+
+networks:
+  dom-network:
+    external: true

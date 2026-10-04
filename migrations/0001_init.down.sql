@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS account_holders;
+DROP TABLE IF EXISTS personal_accounts;
+DROP TABLE IF EXISTS residencies;
+DROP TABLE IF EXISTS ownerships;
+DROP TABLE IF EXISTS legal_entities;
+DROP TABLE IF EXISTS persons;
+DROP TABLE IF EXISTS premises;
+DROP TABLE IF EXISTS buildings;
+DROP TABLE IF EXISTS organizations;

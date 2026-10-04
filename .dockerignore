@@ -1,0 +1,9 @@
+.git
+.github
+.idea
+.vscode
+.claude
+.env
+.env.*
+README.md
+CLAUDE.md

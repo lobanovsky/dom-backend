@@ -1,0 +1,41 @@
+# Секреты и локальное окружение
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+private/
+
+# Файлы деплоя, которые CI создаёт на лету
+.env.deploy
+docker-compose.yml.deploy
+*.rollback
+
+# Бинарники и артефакты сборки
+/server
+/hashpw
+/dom-backend
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# IDE и редакторы
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# ОС
+.DS_Store
+Thumbs.db
+
+# Логи и временные файлы
+*.log
+tmp/
+
+# Локальные настройки Claude Code
+.claude/settings.local.json

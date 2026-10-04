@@ -1,0 +1,185 @@
+name: Backend CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: dom-backend
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: go build ./cmd/server
+
+  publish:
+    name: Build and publish image
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set image tag
+        id: image
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.image.outputs.tag }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Ubuntu server
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: dom-backend-production
+      cancel-in-progress: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Prepare deployment files
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
+          ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+        run: |
+          # ADMIN_PASSWORD_HASH — bcrypt-хеш, всегда содержит "$" (например $2a$10$...).
+          # docker compose интерпретирует "$" в .env как начало переменной, поэтому
+          # перед записью каждый "$" удваиваем — иначе часть хеша молча обнулится.
+          admin_password_hash_escaped=${ADMIN_PASSWORD_HASH//\$/\$\$}
+
+          {
+            echo "DOCKER_USERNAME=$DOCKER_USERNAME"
+            echo "TAG=$TAG"
+            echo "DATABASE_URL=$DATABASE_URL"
+            echo "ADMIN_USERNAME=$ADMIN_USERNAME"
+            echo "ADMIN_PASSWORD_HASH=$admin_password_hash_escaped"
+            echo "ADMIN_SESSION_SECRET=$ADMIN_SESSION_SECRET"
+          } > .env.deploy
+
+          sed "s|image: dom-backend|image: ${DOCKER_USERNAME}/dom-backend:${TAG}|" docker-compose.yml > docker-compose.yml.deploy
+
+      - name: Copy deployment files
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST_IP }}
+          username: ${{ secrets.DEPLOY_HOST_USERNAME }}
+          port: ${{ secrets.DEPLOY_HOST_PORT }}
+          key: ${{ secrets.DEPLOY_HOST_KEY }}
+          source: ".env.deploy,docker-compose.yml.deploy"
+          target: ${{ secrets.DEPLOY_HOST_PROJECT_PATH }}
+
+      - name: Deploy and verify
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST_IP }}
+          username: ${{ secrets.DEPLOY_HOST_USERNAME }}
+          port: ${{ secrets.DEPLOY_HOST_PORT }}
+          key: ${{ secrets.DEPLOY_HOST_KEY }}
+          script: |
+            set -u
+            cd "${{ secrets.DEPLOY_HOST_PROJECT_PATH }}"
+            echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+            docker network inspect dom-network >/dev/null 2>&1 || docker network create dom-network
+
+            had_previous=false
+            if [ -f .env ] && [ -f docker-compose.yml ]; then
+              cp .env .env.rollback
+              cp docker-compose.yml docker-compose.yml.rollback
+              had_previous=true
+            fi
+
+            mv .env.deploy .env
+            mv docker-compose.yml.deploy docker-compose.yml
+
+            deployment_ok=false
+            expected_image="${{ secrets.DOCKER_USERNAME }}/dom-backend:${{ needs.publish.outputs.tag }}"
+            if docker compose pull backend && docker compose up -d backend; then
+              attempt=1
+              while [ "$attempt" -le 30 ]; do
+                running_image=$(docker inspect --format '{{.Config.Image}}' dom-backend 2>/dev/null || true)
+                if [ "$running_image" = "$expected_image" ] && \
+                   docker compose exec -T backend wget -q -O- http://127.0.0.1:8080/healthz 2>/dev/null | grep -q '"status":"ok"'; then
+                  deployment_ok=true
+                  break
+                fi
+                sleep 2
+                attempt=$((attempt + 1))
+              done
+            fi
+
+            if [ "$deployment_ok" = true ]; then
+              rm -f .env.rollback docker-compose.yml.rollback
+              exit 0
+            fi
+
+            echo "Deployment health check failed; restoring previous version"
+            echo "Expected image: $expected_image"
+            echo "Container state:"
+            docker compose ps
+            docker compose logs --tail 20 backend || true
+            if [ "$had_previous" = true ]; then
+              mv .env.rollback .env
+              mv docker-compose.yml.rollback docker-compose.yml
+              docker compose pull backend
+              docker compose up -d backend
+            else
+              docker compose down
+            fi
+            exit 1

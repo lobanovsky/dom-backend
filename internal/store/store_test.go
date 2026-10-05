@@ -244,6 +244,15 @@ func TestImport(t *testing.T) {
 		t.Fatalf("result = %+v, want %+v", res, want)
 	}
 
+	var personID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM persons WHERE last_name = 'Импортов' AND deleted_at IS NULL`).Scan(&personID); err != nil {
+		t.Fatal(err)
+	}
+	owned, err := NewProperties(pool).ByPerson(ctx, personID)
+	if err != nil || len(owned) != 2 || owned[0].PremisesNumber != "1" || owned[1].PremisesNumber != "2" || owned[0].BuildingID != b.ID {
+		t.Fatalf("ByPerson = %+v, err = %v", owned, err)
+	}
+
 	// повторный импорт отклоняется целиком, строка указана в сообщении
 	_, err = imp.Import(ctx, b.ID, "apartment", rows[:1])
 	var se *Error

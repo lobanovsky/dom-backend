@@ -19,7 +19,8 @@ type Deps struct {
 	Accounts      AccountStore
 	Holders       AccountHolderStore
 
-	Importer ImportStore
+	Importer   ImportStore
+	Properties PropertiesStore
 
 	PremisesOwnerships PremisesOwnershipsStore
 	PremisesAccounts   PremisesAccountsStore
@@ -42,6 +43,7 @@ func NewRouter(d Deps) http.Handler {
 	premisesHandlers{d.Premises}.register(api)
 	premisesNestedHandlers{d.PremisesOwnerships, d.PremisesAccounts}.register(api)
 	importHandlers{d.Importer}.register(api)
+	propertiesHandlers{d.Properties}.register(api)
 	personHandlers{d.Persons}.register(api)
 	legalEntityHandlers{d.LegalEntities}.register(api)
 	ownershipHandlers{d.Ownerships}.register(api)

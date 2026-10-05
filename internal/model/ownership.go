@@ -43,3 +43,18 @@ func (o *Ownership) SetDefaults() {
 		o.ShareNum, o.ShareDen = 1, 1
 	}
 }
+
+// OwnedPremises — помещение, которым сейчас владеет физлицо или юрлицо.
+type OwnedPremises struct {
+	OwnershipID     int64    `json:"ownership_id" db:"ownership_id"`
+	PremisesID      int64    `json:"premises_id" db:"premises_id"`
+	PremisesKind    string   `json:"premises_kind" db:"premises_kind"`
+	PremisesNumber  string   `json:"premises_number" db:"premises_number"`
+	TotalArea       *float64 `json:"total_area" db:"total_area"`
+	BuildingID      int64    `json:"building_id" db:"building_id"`
+	BuildingAddress string   `json:"building_address" db:"building_address"`
+	ShareNum        int      `json:"share_num" db:"share_num"`
+	ShareDen        int      `json:"share_den" db:"share_den"`
+	ValidFrom       Date     `json:"valid_from" db:"valid_from"`
+	ValidTo         *Date    `json:"valid_to" db:"valid_to"`
+}

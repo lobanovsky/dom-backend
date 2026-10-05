@@ -64,6 +64,7 @@ func run(log *slog.Logger) error {
 			Accounts:           accounts,
 			Holders:            store.NewAccountHolders(pool),
 			Importer:           store.NewImporter(pool),
+			Properties:         store.NewProperties(pool),
 			PremisesOwnerships: ownerships,
 			PremisesAccounts:   accounts,
 		}),

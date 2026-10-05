@@ -115,6 +115,7 @@ docker compose up -d --build
 | `PUT /{ресурс}/{id}` | заменить запись целиком: не переданные необязательные поля станут `null` |
 | `DELETE /{ресурс}/{id}` | мягкое удаление (запись остаётся в БД с `deleted_at`), 204 |
 | `POST /{ресурс}/{id}/restore` | восстановить удалённую запись, 200 |
+| `GET /persons/{id}/properties`, `GET /legal-entities/{id}/properties` | помещения, которыми владелец владеет сегодня (дом, номер, площадь, доля, период) |
 | `GET /premises/{id}/ownerships` | владения помещения с именем владельца (`owner_kind`, `owner_name`) |
 | `GET /premises/{id}/accounts` | лицевые счета помещения со всеми текущими плательщиками (`holder_names`, массив) |
 

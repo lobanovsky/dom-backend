@@ -32,10 +32,10 @@ func (a Account) Validate() error {
 	)
 }
 
-// AccountView — счёт с названием текущего плательщика.
+// AccountView — счёт с названиями всех текущих плательщиков (по порядку начала периода).
 type AccountView struct {
 	Account
-	HolderName *string `json:"holder_name" db:"holder_name"`
+	HolderNames []string `json:"holder_names" db:"holder_names"`
 }
 
 // AccountHolder — плательщик по лицевому счёту в заданный период.

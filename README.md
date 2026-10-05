@@ -116,7 +116,7 @@ docker compose up -d --build
 | `DELETE /{ресурс}/{id}` | мягкое удаление (запись остаётся в БД с `deleted_at`), 204 |
 | `POST /{ресурс}/{id}/restore` | восстановить удалённую запись, 200 |
 | `GET /premises/{id}/ownerships` | владения помещения с именем владельца (`owner_kind`, `owner_name`) |
-| `GET /premises/{id}/accounts` | лицевые счета помещения с текущим плательщиком (`holder_name`) |
+| `GET /premises/{id}/accounts` | лицевые счета помещения со всеми текущими плательщиками (`holder_names`, массив) |
 
 Фильтры списков:
 - `organizations`: `kind`

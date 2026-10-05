@@ -53,17 +53,17 @@ func (s *Accounts) Delete(ctx context.Context, id int64) error {
 	return checkDeleted(tag, err)
 }
 
-// ListByPremises возвращает счета помещения с названием текущего плательщика.
+// ListByPremises возвращает счета помещения с названиями всех текущих плательщиков.
 func (s *Accounts) ListByPremises(ctx context.Context, premisesID int64, deleted bool) ([]model.AccountView, error) {
 	return collect[model.AccountView](s.pool.Query(ctx,
 		`SELECT a.id, a.number, a.premises_id, a.purpose, a.status, a.opened_at, a.closed_at, a.created_at, a.updated_at, a.deleted_at,
-		        (SELECT COALESCE(concat_ws(' ', p.last_name, p.first_name, p.middle_name), le.name)
-		         FROM account_holders h
-		         LEFT JOIN persons p ON p.id = h.person_id
-		         LEFT JOIN legal_entities le ON le.id = h.legal_entity_id
-		         WHERE h.account_id = a.id AND h.deleted_at IS NULL AND h.valid_from <= CURRENT_DATE
-		           AND (h.valid_to IS NULL OR h.valid_to >= CURRENT_DATE)
-		         ORDER BY h.valid_from DESC LIMIT 1) AS holder_name
+		        ARRAY(SELECT COALESCE(concat_ws(' ', p.last_name, p.first_name, p.middle_name), le.name)
+		              FROM account_holders h
+		              LEFT JOIN persons p ON p.id = h.person_id
+		              LEFT JOIN legal_entities le ON le.id = h.legal_entity_id
+		              WHERE h.account_id = a.id AND h.deleted_at IS NULL AND h.valid_from <= CURRENT_DATE
+		                AND (h.valid_to IS NULL OR h.valid_to >= CURRENT_DATE)
+		              ORDER BY h.valid_from, h.id) AS holder_names
 		 FROM personal_accounts a
 		 WHERE a.premises_id = $1 AND (a.deleted_at IS NOT NULL) = $2
 		 ORDER BY a.id`, premisesID, deleted))

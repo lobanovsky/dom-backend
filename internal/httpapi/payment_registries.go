@@ -140,7 +140,8 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		case err != nil:
 			results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 		case isZip(hd.Filename, data):
-			files, err := expandZip(hd.Filename, data, &unpacked)
+			files, skipped, err := expandZip(hd.Filename, data, &unpacked)
+			summary.FilesIgnored += skipped
 			if err != nil {
 				results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 				continue

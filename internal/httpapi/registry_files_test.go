@@ -186,7 +186,7 @@ func TestBaseNameAndTxt(t *testing.T) {
 
 func TestExpandZipLimits(t *testing.T) {
 	var total int64
-	files, err := expandZip("big.zip", zipOf(t, map[string]string{"x_" + acct + "_1.txt": string(make([]byte, maxRegistrySize+1))}), &total)
+	files, _, err := expandZip("big.zip", zipOf(t, map[string]string{"x_" + acct + "_1.txt": string(make([]byte, maxRegistrySize+1))}), &total)
 	if err != nil || len(files) != 1 {
 		t.Fatalf("files = %v, err = %v", files, err)
 	}
@@ -194,11 +194,11 @@ func TestExpandZipLimits(t *testing.T) {
 		t.Error("a file over the size limit must not be read")
 	}
 
-	many := map[string]string{}
-	for i := 0; i <= maxArchiveEntries; i++ {
-		many[string(rune('a'+i%26))+"/"+string(rune('A'+i/26%26))+"/"+string(rune('0'+i/676))+"_"+time.Duration(i).String()] = ""
-	}
-	if _, err := expandZip("many.zip", zipOf(t, many), &total); err == nil {
+	old := maxArchiveEntries
+	maxArchiveEntries = 3
+	defer func() { maxArchiveEntries = old }()
+	many := map[string]string{"a.txt": "", "b.txt": "", "c.txt": "", "d.txt": ""}
+	if _, _, err := expandZip("many.zip", zipOf(t, many), &total); err == nil {
 		t.Error("an archive with too many entries must be rejected")
 	}
 }

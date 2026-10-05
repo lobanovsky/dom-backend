@@ -92,3 +92,24 @@ func TestFileAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountsInName(t *testing.T) {
+	for in, want := range map[string][]string{
+		"900005_9715357654_40703810338000004376_640.txt":  {"40703810338000004376"},
+		"40703810338000004376.txt":                        {"40703810338000004376"},
+		"a_40703810338000004376_40705810238000000478.txt": {"40703810338000004376", "40705810238000000478"},
+		"9715357654_407038103380000043761_1.txt":          nil, // 21 цифра подряд — не счёт
+		"registry.txt":                                    nil,
+	} {
+		got := AccountsInName(in)
+		if len(got) != len(want) {
+			t.Errorf("AccountsInName(%q) = %v, want %v", in, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("AccountsInName(%q) = %v, want %v", in, got, want)
+			}
+		}
+	}
+}

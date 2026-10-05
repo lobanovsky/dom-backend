@@ -13,6 +13,25 @@ import (
 	"dom-backend/internal/model"
 )
 
+// RegistryExistsError — файл с таким содержимым (sha256) уже загружен.
+type RegistryExistsError struct{ RegistryID int64 }
+
+func (e *RegistryExistsError) Error() string {
+	return fmt.Sprintf("registry file already loaded: registry %d", e.RegistryID)
+}
+func (e *RegistryExistsError) Unwrap() error { return ErrConflict }
+
+// AllDuplicatesError — все платежи файла уже есть в базе; реестр не создан.
+type AllDuplicatesError struct {
+	Total   int
+	Skipped []model.SkippedPayment
+}
+
+func (e *AllDuplicatesError) Error() string {
+	return fmt.Sprintf("all %d payments of the file are already loaded", e.Total)
+}
+func (e *AllDuplicatesError) Unwrap() error { return ErrConflict }
+
 const registryCols = `id, bank_account_id, source, file_name, file_sha256, registry_number, registry_date, payments_count,
 	total_amount, total_transferred, total_commission, created_at, updated_at, deleted_at`
 
@@ -76,7 +95,7 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 	var existing int64
 	switch err := tx.QueryRow(ctx, `SELECT id FROM payment_registries WHERE file_sha256 = $1`, hash).Scan(&existing); {
 	case err == nil:
-		return res, &Error{ErrConflict, fmt.Sprintf("registry file already loaded: registry %d", existing)}
+		return res, &RegistryExistsError{RegistryID: existing}
 	case err != pgx.ErrNoRows:
 		return res, mapErr(err)
 	}
@@ -95,7 +114,7 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 	}
 	res.SkippedDuplicates = len(res.Skipped)
 	if len(fresh) == 0 {
-		return res, &Error{ErrConflict, fmt.Sprintf("all %d payments of the file are already loaded", len(reg.Payments))}
+		return res, &AllDuplicatesError{Total: len(reg.Payments), Skipped: res.Skipped}
 	}
 
 	accounts, err := accountsByNumber(ctx, tx, fresh)
@@ -186,6 +205,26 @@ func accountsByNumber(ctx context.Context, tx pgx.Tx, payments []model.RegistryP
 			return nil, mapErr(err)
 		}
 		out[number] = a
+	}
+	return out, mapErr(rows.Err())
+}
+
+// BankAccountsByNumber возвращает неудалённые банковские счета: номер → id (в том числе закрытые по периоду:
+// реестры за прошлые периоды тоже нужно загружать).
+func (s *PaymentRegistries) BankAccountsByNumber(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT number, id FROM bank_accounts WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var number string
+		var id int64
+		if err := rows.Scan(&number, &id); err != nil {
+			return nil, mapErr(err)
+		}
+		out[number] = id
 	}
 	return out, mapErr(rows.Err())
 }

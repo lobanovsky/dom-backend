@@ -31,6 +31,22 @@ func FileAccount(fileName string) string {
 	return ""
 }
 
+var accountRe = regexp.MustCompile(`(?:^|\D)(\d{20})(?:\D|$)`)
+
+// AccountsInName возвращает все 20-значные числа из имени файла (кандидаты в номер расчётного счёта).
+func AccountsInName(fileName string) []string {
+	var out []string
+	rest := fileName
+	for {
+		m := accountRe.FindStringSubmatchIndex(rest)
+		if m == nil {
+			return out
+		}
+		out = append(out, rest[m[2]:m[3]])
+		rest = rest[m[3]:]
+	}
+}
+
 // Parse разбирает файл. Ошибки данных собираются по строкам (номер строки файла);
 // err возвращается, если файл в целом непригоден (нет итоговой строки, пустой).
 func Parse(fileName string, data []byte) (*model.ParsedRegistry, []model.ImportRowError, error) {

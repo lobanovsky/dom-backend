@@ -219,8 +219,9 @@ func TestRegistryImport(t *testing.T) {
 
 	var se *Error
 	// тот же файл: отказ целиком
-	if _, err := regs.Import(ctx, bank.ID, "reg-1.txt", []byte("file one"), reg); !errors.As(err, &se) || !errors.Is(se.Kind, ErrConflict) {
-		t.Errorf("same file: err = %v, want conflict", err)
+	var exists *RegistryExistsError
+	if _, err := regs.Import(ctx, bank.ID, "reg-1.txt", []byte("file one"), reg); !errors.As(err, &exists) || exists.RegistryID != res.RegistryID || !errors.Is(err, ErrConflict) {
+		t.Errorf("same file: err = %v, want RegistryExistsError(%d)", err, res.RegistryID)
 	}
 	// другой файл с пересечением: старый платёж пропускается, новый загружается
 	overlap := &model.ParsedRegistry{FileAccount: bank.Number, Payments: []model.RegistryPayment{pay("reg-test-a", "reg-test-1", 857532), pay("reg-test-c", "reg-test-1", 500)}}
@@ -230,8 +231,12 @@ func TestRegistryImport(t *testing.T) {
 	}
 	// все платежи уже известны: реестр не создаётся
 	all := &model.ParsedRegistry{FileAccount: bank.Number, Payments: []model.RegistryPayment{pay("reg-test-a", "reg-test-1", 857532)}}
-	if _, err := regs.Import(ctx, bank.ID, "reg-3.txt", []byte("file three"), all); !errors.As(err, &se) || !errors.Is(se.Kind, ErrConflict) {
-		t.Errorf("all known: err = %v, want conflict", err)
+	var allDup *AllDuplicatesError
+	if _, err := regs.Import(ctx, bank.ID, "reg-3.txt", []byte("file three"), all); !errors.As(err, &allDup) || allDup.Total != 1 || len(allDup.Skipped) != 1 || !errors.Is(err, ErrConflict) {
+		t.Errorf("all known: err = %v, want AllDuplicatesError", err)
+	}
+	if byNumber, err := regs.BankAccountsByNumber(ctx); err != nil || byNumber[bank.Number] != bank.ID {
+		t.Errorf("BankAccountsByNumber: %v, err = %v", byNumber[bank.Number], err)
 	}
 	// счёт из имени файла не совпадает с выбранным
 	wrong := &model.ParsedRegistry{FileAccount: "40703810000000000000", Payments: []model.RegistryPayment{pay("reg-test-d", "x", 100)}}

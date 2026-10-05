@@ -51,6 +51,7 @@ type AccountFilter struct {
 	Deleted    bool // true — только удалённые (корзина), false — только действующие
 	PremisesID *int64
 	Number     *string
+	Q          *string // начало номера лицевого счёта (для поиска при вводе)
 	Status     *string
 	Purpose    *string
 }
@@ -60,4 +61,49 @@ type AccountHolderFilter struct {
 	AccountID     *int64
 	PersonID      *int64
 	LegalEntityID *int64
+}
+
+type BankAccountFilter struct {
+	Deleted        bool // true — только удалённые (корзина), false — только действующие
+	OrganizationID *int64
+	IsSpecial      *bool
+	Active         *bool // вычисляется по периоду действия на сегодня
+}
+
+type PaymentCategoryFilter struct {
+	Deleted   bool
+	Direction *string
+}
+
+type PaymentRegistryFilter struct {
+	Deleted       bool
+	BankAccountID *int64
+	DateFrom      *Date // по дате реестра
+	DateTo        *Date
+	Q             *string // подстрока в имени файла или номере реестра
+}
+
+type IncomingPaymentFilter struct {
+	Deleted           bool
+	BankAccountID     *int64
+	RegistryID        *int64
+	PersonalAccountID *int64
+	CategoryID        *int64
+	DateFrom          *Date
+	DateTo            *Date
+	AmountFrom        *float64
+	AmountTo          *float64
+	Q                 *string // подстрока в плательщике, назначении, комментарии, номере документа
+	Unlinked          bool    // только без лицевого счёта и категории
+}
+
+type OutgoingPaymentFilter struct {
+	Deleted       bool
+	BankAccountID *int64
+	CategoryID    *int64
+	DateFrom      *Date
+	DateTo        *Date
+	AmountFrom    *float64
+	AmountTo      *float64
+	Q             *string // подстрока в получателе, назначении, комментарии, номере документа
 }

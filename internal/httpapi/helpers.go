@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"dom-backend/internal/model"
 	"dom-backend/internal/store"
@@ -44,6 +45,38 @@ type listParams struct {
 	Deleted       bool // ?deleted=only — показать только удалённые
 	ints          map[string]int64
 	texts         map[string]string
+	dates         map[string]model.Date
+	floats        map[string]float64
+	bools         map[string]bool
+}
+
+// listSpec — допустимые фильтры списка по типам значений.
+type listSpec struct {
+	Ints, Texts, Dates, Floats, Bools []string
+}
+
+// Date возвращает фильтр-дату (YYYY-MM-DD) или nil, если он не задан.
+func (p listParams) Date(name string) *model.Date {
+	if v, ok := p.dates[name]; ok {
+		return &v
+	}
+	return nil
+}
+
+// Float возвращает числовой фильтр или nil, если он не задан.
+func (p listParams) Float(name string) *float64 {
+	if v, ok := p.floats[name]; ok {
+		return &v
+	}
+	return nil
+}
+
+// Bool: фильтр true/false; не заданный фильтр — nil.
+func (p listParams) Bool(name string) *bool {
+	if v, ok := p.bools[name]; ok {
+		return &v
+	}
+	return nil
 }
 
 // Int возвращает фильтр-число или nil, если он не задан.
@@ -64,8 +97,15 @@ func (p listParams) Text(name string) *string {
 
 // parseList разбирает limit/offset и допустимые фильтры; любой другой параметр — 400.
 func parseList(w http.ResponseWriter, r *http.Request, intFilters, textFilters []string) (listParams, bool) {
+	return parseListSpec(w, r, listSpec{Ints: intFilters, Texts: textFilters})
+}
+
+// parseListSpec — parseList с датами, числами и булевыми фильтрами.
+func parseListSpec(w http.ResponseWriter, r *http.Request, spec listSpec) (listParams, bool) {
+	intFilters, textFilters := spec.Ints, spec.Texts
 	q := r.URL.Query()
-	p := listParams{Limit: defaultLimit, ints: map[string]int64{}, texts: map[string]string{}}
+	p := listParams{Limit: defaultLimit, ints: map[string]int64{}, texts: map[string]string{},
+		dates: map[string]model.Date{}, floats: map[string]float64{}, bools: map[string]bool{}}
 	fail := func(msg string) (listParams, bool) {
 		writeError(w, http.StatusBadRequest, msg)
 		return p, false
@@ -103,6 +143,38 @@ func parseList(w http.ResponseWriter, r *http.Request, intFilters, textFilters [
 		known[name] = true
 		if v := q.Get(name); v != "" {
 			p.texts[name] = v
+		}
+	}
+	for _, name := range spec.Dates {
+		known[name] = true
+		if v := q.Get(name); v != "" {
+			t, err := time.Parse("2006-01-02", v)
+			if err != nil {
+				return fail(fmt.Sprintf("%s must be a date YYYY-MM-DD", name))
+			}
+			p.dates[name] = model.Date{Time: t}
+		}
+	}
+	for _, name := range spec.Floats {
+		known[name] = true
+		if v := q.Get(name); v != "" {
+			f, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return fail(fmt.Sprintf("%s must be a number", name))
+			}
+			p.floats[name] = f
+		}
+	}
+	for _, name := range spec.Bools {
+		known[name] = true
+		switch q.Get(name) {
+		case "":
+		case "true":
+			p.bools[name] = true
+		case "false":
+			p.bools[name] = false
+		default:
+			return fail(fmt.Sprintf("%s must be true or false", name))
 		}
 	}
 	if name := unknownParam(q, known); name != "" {

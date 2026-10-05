@@ -25,6 +25,14 @@ erDiagram
     personal_accounts ||--o{ account_holders : "плательщики по периодам"
     persons |o--o{ account_holders : ""
     legal_entities |o--o{ account_holders : ""
+    organizations ||--o{ bank_accounts : "расчётные счета"
+    bank_accounts ||--o{ payment_registries : "реестры"
+    bank_accounts ||--o{ incoming_payments : "поступления"
+    bank_accounts ||--o{ outgoing_payments : "списания"
+    payment_registries |o--o{ incoming_payments : "строки реестра"
+    personal_accounts |o--o{ incoming_payments : "привязка"
+    payment_categories |o--o{ incoming_payments : ""
+    payment_categories |o--o{ outgoing_payments : ""
 ```
 
 | Таблица | Назначение |
@@ -38,11 +46,17 @@ erDiagram
 | `residencies` | Жители: прописан или фактически проживает, период, родство (`relation`, `related_owner_id`; родство необязательно) |
 | `personal_accounts` | Лицевой счёт. Принадлежит **помещению**, у помещения может быть несколько счетов (`purpose`: utilities, capital_repair, parking, other) |
 | `account_holders` | Плательщики счёта по периодам (физлицо **или** юрлицо) |
+| `bank_accounts` | Расчётный счёт организации (не путать с лицевым): номер (20 цифр), БИК, банк, `is_special` (спецсчёт капремонта), описание, период действия. Поле `active` не хранится, а вычисляется: сегодня внутри периода |
+| `payment_categories` | Справочник категорий платежей (`direction`: incoming / outgoing): для платежей без лицевого счёта (аренда оборудования) и для расходов |
+| `payment_registries` | Загруженный файл реестра платежей (Сбер): имя, sha256, сам файл, номер и дата реестра, итоги. sha256 уникален |
+| `incoming_payments` | Поступление на наш счёт: дата и время, сумма, комиссия, от кого (`payer_*`), номер документа, ВО, назначение, комментарий; не более чем одна привязка: к лицевому счёту **или** к категории; для строк реестра ещё `registry_id`, `external_id` (номер операции Сбера) и `raw_line` |
+| `outgoing_payments` | Списание с нашего счёта: дата, сумма, кому (`recipient_*`), документ, ВО, назначение, категория |
 
 Правила, которые обеспечивает база:
 - у владельца или плательщика заполнено ровно одно из `person_id` / `legal_entity_id`;
 - доля не больше 1, конец периода не раньше начала;
-- уникальны номер лицевого счёта, кадастровые номера и (дом, вид, номер) помещения.
+- уникальны номер лицевого счёта, кадастровые номера и (дом, вид, номер) помещения;
+- у платежа не одновременно лицевой счёт и категория; сумма больше нуля; номер операции Сбера уникален в пределах банковского счёта (в том числе среди удалённых платежей: удалённый платёж не «воскресает» при повторной загрузке реестра).
 
 Правило на уровне сервиса: на любую дату сумма долей по помещению не превышает 1 (`store.checkOwnershipShares`, в одной транзакции с записью). При нарушении API отвечает 422.
 
@@ -56,6 +70,7 @@ internal/db       миграции и пул pgx
 internal/model    структуры сущностей, перечисления, Validate() и SetDefaults(), тип Date, структуры фильтров
 internal/store    по файлу на сущность: явный SQL на pgx, ошибки БД переводятся в store.Error
 internal/auth     проверка пароля, подписанный токен сессии
+internal/sberregistry  разбор реестров платежей Сбера (cp1251, итоговая строка, суммы в копейках)
 internal/xlsximport  разбор xlsx-файла импорта помещений (строки → model.ImportRow, ошибки по строкам)
 internal/httpapi  по файлу на сущность: интерфейс хранилища и обработчики; helpers.go: разбор id, тела, фильтров, ошибок
 migrations        SQL-миграции NNNN_name.{up,down}.sql
@@ -105,7 +120,7 @@ docker compose up -d --build
 - `POST /api/v1/auth/login` с телом `{"username","password"}` ставит cookie `dom_session` (HttpOnly). `POST /api/v1/auth/logout` её сбрасывает. Остальные пути требуют cookie, иначе 401.
 - `GET /api/v1/auth/me` возвращает `{"username":"admin"}` при действующей сессии, иначе 401. Фронтенд вызывает его при загрузке страницы.
 
-Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`.
+Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`, `bank-accounts`, `payment-categories`, `incoming-payments`, `outgoing-payments` (последние четыре работают так же, `payment-registries` только читаются и загружаются, см. ниже).
 
 | Метод и путь | Действие |
 |---|---|
@@ -129,6 +144,14 @@ docker compose up -d --build
 - `residencies`: `premises_id`, `person_id`, `related_owner_id`
 - `accounts`: `premises_id`, `number`, `status`, `purpose`
 - `account-holders`: `account_id`, `person_id`, `legal_entity_id`
+- `accounts` также принимает `q` (начало номера лицевого счёта)
+- `bank-accounts`: `organization_id`, `is_special`, `active` (true/false, по периоду на сегодня)
+- `payment-categories`: `direction`
+- `payment-registries`: `bank_account_id`, `date_from`, `date_to` (по дате реестра), `q` (подстрока в имени файла или номере реестра)
+- `incoming-payments`: `bank_account_id`, `registry_id`, `personal_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q` (плательщик, назначение, комментарий, номер документа или операции), `unlinked=true` (без лицевого счёта и категории); сортировка: новые сверху
+- `outgoing-payments`: `bank_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q`
+
+Даты фильтров передаются как `YYYY-MM-DD`, неверный формат даёт 400. Суммы платежей: число не более чем с двумя знаками после запятой.
 
 Контакты физлица: `phones` и `emails` — массивы строк, первый элемент основной. Значения обрезаются по краям, пустые и повторы убираются, не больше 10 каждого. В телефоне должно быть не меньше 5 цифр (формат любой: `+7 (495) 123-45-67`, `8 903 111 22 33 доб. 4`), email проверяется как адрес. Не переданное поле и `null` считаются пустым списком.
 
@@ -162,6 +185,17 @@ docker compose up -d --build
 На каждую строку создаются: помещение, собственник с долей 1/1, два лицевых счёта (`utilities` и `capital_repair`) и плательщик каждого счёта. Даты начала (`valid_from`, `opened_at`) равны дате импорта. Физлица с одинаковым ФИО (без учёта регистра и лишних пробелов) считаются одним человеком, в том числе уже существующим в БД. Импорт выполняется одной транзакцией: при любой ошибке не сохраняется ничего.
 
 Ответы: `201` `{"premises","accounts","ownerships","persons_created","persons_reused"}`; `422` с `{"error","rows":[{"row","error"}]}` — ошибки данных файла (все сразу); `409`/`422` с номером строки в тексте — конфликт с БД (повторный номер помещения, кадастровый номер, номер счёта); `404` — нет дома.
+
+### Реестры платежей Сбера
+
+Реестр — текстовый файл (cp1251, разделитель `;`): строка на платёж, в конце итоговая строка `=N;сумма;к перечислению;комиссия;номер;дата`. Имя файла вида `[префикс_]ИНН_СЧЁТ_N.txt` содержит расчётный счёт получателя.
+
+- `POST /api/v1/payment-registries/import`: `multipart/form-data` с полями `bank_account_id` (наш счёт-получатель) и `file` (до 5 МБ). Одна транзакция. Файл должен быть целым: число строк и суммы сверяются с итоговой строкой, иначе 422 и ничего не сохраняется. Если счёт в имени файла не совпадает с выбранным, 422. Ошибки строк: `422 {"error","rows":[{"row","error"}]}`.
+- Защита от дублей: тот же файл (sha256) отклоняется целиком (`409 registry file already loaded: registry N`). Платёж с уже известным номером операции на этом счёте пропускается и попадает в отчёт; если пропущены все платежи, `409 all N payments of the file are already loaded` и реестр не создаётся.
+- Лицевой счёт определяется точным совпадением номера среди действующих; не найден — платёж загружается без привязки (виден по `unlinked=true`). Предупреждение, если лицевой счёт капремонта оплачен на неспециальный банковский счёт и наоборот (привязка сохраняется).
+- Ответ `201`: `{"registry_id","created","skipped_duplicates","linked","unlinked","skipped":[...],"warnings":[...]}`.
+- `GET /payment-registries`, `GET /payment-registries/{id}`, `GET /payment-registries/{id}/file` (исходный файл). Платежи реестра: `GET /incoming-payments?registry_id=N`.
+- Смысл полей 3, 4, 9, 13 строки реестра неизвестен, они не разбираются; исходная строка целиком хранится в `incoming_payments.raw_line`.
 
 Коды ошибок: 400 неизвестное поле или параметр, неверный формат; 404 не найдено; 409 дубликат; 422 не прошла валидация (`{"error":"поле: причина"}`) или нарушено ограничение БД (внешний ключ, сумма долей); 401 нет сессии.
 

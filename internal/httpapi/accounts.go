@@ -28,7 +28,7 @@ func (h accountHandlers) register(mux *http.ServeMux) {
 }
 
 func (h accountHandlers) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, []string{"premises_id"}, []string{"number", "status", "purpose"})
+	p, ok := parseList(w, r, []string{"premises_id"}, []string{"number", "status", "purpose", "q"})
 	if !ok {
 		return
 	}
@@ -38,6 +38,7 @@ func (h accountHandlers) list(w http.ResponseWriter, r *http.Request) {
 		Number:     p.Text("number"),
 		Status:     p.Text("status"),
 		Purpose:    p.Text("purpose"),
+		Q:          p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)

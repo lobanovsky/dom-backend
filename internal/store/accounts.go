@@ -19,8 +19,9 @@ func (s *Accounts) List(ctx context.Context, f model.AccountFilter, limit, offse
 		   AND ($2::text IS NULL OR number = $2)
 		   AND ($3::text IS NULL OR status = $3)
 		   AND ($4::text IS NULL OR purpose = $4)
-		   AND (deleted_at IS NOT NULL) = $5
-		 ORDER BY id LIMIT $6 OFFSET $7`, f.PremisesID, f.Number, f.Status, f.Purpose, f.Deleted, limit, offset))
+		   AND ($5::text IS NULL OR number LIKE $5)
+		   AND (deleted_at IS NOT NULL) = $6
+		 ORDER BY id LIMIT $7 OFFSET $8`, f.PremisesID, f.Number, f.Status, f.Purpose, prefixPattern(f.Q), f.Deleted, limit, offset))
 }
 
 func (s *Accounts) Get(ctx context.Context, id int64) (model.Account, error) {

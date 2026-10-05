@@ -13,3 +13,12 @@ func likePattern(q *string) *string {
 	p := "%" + likeEscaper.Replace(strings.TrimSpace(*q)) + "%"
 	return &p
 }
+
+// prefixPattern — шаблон LIKE «начинается с»; nil или пустая строка — фильтр не задан.
+func prefixPattern(q *string) *string {
+	if q == nil || strings.TrimSpace(*q) == "" {
+		return nil
+	}
+	p := likeEscaper.Replace(strings.TrimSpace(*q)) + "%"
+	return &p
+}

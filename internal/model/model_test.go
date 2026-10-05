@@ -114,3 +114,41 @@ func TestDateJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestPaymentValidation(t *testing.T) {
+	ok := IncomingPayment{BankAccountID: 1, PaymentDate: NewDate(2026, 1, 3), Amount: 100.5, PayerName: "ИВАНОВ"}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid payment: %v", err)
+	}
+	account, cat := int64(1), int64(2)
+	for name, mutate := range map[string]func(*IncomingPayment){
+		"zero amount":          func(p *IncomingPayment) { p.Amount = 0 },
+		"fractional kopecks":   func(p *IncomingPayment) { p.Amount = 10.005 },
+		"no payer":             func(p *IncomingPayment) { p.PayerName = " " },
+		"no date":              func(p *IncomingPayment) { p.PaymentDate = Date{} },
+		"account and category": func(p *IncomingPayment) { p.PersonalAccountID, p.CategoryID = &account, &cat },
+		"bad bik":              func(p *IncomingPayment) { b := "123"; p.PayerBIK = &b },
+		"bad inn":              func(p *IncomingPayment) { b := "12345"; p.PayerINN = &b },
+	} {
+		p := ok
+		mutate(&p)
+		if p.Validate() == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+}
+
+func TestBankAccountValidation(t *testing.T) {
+	ok := BankAccount{OrganizationID: 1, Number: "40703810338000004376", ValidFrom: NewDate(2020, 1, 1)}
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	short := ok
+	short.Number = "4070"
+	to := NewDate(2019, 1, 1)
+	backwards := ok
+	backwards.ValidTo = &to
+	if short.Validate() == nil || backwards.Validate() == nil {
+		t.Error("expected errors for a short number and valid_to before valid_from")
+	}
+}

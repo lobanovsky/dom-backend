@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,4 +193,64 @@ func containsPerson(items []model.Person, id int64) bool {
 func isKind(err error, kind error) bool {
 	e, ok := err.(*Error)
 	return ok && e.Kind == kind
+}
+
+func TestImport(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	org, err := NewOrganizations(pool).Create(ctx, model.Organization{Kind: "tsn", Name: "import-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "organizations", org.ID)
+	b, err := NewBuildings(pool).Create(ctx, model.Building{OrganizationID: org.ID, Kind: "apartment_building", Address: "import-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "buildings", b.ID)
+
+	imp := NewImporter(pool)
+	rows := []model.ImportRow{
+		{Row: 2, Number: "1", Area: 50, CadastralNumber: "imp:1", LastName: "Импортов", FirstName: "Иван", MiddleName: "Иванович", UtilitiesAccount: "imp-u1", CapitalRepairAccount: "imp-k1"},
+		{Row: 3, Number: "2", Area: 40.5, LastName: "импортов", FirstName: "иван", MiddleName: "иванович", UtilitiesAccount: "imp-u2", CapitalRepairAccount: "imp-k2"},
+	}
+	var created []int64
+	t.Cleanup(func() {
+		// порядок: дети раньше родителей; персоны, созданные импортом, помечены фамилией
+		for _, q := range []string{
+			`DELETE FROM account_holders WHERE account_id IN (SELECT id FROM personal_accounts WHERE number LIKE 'imp-%')`,
+			`DELETE FROM personal_accounts WHERE number LIKE 'imp-%'`,
+			`DELETE FROM ownerships WHERE premises_id IN (SELECT id FROM premises WHERE building_id = $1)`,
+			`DELETE FROM premises WHERE building_id = $1`,
+			`DELETE FROM persons WHERE last_name = 'Импортов'`,
+		} {
+			args := []any{}
+			if strings.Contains(q, "$1") {
+				args = append(args, b.ID)
+			}
+			if _, err := pool.Exec(ctx, q, args...); err != nil {
+				t.Error(err)
+			}
+		}
+		_ = created
+	})
+
+	res, err := imp.Import(ctx, b.ID, "apartment", rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := model.ImportResult{Premises: 2, Accounts: 4, Ownerships: 2, PersonsCreated: 1, PersonsReused: 1}
+	if res != want {
+		t.Fatalf("result = %+v, want %+v", res, want)
+	}
+
+	// повторный импорт отклоняется целиком, строка указана в сообщении
+	_, err = imp.Import(ctx, b.ID, "apartment", rows[:1])
+	var se *Error
+	if !errors.As(err, &se) || !errors.Is(se.Kind, ErrConflict) || !strings.HasPrefix(se.Msg, "row 2:") {
+		t.Fatalf("repeat import err = %v", err)
+	}
+	if _, err := imp.Import(ctx, 1<<40, "apartment", rows); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing building err = %v", err)
+	}
 }

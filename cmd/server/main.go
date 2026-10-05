@@ -63,6 +63,7 @@ func run(log *slog.Logger) error {
 			Residencies:        store.NewResidencies(pool),
 			Accounts:           accounts,
 			Holders:            store.NewAccountHolders(pool),
+			Importer:           store.NewImporter(pool),
 			PremisesOwnerships: ownerships,
 			PremisesAccounts:   accounts,
 		}),

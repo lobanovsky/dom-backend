@@ -93,6 +93,7 @@ type registryFileResult struct {
 	Status        string                      `json:"status"`
 	BankAccountID int64                       `json:"bank_account_id,omitempty"`
 	RegistryID    int64                       `json:"registry_id,omitempty"`
+	DuplicateOf   string                      `json:"duplicate_of,omitempty"` // для duplicate_file: имя файла, с которым совпало содержимое
 	Result        *model.RegistryImportResult `json:"result,omitempty"`
 	Skipped       []model.SkippedPayment      `json:"skipped,omitempty"`
 	Error         string                      `json:"error,omitempty"`
@@ -158,6 +159,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		writeErr(w, err)
 		return
 	}
+	loadedAs := map[int64]string{} // id реестра, созданного в этом запросе → полный путь файла (в том числе внутри архива)
 	for _, f := range candidates {
 		base := baseName(f.Name)
 		accounts := sberregistry.AccountsInName(base)
@@ -176,7 +178,17 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 			results = append(results, registryFileResult{FileName: f.Name, Status: fileUnknownAccount, Error: "bank account " + accounts[0] + " is not in the system"})
 			continue
 		}
-		results = append(results, h.importOne(r.Context(), f, base, bankID))
+		fr := h.importOne(r.Context(), f, base, bankID)
+		switch fr.Status {
+		case fileImported:
+			loadedAs[fr.Result.RegistryID] = f.Name
+		case fileDuplicate:
+			// Копия файла из этого же запроса: полный путь понятнее имени без каталогов.
+			if path, ok := loadedAs[fr.RegistryID]; ok {
+				fr.DuplicateOf = path
+			}
+		}
+		results = append(results, fr)
 	}
 
 	for _, fr := range results {
@@ -222,7 +234,7 @@ func (h paymentRegistryHandlers) importOne(ctx context.Context, f registryFile, 
 	case err == nil:
 		fr.Status, fr.Result = fileImported, &res
 	case errors.As(err, &exists):
-		fr.Status, fr.RegistryID = fileDuplicate, exists.RegistryID
+		fr.Status, fr.RegistryID, fr.DuplicateOf = fileDuplicate, exists.RegistryID, exists.FileName
 	case errors.As(err, &allDup):
 		fr.Status, fr.Skipped = fileAllDuplicates, allDup.Skipped
 	case errors.As(err, &se):

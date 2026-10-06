@@ -15,7 +15,10 @@ import (
 )
 
 // RegistryExistsError — файл с таким содержимым (sha256) уже загружен.
-type RegistryExistsError struct{ RegistryID int64 }
+type RegistryExistsError struct {
+	RegistryID int64
+	FileName   string // имя файла, под которым этот реестр загружен
+}
 
 func (e *RegistryExistsError) Error() string {
 	return fmt.Sprintf("registry file already loaded: registry %d", e.RegistryID)
@@ -94,9 +97,10 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
 	var existing int64
-	switch err := tx.QueryRow(ctx, `SELECT id FROM payment_registries WHERE file_sha256 = $1`, hash).Scan(&existing); {
+	var existingName string
+	switch err := tx.QueryRow(ctx, `SELECT id, file_name FROM payment_registries WHERE file_sha256 = $1`, hash).Scan(&existing, &existingName); {
 	case err == nil:
-		return res, &RegistryExistsError{RegistryID: existing}
+		return res, &RegistryExistsError{RegistryID: existing, FileName: existingName}
 	case err != pgx.ErrNoRows:
 		return res, mapErr(err)
 	}

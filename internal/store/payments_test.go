@@ -225,7 +225,7 @@ func TestRegistryImport(t *testing.T) {
 	var se *Error
 	// тот же файл: отказ целиком
 	var exists *RegistryExistsError
-	if _, err := regs.Import(ctx, bank.ID, "reg-1.txt", []byte("file one"), reg); !errors.As(err, &exists) || exists.RegistryID != res.RegistryID || !errors.Is(err, ErrConflict) {
+	if _, err := regs.Import(ctx, bank.ID, "reg-1.txt", []byte("file one"), reg); !errors.As(err, &exists) || exists.RegistryID != res.RegistryID || exists.FileName != "reg-1.txt" || !errors.Is(err, ErrConflict) {
 		t.Errorf("same file: err = %v, want RegistryExistsError(%d)", err, res.RegistryID)
 	}
 	// другой файл с пересечением: старый платёж пропускается, новый загружается

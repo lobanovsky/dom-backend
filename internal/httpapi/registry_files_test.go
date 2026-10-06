@@ -39,7 +39,9 @@ func (f *fakeRegistries) BankAccountsByNumber(context.Context) (map[string]int64
 func (f *fakeRegistries) Import(_ context.Context, bankID int64, name string, _ []byte, _ *model.ParsedRegistry) (model.RegistryImportResult, error) {
 	switch name {
 	case "UPPER_" + acct + "_2.TXT":
-		return model.RegistryImportResult{}, &store.RegistryExistsError{RegistryID: 7}
+		return model.RegistryImportResult{}, &store.RegistryExistsError{RegistryID: 7, FileName: "stored-earlier.txt"}
+	case "dup2_" + acct + "_5.txt":
+		return model.RegistryImportResult{}, &store.RegistryExistsError{RegistryID: 11, FileName: "short-name.txt"}
 	case "dup_" + acct + "_3.txt":
 		return model.RegistryImportResult{}, &store.AllDuplicatesError{Total: 1, Skipped: []model.SkippedPayment{{ExternalID: "900000000001"}}}
 	}
@@ -115,6 +117,7 @@ func TestImportZipFindsRegistriesByAccountInName(t *testing.T) {
 		"2026/x_11111111111111111111_1.txt": registryText,
 		"2026/UPPER_" + acct + "_2.TXT":     registryText,
 		"dup_" + acct + "_3.txt":            registryText,
+		"2026/ящик/dup2_" + acct + "_5.txt": registryText,
 		"2026/" + otherAc + "_9.pdf":        "not txt",
 		"2026/n/z.zip":                      "PK nested archives are not unpacked",
 	})
@@ -129,6 +132,7 @@ func TestImportZipFindsRegistriesByAccountInName(t *testing.T) {
 		"registries.zip/2026/x_11111111111111111111_1.txt":                  "unknown_account",
 		"registries.zip/2026/UPPER_" + acct + "_2.TXT":                      "duplicate_file",
 		"registries.zip/dup_" + acct + "_3.txt":                             "all_duplicates",
+		"registries.zip/2026/ящик/dup2_" + acct + "_5.txt":                  "duplicate_file",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("files = %v, want %v", got, want)
@@ -142,8 +146,20 @@ func TestImportZipFindsRegistriesByAccountInName(t *testing.T) {
 	if len(fake.imported) != 1 || fake.imported[0] != "900005_9715357654_"+acct+"_640.txt" {
 		t.Errorf("imported = %v", fake.imported)
 	}
+	// имя файла-оригинала: для копии из этого же запроса полный путь, для ранее загруженного имя из базы
+	dupOf := map[string]string{}
+	for _, f := range out["files"].([]any) {
+		m := f.(map[string]any)
+		if d, ok := m["duplicate_of"].(string); ok {
+			dupOf[m["file_name"].(string)] = d
+		}
+	}
+	if dupOf["registries.zip/2026/UPPER_"+acct+"_2.TXT"] != "stored-earlier.txt" ||
+		dupOf["registries.zip/2026/ящик/dup2_"+acct+"_5.txt"] != "registries.zip/2026/январь/900005_9715357654_"+acct+"_640.txt" {
+		t.Errorf("duplicate_of = %v", dupOf)
+	}
 	s := out["summary"].(map[string]any)
-	if s["files_imported"] != 1.0 || s["files_failed"] != 3.0 || s["files_ignored"] != 3.0 || s["payments_created"] != 1.0 || s["payments_skipped"] != 1.0 {
+	if s["files_imported"] != 1.0 || s["files_failed"] != 4.0 || s["files_ignored"] != 3.0 || s["payments_created"] != 1.0 || s["payments_skipped"] != 1.0 {
 		t.Errorf("summary = %v", s)
 	}
 }

@@ -174,6 +174,11 @@ func TestRegistryImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup(t, pool, "personal_accounts", acc.ID)
+	accKR, err := NewAccounts(pool).Create(ctx, model.Account{Number: "reg-test-kr", PremisesID: pr.ID, Purpose: "capital_repair", Status: "active", OpenedAt: date(2026, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "personal_accounts", accKR.ID)
 	// платежи и реестры удаляются раньше счетов (cleanup выполняются в обратном порядке)
 	t.Cleanup(func() {
 		for _, q := range []string{`DELETE FROM incoming_payments WHERE bank_account_id = $1`, `DELETE FROM payment_registries WHERE bank_account_id = $1`} {
@@ -229,6 +234,18 @@ func TestRegistryImport(t *testing.T) {
 	if err != nil || res2.Created != 1 || res2.SkippedDuplicates != 1 || res2.Skipped[0].ExternalID != "reg-test-a" {
 		t.Fatalf("overlapping import: %+v, err = %v", res2, err)
 	}
+	// капремонт на обычный банковский счёт: платёж привязан как есть, в комментарии пометка, в отчёте предупреждение;
+	// платёж без ФИО допустим
+	mismatch := &model.ParsedRegistry{FileAccount: bank.Number, Payments: []model.RegistryPayment{pay("reg-test-e", "reg-test-kr", 7245960)}}
+	mismatch.Payments[0].PayerName = ""
+	res3, err := regs.Import(ctx, bank.ID, "reg-mismatch.txt", []byte("file mismatch"), mismatch)
+	if err != nil || res3.Created != 1 || res3.Linked != 1 || len(res3.Warnings) != 1 {
+		t.Fatalf("type mismatch import: %+v, err = %v", res3, err)
+	}
+	if got, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{RegistryID: &res3.RegistryID}, 50, 0); err != nil || len(got) != 1 ||
+		got[0].PersonalAccountID == nil || *got[0].PersonalAccountID != accKR.ID || got[0].Comment == nil || got[0].PayerName != "" {
+		t.Errorf("mismatch payment: %+v, err = %v", got, err)
+	}
 	// все платежи уже известны: реестр не создаётся
 	all := &model.ParsedRegistry{FileAccount: bank.Number, Payments: []model.RegistryPayment{pay("reg-test-a", "reg-test-1", 857532)}}
 	var allDup *AllDuplicatesError
@@ -246,7 +263,7 @@ func TestRegistryImport(t *testing.T) {
 	if _, err := regs.Import(ctx, 1<<40, "reg-5.txt", []byte("five"), reg); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing bank account: err = %v", err)
 	}
-	if list, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 3 {
+	if list, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 4 {
 		t.Errorf("failed imports must not leave payments: %d, err = %v", len(list), err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -132,33 +133,52 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 		return res, mapErr(err)
 	}
 
-	warned := map[string]bool{}
+	// Оплата по лицевому счёту «не того» типа (капремонт на обычный счёт и наоборот) загружается как есть,
+	// привязка не меняется; в комментарий платежа пишется пометка, а в отчёт попадает одно предупреждение на тип.
+	mismatches := map[string]int{}
 	for _, p := range fresh {
 		var accountID *int64
+		var comment *string
 		if a, ok := accounts[p.AccountNum]; ok {
 			accountID = &a.id
 			res.Linked++
-			if (a.purpose == "capital_repair") != special && !warned[a.purpose] {
-				warned[a.purpose] = true
-				res.Warnings = append(res.Warnings, fmt.Sprintf("лицевой счёт %s (%s) оплачен на банковский счёт другого типа: проверьте, тот ли счёт выбран", p.AccountNum, a.purpose))
+			if note := accountTypeMismatch(a.purpose, special); note != "" {
+				comment = &note
+				mismatches[note]++
 			}
 		} else {
 			res.Unlinked++
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO incoming_payments (bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
-			        payer_name, personal_account_id, raw_line)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			        payer_name, personal_account_id, comment, raw_line)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 			bankAccountID, res.RegistryID, p.ExternalID, p.Date, p.Time, float64(p.Amount)/100, float64(p.Commission)/100,
-			p.PayerName, accountID, p.Raw); err != nil {
+			p.PayerName, accountID, comment, p.Raw); err != nil {
 			return model.RegistryImportResult{}, rowErr(p.Line, err)
 		}
 		res.Created++
 	}
+	for note, n := range mismatches {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d: %s (платежи загружены как есть, пометка добавлена в комментарий)", n, note))
+	}
+	sort.Strings(res.Warnings)
 	if err := tx.Commit(ctx); err != nil {
 		return model.RegistryImportResult{}, mapErr(err)
 	}
 	return res, nil
+}
+
+// accountTypeMismatch возвращает пометку, если тип лицевого счёта не соответствует типу банковского счёта,
+// на который пришла оплата: капремонт на обычный счёт или остальное на специальный счёт капремонта.
+func accountTypeMismatch(purpose string, specialBank bool) string {
+	switch {
+	case purpose == "capital_repair" && !specialBank:
+		return "оплата капремонта поступила на обычный (не специальный) банковский счёт"
+	case purpose != "capital_repair" && specialBank:
+		return "оплата по лицевому счёту не за капремонт поступила на специальный счёт капремонта"
+	}
+	return ""
 }
 
 func knownExternalIDs(ctx context.Context, tx pgx.Tx, bankAccountID int64, payments []model.RegistryPayment) (map[string]bool, error) {

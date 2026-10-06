@@ -28,7 +28,7 @@ type IncomingPayment struct {
 	PaymentTime       *Clock   `json:"payment_time" db:"payment_time"`
 	Amount            float64  `json:"amount" db:"amount"`
 	Commission        *float64 `json:"commission" db:"commission"`
-	PayerName         string   `json:"payer_name" db:"payer_name"`
+	PayerName         string   `json:"payer_name" db:"payer_name"` // может быть пустым: в реестрах ФИО не всегда указано
 	PayerINN          *string  `json:"payer_inn" db:"payer_inn"`
 	PayerAccount      *string  `json:"payer_account" db:"payer_account"`
 	PayerBIK          *string  `json:"payer_bik" db:"payer_bik"`
@@ -54,7 +54,6 @@ func (p IncomingPayment) Validate() error {
 		positiveInt("bank_account_id", intPtr(p.BankAccountID)),
 		requiredDate("payment_date", p.PaymentDate),
 		positiveAmount("amount", p.Amount),
-		required("payer_name", p.PayerName),
 		optionalINN("payer_inn", p.PayerINN),
 		optionalDigits("payer_bik", p.PayerBIK, 9),
 		link,

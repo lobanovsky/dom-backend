@@ -134,8 +134,6 @@ func parseLine(n int, line string) (model.RegistryPayment, error) {
 		return p, fmt.Errorf("operation number is empty")
 	case p.AccountNum == "":
 		return p, fmt.Errorf("account number is empty")
-	case p.PayerName == "":
-		return p, fmt.Errorf("payer name is empty")
 	}
 	for i, dst := range []*int64{&p.Amount, &p.Transferred, &p.Commission} {
 		if *dst, err = kopecks(f[9+i]); err != nil {

@@ -113,3 +113,11 @@ func TestAccountsInName(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAllowsEmptyPayerName(t *testing.T) {
+	text := strings.Replace(sample, "ИВАНОВ ИВАН ИВАНОВИЧ", "", 1)
+	reg, errs, err := Parse("x.txt", cp1251(t, text))
+	if err != nil || len(errs) != 0 || reg.Payments[0].PayerName != "" {
+		t.Fatalf("payment without payer name must load: err = %v, errs = %v", err, errs)
+	}
+}

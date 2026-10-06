@@ -120,11 +120,15 @@ func TestPaymentValidation(t *testing.T) {
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid payment: %v", err)
 	}
+	noName := ok
+	noName.PayerName = ""
+	if err := noName.Validate(); err != nil {
+		t.Errorf("payment without payer name must be valid: %v", err)
+	}
 	account, cat := int64(1), int64(2)
 	for name, mutate := range map[string]func(*IncomingPayment){
 		"zero amount":          func(p *IncomingPayment) { p.Amount = 0 },
 		"fractional kopecks":   func(p *IncomingPayment) { p.Amount = 10.005 },
-		"no payer":             func(p *IncomingPayment) { p.PayerName = " " },
 		"no date":              func(p *IncomingPayment) { p.PaymentDate = Date{} },
 		"account and category": func(p *IncomingPayment) { p.PersonalAccountID, p.CategoryID = &account, &cat },
 		"bad bik":              func(p *IncomingPayment) { b := "123"; p.PayerBIK = &b },

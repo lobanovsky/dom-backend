@@ -201,3 +201,11 @@ func outgoingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Outgoi
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"), Q: p.Text("q"),
 	}, p, true
 }
+
+func paymentRuleFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRuleFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Bools: []string{"enabled"}})
+	if !ok {
+		return model.PaymentRuleFilter{}, p, false
+	}
+	return model.PaymentRuleFilter{Deleted: p.Deleted, Enabled: p.Bool("enabled")}, p, true
+}

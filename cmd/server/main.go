@@ -49,6 +49,7 @@ func run(log *slog.Logger) error {
 	premises := store.NewPremisesStore(pool)
 	ownerships := store.NewOwnerships(pool)
 	accounts := store.NewAccounts(pool)
+	paymentRules := store.NewPaymentRules(pool)
 
 	srv := &http.Server{
 		Addr: cfg.ListenAddr,
@@ -67,6 +68,9 @@ func run(log *slog.Logger) error {
 			Properties:         store.NewProperties(pool),
 			PaymentRegistries:  store.NewPaymentRegistries(pool),
 			BankStatements:     store.NewBankStatements(pool),
+			PaymentRules:       paymentRules,
+			RuleOrder:          paymentRules,
+			Assignments:        store.NewAssignments(pool),
 			BankAccounts:       store.NewBankAccounts(pool),
 			PaymentCategories:  store.NewPaymentCategories(pool),
 			IncomingPayments:   store.NewIncomingPayments(pool),

@@ -155,8 +155,8 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO incoming_payments (bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
-			        payer_name, personal_account_id, comment, raw_line)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			        payer_name, personal_account_id, comment, raw_line, assigned_by)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $9::bigint IS NOT NULL THEN 'registry' END)`,
 			bankAccountID, res.RegistryID, p.ExternalID, p.Date, p.Time, float64(p.Amount)/100, float64(p.Commission)/100,
 			p.PayerName, accountID, comment, p.Raw); err != nil {
 			return model.RegistryImportResult{}, rowErr(p.Line, err)

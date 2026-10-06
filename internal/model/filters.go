@@ -18,6 +18,7 @@ type PremisesFilter struct {
 	BuildingID *int64
 	Kind       *string
 	Number     *string
+	Q          *string // начало номера помещения (для поиска при вводе)
 }
 
 type PersonFilter struct {
@@ -108,4 +109,17 @@ type OutgoingPaymentFilter struct {
 	AmountFrom    *float64
 	AmountTo      *float64
 	Q             *string // подстрока в получателе, назначении, комментарии, номере документа
+}
+
+// AssignmentScope — какие входящие платежи участвуют в определении лицевых счетов (те же фильтры, что у списка платежей).
+type AssignmentScope struct {
+	BankAccountID *int64   `json:"bank_account_id,omitempty"`
+	RegistryID    *int64   `json:"registry_id,omitempty"`
+	StatementID   *int64   `json:"statement_id,omitempty"`
+	CategoryID    *int64   `json:"category_id,omitempty"`
+	DateFrom      *Date    `json:"date_from,omitempty"`
+	DateTo        *Date    `json:"date_to,omitempty"`
+	AmountFrom    *float64 `json:"amount_from,omitempty"`
+	AmountTo      *float64 `json:"amount_to,omitempty"`
+	Q             *string  `json:"q,omitempty"`
 }

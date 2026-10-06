@@ -43,7 +43,12 @@ type IncomingPayment struct {
 	// Происхождение: выписка и ключ опознания операции (служебный, наружу не отдаётся).
 	StatementID *int64  `json:"statement_id" db:"statement_id"`
 	DedupKey    *string `json:"-" db:"dedup_key"`
-	// Только чтение: номер лицевого счёта и номер реестра для отображения в списках.
+	// Происхождение привязки к лицевому счёту/категории: registry | manual | rule (выставляет сервер).
+	AssignedBy *string `json:"assigned_by" db:"assigned_by"`
+	RuleID     *int64  `json:"rule_id" db:"rule_id"`
+	RunID      *int64  `json:"run_id" db:"run_id"`
+	// Только чтение: название правила, номер лицевого счёта и номер реестра для отображения в списках.
+	RuleName              *string `json:"rule_name" db:"rule_name"`
 	PersonalAccountNumber *string `json:"personal_account_number" db:"personal_account_number"`
 	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
 }

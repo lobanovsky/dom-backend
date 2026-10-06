@@ -18,8 +18,9 @@ func (s *PremisesStore) List(ctx context.Context, f model.PremisesFilter, limit,
 		 WHERE ($1::bigint IS NULL OR building_id = $1)
 		   AND ($2::text IS NULL OR kind = $2)
 		   AND ($3::text IS NULL OR number = $3)
-		   AND (deleted_at IS NOT NULL) = $4
-		 ORDER BY id LIMIT $5 OFFSET $6`, f.BuildingID, f.Kind, f.Number, f.Deleted, limit, offset))
+		   AND ($4::text IS NULL OR number ILIKE $4)
+		   AND (deleted_at IS NOT NULL) = $5
+		 ORDER BY id LIMIT $6 OFFSET $7`, f.BuildingID, f.Kind, f.Number, prefixPattern(f.Q), f.Deleted, limit, offset))
 }
 
 func (s *PremisesStore) Get(ctx context.Context, id int64) (model.Premises, error) {

@@ -17,7 +17,8 @@ func softDelete(ctx context.Context, pool *pgxpool.Pool, table string, id int64)
 
 const incomingCols = `id, bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
 	payer_name, payer_inn, payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, comment,
-	personal_account_id, category_id, raw_line, statement_id, dedup_key, created_at, updated_at, deleted_at,
+	personal_account_id, category_id, raw_line, statement_id, dedup_key, assigned_by, rule_id, run_id, created_at, updated_at, deleted_at,
+	(SELECT r.name FROM payment_rules r WHERE r.id = rule_id) AS rule_name,
 	(SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id) AS personal_account_number,
 	(SELECT r.registry_number FROM payment_registries r WHERE r.id = registry_id) AS registry_number`
 
@@ -55,8 +56,9 @@ func (s *IncomingPayments) Create(ctx context.Context, in model.IncomingPayment)
 	return one[model.IncomingPayment](s.pool.Query(ctx,
 		`INSERT INTO incoming_payments (bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
 		        payer_name, payer_inn, payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, comment,
-		        personal_account_id, category_id, raw_line)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING `+incomingCols,
+		        personal_account_id, category_id, raw_line, assigned_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+		         CASE WHEN $17::bigint IS NOT NULL OR $18::bigint IS NOT NULL THEN 'manual' END) RETURNING `+incomingCols,
 		in.BankAccountID, in.RegistryID, in.ExternalID, in.PaymentDate, in.PaymentTime, in.Amount, in.Commission,
 		in.PayerName, in.PayerINN, in.PayerAccount, in.PayerBIK, in.PayerBankName, in.DocNumber, in.OperationType, in.Purpose, in.Comment,
 		in.PersonalAccountID, in.CategoryID, in.RawLine))
@@ -67,7 +69,13 @@ func (s *IncomingPayments) Update(ctx context.Context, id int64, in model.Incomi
 	return one[model.IncomingPayment](s.pool.Query(ctx,
 		`UPDATE incoming_payments SET bank_account_id = $2, payment_date = $3, payment_time = $4, amount = $5, commission = $6,
 		        payer_name = $7, payer_inn = $8, payer_account = $9, payer_bik = $10, payer_bank_name = $11, doc_number = $12,
-		        operation_type = $13, purpose = $14, comment = $15, personal_account_id = $16, category_id = $17, updated_at = now()
+		        operation_type = $13, purpose = $14, comment = $15, personal_account_id = $16, category_id = $17,
+		        -- ручное изменение привязки: происхождение «вручную», связь с правилом и запуском снимается
+		        assigned_by = CASE WHEN personal_account_id IS NOT DISTINCT FROM $16::bigint AND category_id IS NOT DISTINCT FROM $17::bigint THEN assigned_by
+		                           WHEN $16::bigint IS NULL AND $17::bigint IS NULL THEN NULL ELSE 'manual' END,
+		        rule_id = CASE WHEN personal_account_id IS NOT DISTINCT FROM $16::bigint AND category_id IS NOT DISTINCT FROM $17::bigint THEN rule_id END,
+		        run_id = CASE WHEN personal_account_id IS NOT DISTINCT FROM $16::bigint AND category_id IS NOT DISTINCT FROM $17::bigint THEN run_id END,
+		        updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+incomingCols,
 		id, in.BankAccountID, in.PaymentDate, in.PaymentTime, in.Amount, in.Commission,
 		in.PayerName, in.PayerINN, in.PayerAccount, in.PayerBIK, in.PayerBankName, in.DocNumber,

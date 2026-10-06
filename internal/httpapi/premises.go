@@ -28,7 +28,7 @@ func (h premisesHandlers) register(mux *http.ServeMux) {
 }
 
 func (h premisesHandlers) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, []string{"building_id"}, []string{"kind", "number"})
+	p, ok := parseList(w, r, []string{"building_id"}, []string{"kind", "number", "q"})
 	if !ok {
 		return
 	}
@@ -37,6 +37,7 @@ func (h premisesHandlers) list(w http.ResponseWriter, r *http.Request) {
 		BuildingID: p.Int("building_id"),
 		Kind:       p.Text("kind"),
 		Number:     p.Text("number"),
+		Q:          p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)

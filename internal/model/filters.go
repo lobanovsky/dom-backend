@@ -87,6 +87,7 @@ type IncomingPaymentFilter struct {
 	Deleted           bool
 	BankAccountID     *int64
 	RegistryID        *int64
+	StatementID       *int64
 	PersonalAccountID *int64
 	CategoryID        *int64
 	DateFrom          *Date
@@ -100,6 +101,7 @@ type IncomingPaymentFilter struct {
 type OutgoingPaymentFilter struct {
 	Deleted       bool
 	BankAccountID *int64
+	StatementID   *int64
 	CategoryID    *int64
 	DateFrom      *Date
 	DateTo        *Date

@@ -166,7 +166,7 @@ func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.Paymen
 
 func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.IncomingPaymentFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{
-		Ints:   []string{"bank_account_id", "registry_id", "personal_account_id", "category_id"},
+		Ints:   []string{"bank_account_id", "registry_id", "statement_id", "personal_account_id", "category_id"},
 		Texts:  []string{"q"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
@@ -178,7 +178,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 	unlinked := p.Bool("unlinked")
 	return model.IncomingPaymentFilter{
 		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), RegistryID: p.Int("registry_id"),
-		PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
+		StatementID: p.Int("statement_id"), PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"),
 		Q: p.Text("q"), Unlinked: unlinked != nil && *unlinked,
@@ -187,7 +187,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 
 func outgoingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.OutgoingPaymentFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{
-		Ints:   []string{"bank_account_id", "category_id"},
+		Ints:   []string{"bank_account_id", "category_id", "statement_id"},
 		Texts:  []string{"q"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
@@ -196,7 +196,7 @@ func outgoingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Outgoi
 		return model.OutgoingPaymentFilter{}, p, false
 	}
 	return model.OutgoingPaymentFilter{
-		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), CategoryID: p.Int("category_id"),
+		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), CategoryID: p.Int("category_id"), StatementID: p.Int("statement_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"), Q: p.Text("q"),
 	}, p, true

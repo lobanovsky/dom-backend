@@ -40,6 +40,9 @@ type IncomingPayment struct {
 	PersonalAccountID *int64   `json:"personal_account_id" db:"personal_account_id"`
 	CategoryID        *int64   `json:"category_id" db:"category_id"`
 	RawLine           *string  `json:"raw_line" db:"raw_line"`
+	// Происхождение: выписка и ключ опознания операции (служебный, наружу не отдаётся).
+	StatementID *int64  `json:"statement_id" db:"statement_id"`
+	DedupKey    *string `json:"-" db:"dedup_key"`
 	// Только чтение: номер лицевого счёта и номер реестра для отображения в списках.
 	PersonalAccountNumber *string `json:"personal_account_number" db:"personal_account_number"`
 	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
@@ -76,6 +79,8 @@ type OutgoingPayment struct {
 	Purpose           *string `json:"purpose" db:"purpose"`
 	Comment           *string `json:"comment" db:"comment"`
 	CategoryID        *int64  `json:"category_id" db:"category_id"`
+	StatementID       *int64  `json:"statement_id" db:"statement_id"`
+	DedupKey          *string `json:"-" db:"dedup_key"`
 }
 
 func (p OutgoingPayment) Validate() error {

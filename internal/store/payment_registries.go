@@ -233,22 +233,8 @@ func accountsByNumber(ctx context.Context, tx pgx.Tx, payments []model.RegistryP
 	return out, mapErr(rows.Err())
 }
 
-// BankAccountsByNumber возвращает неудалённые банковские счета: номер → id (в том числе закрытые по периоду:
+// BankAccountsByNumber: номер → id неудалённых банковских счетов (в том числе закрытых по периоду:
 // реестры за прошлые периоды тоже нужно загружать).
 func (s *PaymentRegistries) BankAccountsByNumber(ctx context.Context) (map[string]int64, error) {
-	rows, err := s.pool.Query(ctx, `SELECT number, id FROM bank_accounts WHERE deleted_at IS NULL`)
-	if err != nil {
-		return nil, mapErr(err)
-	}
-	defer rows.Close()
-	out := map[string]int64{}
-	for rows.Next() {
-		var number string
-		var id int64
-		if err := rows.Scan(&number, &id); err != nil {
-			return nil, mapErr(err)
-		}
-		out[number] = id
-	}
-	return out, mapErr(rows.Err())
+	return bankAccountsByNumber(ctx, s.pool)
 }

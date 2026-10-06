@@ -37,17 +37,18 @@ func baseName(name string) string {
 
 func isTxt(name string) bool { return strings.EqualFold(path.Ext(name), ".txt") }
 
-func isZip(name string, data []byte) bool {
-	return strings.EqualFold(path.Ext(name), ".zip") || bytes.HasPrefix(data, []byte("PK\x03\x04"))
+// isZip: архив определяется по расширению .zip. По сигнатуре нельзя: файл .xlsx сам является zip-контейнером.
+func isZip(name string, _ []byte) bool {
+	return strings.EqualFold(path.Ext(name), ".zip")
 }
 
 func validUTF8(s string) string { return strings.ToValidUTF8(s, "?") }
 
-// expandZip возвращает файлы архива, похожие на реестры (.txt с 20-значным числом в имени); остальные
+// expandZip возвращает файлы архива, подходящие под accept(basename) (например, .txt с номером счёта в имени); остальные
 // считаются в ignored и сразу отбрасываются, чтобы не держать в памяти список всех записей большого архива.
 // Служебные записи macOS (__MACOSX/, ._имя) и каталоги пропускаются без счёта. Вложенные архивы не раскрываются.
 // unpacked — общий счётчик распакованных байт на запрос.
-func expandZip(archiveName string, data []byte, unpacked *int64) (files []registryFile, ignored int, err error) {
+func expandZip(archiveName string, data []byte, unpacked *int64, accept func(base string) bool) (files []registryFile, ignored int, err error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, 0, fmt.Errorf("not a valid zip archive")
@@ -60,7 +61,7 @@ func expandZip(archiveName string, data []byte, unpacked *int64) (files []regist
 		if f.FileInfo().IsDir() || strings.HasPrefix(name, "__MACOSX/") || strings.Contains(name, "/__MACOSX/") || strings.HasPrefix(path.Base(name), "._") {
 			continue
 		}
-		if base := path.Base(name); !isTxt(base) || len(sberregistry.AccountsInName(base)) == 0 {
+		if !accept(path.Base(name)) {
 			ignored++
 			continue
 		}
@@ -100,4 +101,9 @@ func readZipEntry(f *zip.File, unpacked *int64) ([]byte, error) {
 // plainFile — обычный загруженный файл.
 func plainFile(name string, data []byte) registryFile {
 	return registryFile{Name: validUTF8(name), open: func() ([]byte, error) { return data, nil }}
+}
+
+// registryName: реестр Сбера — .txt с 20-значным номером счёта в имени.
+func registryName(base string) bool {
+	return isTxt(base) && len(sberregistry.AccountsInName(base)) > 0
 }

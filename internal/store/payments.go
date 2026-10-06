@@ -17,7 +17,7 @@ func softDelete(ctx context.Context, pool *pgxpool.Pool, table string, id int64)
 
 const incomingCols = `id, bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
 	payer_name, payer_inn, payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, comment,
-	personal_account_id, category_id, raw_line, created_at, updated_at, deleted_at,
+	personal_account_id, category_id, raw_line, statement_id, dedup_key, created_at, updated_at, deleted_at,
 	(SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id) AS personal_account_number,
 	(SELECT r.registry_number FROM payment_registries r WHERE r.id = registry_id) AS registry_number`
 
@@ -41,9 +41,10 @@ func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilt
 		                     (SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id)) ILIKE $9)
 		   AND (NOT $10 OR (personal_account_id IS NULL AND category_id IS NULL))
 		   AND (deleted_at IS NOT NULL) = $11
+		   AND ($14::bigint IS NULL OR statement_id = $14)
 		 ORDER BY payment_date DESC, payment_time DESC NULLS LAST, id DESC LIMIT $12 OFFSET $13`,
 		f.BankAccountID, f.RegistryID, f.PersonalAccountID, f.CategoryID, f.DateFrom, f.DateTo,
-		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset))
+		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID))
 }
 
 func (s *IncomingPayments) Get(ctx context.Context, id int64) (model.IncomingPayment, error) {
@@ -83,7 +84,7 @@ func (s *IncomingPayments) Delete(ctx context.Context, id int64) error {
 }
 
 const outgoingCols = `id, bank_account_id, payment_date, amount, recipient_name, recipient_inn, recipient_account, recipient_bik,
-	recipient_bank_name, doc_number, operation_type, purpose, comment, category_id, created_at, updated_at, deleted_at`
+	recipient_bank_name, doc_number, operation_type, purpose, comment, category_id, statement_id, dedup_key, created_at, updated_at, deleted_at`
 
 type OutgoingPayments struct{ pool *pgxpool.Pool }
 
@@ -100,8 +101,9 @@ func (s *OutgoingPayments) List(ctx context.Context, f model.OutgoingPaymentFilt
 		   AND ($6::numeric IS NULL OR amount <= $6)
 		   AND ($7::text IS NULL OR concat_ws(' ', recipient_name, purpose, comment, doc_number) ILIKE $7)
 		   AND (deleted_at IS NOT NULL) = $8
+		   AND ($11::bigint IS NULL OR statement_id = $11)
 		 ORDER BY payment_date DESC, id DESC LIMIT $9 OFFSET $10`,
-		f.BankAccountID, f.CategoryID, f.DateFrom, f.DateTo, f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Deleted, limit, offset))
+		f.BankAccountID, f.CategoryID, f.DateFrom, f.DateTo, f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Deleted, limit, offset, f.StatementID))
 }
 
 func (s *OutgoingPayments) Get(ctx context.Context, id int64) (model.OutgoingPayment, error) {

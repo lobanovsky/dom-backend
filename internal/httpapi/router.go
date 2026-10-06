@@ -22,6 +22,7 @@ type Deps struct {
 
 	Importer          ImportStore
 	PaymentRegistries PaymentRegistryStore
+	BankStatements    BankStatementStore
 	BankAccounts      crudStore[model.BankAccount, model.BankAccountFilter]
 	PaymentCategories crudStore[model.PaymentCategory, model.PaymentCategoryFilter]
 	IncomingPayments  crudStore[model.IncomingPayment, model.IncomingPaymentFilter]
@@ -51,6 +52,7 @@ func NewRouter(d Deps) http.Handler {
 	importHandlers{d.Importer}.register(api)
 	propertiesHandlers{d.Properties}.register(api)
 	paymentRegistryHandlers{d.PaymentRegistries}.register(api)
+	bankStatementHandlers{d.BankStatements}.register(api)
 	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter}.register(api)
 	crudHandlers[model.PaymentCategory, model.PaymentCategoryFilter]{path: "/api/v1/payment-categories", store: d.PaymentCategories, filter: paymentCategoryFilter}.register(api)
 	crudHandlers[model.IncomingPayment, model.IncomingPaymentFilter]{path: "/api/v1/incoming-payments", store: d.IncomingPayments, filter: incomingPaymentFilter}.register(api)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"dom-backend/internal/model"
 )
@@ -270,5 +271,94 @@ func TestRegistryImport(t *testing.T) {
 	}
 	if list, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 4 {
 		t.Errorf("failed imports must not leave payments: %d, err = %v", len(list), err)
+	}
+}
+
+func TestStatementImportAndOverlap(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	org, err := NewOrganizations(pool).Create(ctx, model.Organization{Kind: "tsn", Name: "stmt-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "organizations", org.ID)
+	const acct = "40703810000000009977"
+	bank, err := NewBankAccounts(pool).Create(ctx, model.BankAccount{OrganizationID: org.ID, Number: acct, ValidFrom: date(2020, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "bank_accounts", bank.ID)
+	t.Cleanup(func() {
+		for _, q := range []string{`DELETE FROM incoming_payments WHERE bank_account_id = $1`, `DELETE FROM outgoing_payments WHERE bank_account_id = $1`, `DELETE FROM bank_statements WHERE bank_account_id = $1`} {
+			if _, err := pool.Exec(ctx, q, bank.ID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	at := func(d int) time.Time { return time.Date(2026, 1, d, 9, 30, 15, 0, time.UTC) }
+	in := func(key string, d int, kop int64, name string) model.StatementOperation {
+		return model.StatementOperation{Row: d, At: at(d), Amount: kop, CounterAccount: "40817810100000000001", CounterINN: "504908996115", CounterName: name,
+			DocNumber: "d" + key, OperationType: "01", BIK: "044525974", BankName: "ТБанк", Purpose: "ЛС 0000001101 " + key, Raw: "raw " + key, DedupKey: key}
+	}
+	out := in("k3", 10, 5000, "ООО Лифт")
+	out.Outgoing = true
+	open1, close1 := int64(100000), int64(150000)
+	stA := &model.ParsedStatement{Account: acct, PeriodFrom: ptr(date(2026, 1, 1)), PeriodTo: ptr(date(2026, 1, 10)), OpeningBalance: &open1, ClosingBalance: &close1,
+		DebitCount: 1, CreditCount: 2, DebitTotal: 5000, CreditTotal: 30000,
+		Operations: []model.StatementOperation{in("k1", 5, 10000, "ИВАНОВ ИВАН"), in("k2", 10, 20000, "ПЕТРОВ ПЕТР"), out}}
+
+	stmts := NewBankStatements(pool)
+	res, err := stmts.Import(ctx, "A.xlsx", []byte("file A"), stA)
+	if err != nil || res.Incoming != 2 || res.Outgoing != 1 || res.SkippedDuplicates != 0 || res.StatementID == 0 {
+		t.Fatalf("first import: %+v, err = %v", res, err)
+	}
+	got, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{StatementID: &res.StatementID}, 50, 0)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("incoming of the statement: %+v, err = %v", got, err)
+	}
+	var ivan model.IncomingPayment
+	for _, p := range got {
+		if p.PayerName == "ИВАНОВ ИВАН" {
+			ivan = p
+		}
+	}
+	if ivan.Amount != 100 || ivan.PaymentTime == nil || *ivan.PaymentTime != "09:30:15" || ivan.PayerINN == nil || *ivan.PayerINN != "504908996115" ||
+		ivan.DocNumber == nil || *ivan.DocNumber != "dk1" || ivan.RawLine == nil || ivan.PersonalAccountID != nil || ivan.StatementID == nil {
+		t.Errorf("imported incoming payment: %+v", ivan)
+	}
+	if o, err := NewOutgoingPayments(pool).List(ctx, model.OutgoingPaymentFilter{StatementID: &res.StatementID}, 50, 0); err != nil || len(o) != 1 || o[0].RecipientName != "ООО Лифт" || o[0].Amount != 50 {
+		t.Errorf("outgoing of the statement: %+v, err = %v", o, err)
+	}
+	if s, err := stmts.Get(ctx, res.StatementID); err != nil || s.OpeningBalance == nil || *s.OpeningBalance != 1000 || *s.ClosingBalance != 1500 || s.CreditCount != 2 || s.PeriodTo.Format("2006-01-02") != "2026-01-10" {
+		t.Errorf("statement row: %+v, err = %v", s, err)
+	}
+
+	// тот же файл — отказ; пересекающаяся выписка (k2 уже есть) — дубль пропускается, новое загружается
+	var exists *StatementExistsError
+	if _, err := stmts.Import(ctx, "A-copy.xlsx", []byte("file A"), stA); !errors.As(err, &exists) || exists.StatementID != res.StatementID || exists.FileName != "A.xlsx" {
+		t.Errorf("same file: err = %v", err)
+	}
+	stB := &model.ParsedStatement{Account: acct, DebitCount: 0, CreditCount: 2,
+		Operations: []model.StatementOperation{in("k2", 10, 20000, "ПЕТРОВ ПЕТР"), in("k4", 12, 7000, "СИДОРОВ СИДОР")}}
+	resB, err := stmts.Import(ctx, "B.xlsx", []byte("file B"), stB)
+	if err != nil || resB.Incoming != 1 || resB.SkippedDuplicates != 1 || resB.Skipped[0].Counterpart != "ПЕТРОВ ПЕТР" {
+		t.Fatalf("overlapping import: %+v, err = %v", resB, err)
+	}
+	// удалённая операция остаётся «занятой»; всё известно — выписка не создаётся
+	var allDup *StatementAllDuplicatesError
+	stC := &model.ParsedStatement{Account: acct, Operations: []model.StatementOperation{in("k1", 5, 10000, "ИВАНОВ ИВАН"), out}}
+	if _, err := stmts.Import(ctx, "C.xlsx", []byte("file C"), stC); !errors.As(err, &allDup) || allDup.Total != 2 || !errors.Is(err, ErrConflict) {
+		t.Errorf("all known: err = %v", err)
+	}
+	var unknown *UnknownBankAccountError
+	if _, err := stmts.Import(ctx, "D.xlsx", []byte("file D"), &model.ParsedStatement{Account: "40703810000000000000", Operations: stC.Operations}); !errors.As(err, &unknown) || !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown account: err = %v", err)
+	}
+	if list, err := stmts.List(ctx, model.BankStatementFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 2 {
+		t.Errorf("failed imports must not leave statements: %d, err = %v", len(list), err)
+	}
+	if list, err := stmts.List(ctx, model.BankStatementFilter{BankAccountID: &bank.ID, Q: ptr("b.xl")}, 50, 0); err != nil || len(list) != 1 {
+		t.Errorf("search by file name: %d, err = %v", len(list), err)
 	}
 }

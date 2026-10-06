@@ -66,6 +66,7 @@ func run(log *slog.Logger) error {
 			Importer:           store.NewImporter(pool),
 			Properties:         store.NewProperties(pool),
 			PaymentRegistries:  store.NewPaymentRegistries(pool),
+			BankStatements:     store.NewBankStatements(pool),
 			BankAccounts:       store.NewBankAccounts(pool),
 			PaymentCategories:  store.NewPaymentCategories(pool),
 			IncomingPayments:   store.NewIncomingPayments(pool),

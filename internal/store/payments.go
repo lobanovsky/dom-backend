@@ -37,7 +37,8 @@ func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilt
 		   AND ($7::numeric IS NULL OR amount >= $7)
 		   AND ($8::numeric IS NULL OR amount <= $8)
 		   AND ($9::text IS NULL
-		        OR concat_ws(' ', payer_name, purpose, comment, doc_number, external_id) ILIKE $9)
+		        OR concat_ws(' ', payer_name, purpose, comment, doc_number, external_id,
+		                     (SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id)) ILIKE $9)
 		   AND (NOT $10 OR (personal_account_id IS NULL AND category_id IS NULL))
 		   AND (deleted_at IS NOT NULL) = $11
 		 ORDER BY payment_date DESC, payment_time DESC NULLS LAST, id DESC LIMIT $12 OFFSET $13`,

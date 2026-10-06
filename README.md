@@ -148,7 +148,7 @@ docker compose up -d --build
 - `bank-accounts`: `organization_id`, `is_special`, `active` (true/false, по периоду на сегодня)
 - `payment-categories`: `direction`
 - `payment-registries`: `bank_account_id`, `date_from`, `date_to` (по дате реестра), `q` (подстрока в имени файла или номере реестра)
-- `incoming-payments`: `bank_account_id`, `registry_id`, `personal_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q` (плательщик, назначение, комментарий, номер документа или операции), `unlinked=true` (без лицевого счёта и категории); сортировка: новые сверху
+- `incoming-payments`: `bank_account_id`, `registry_id`, `personal_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q` (плательщик, назначение, комментарий, номер документа или операции, номер лицевого счёта), `unlinked=true` (без лицевого счёта и категории); сортировка: новые сверху
 - `outgoing-payments`: `bank_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q`
 
 Даты фильтров передаются как `YYYY-MM-DD`, неверный формат даёт 400. Суммы платежей: число не более чем с двумя знаками после запятой.

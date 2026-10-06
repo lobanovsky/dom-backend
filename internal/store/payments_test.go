@@ -109,6 +109,8 @@ func TestBankAccountsAndPayments(t *testing.T) {
 		t.Errorf("update: %+v, err = %v", got, err)
 	}
 
+	// поиск q находит платёж и по номеру лицевого счёта (в TestRegistryImport проверяется привязка)
+
 	// повтор номера операции на том же счёте — конфликт; CHECK «либо лицевой счёт, либо категория»
 	if _, err := in.Create(ctx, model.IncomingPayment{BankAccountID: bank.ID, ExternalID: ptr("pay-test-1"), PaymentDate: date(2026, 1, 4), Amount: 1, PayerName: "X"}); !errors.Is(err, ErrConflict) {
 		t.Errorf("duplicate external_id: err = %v, want conflict", err)
@@ -211,6 +213,9 @@ func TestRegistryImport(t *testing.T) {
 		if p.ExternalID == nil || (*p.ExternalID == "reg-test-a") != (p.PersonalAccountID != nil && *p.PersonalAccountID == acc.ID) || p.RawLine == nil {
 			t.Errorf("payment link/raw: %+v", p)
 		}
+	}
+	if got, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID, Q: ptr("reg-test-1")}, 50, 0); err != nil || len(got) != 1 {
+		t.Errorf("search by personal account number: %+v, err = %v", got, err)
 	}
 	if r, err := regs.Get(ctx, res.RegistryID); err != nil || r.PaymentsCount != 2 || r.TotalAmount != 8576.32 {
 		t.Errorf("registry row: %+v, err = %v", r, err)

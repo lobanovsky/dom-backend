@@ -10,9 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"dom-backend/internal/bankstatement"
+	"dom-backend/internal/clientbank"
 	"dom-backend/internal/model"
-	"dom-backend/internal/sberregistry"
 	"dom-backend/internal/store"
 )
 
@@ -97,9 +96,9 @@ type statementImportSummary struct {
 	OperationsSkipped int `json:"operations_skipped"`
 }
 
-// statementName: выписка — файл .xlsx (временные файлы Excel «~$…» не считаются).
+// statementName: выписка — текстовый файл обмена с 1С (.txt); по содержимому это проверяется при разборе.
 func statementName(base string) bool {
-	return strings.EqualFold(baseExt(base), ".xlsx") && !strings.HasPrefix(base, "~$")
+	return strings.EqualFold(baseExt(base), ".txt")
 }
 
 func baseExt(name string) string {
@@ -109,8 +108,8 @@ func baseExt(name string) string {
 	return ""
 }
 
-// importFiles принимает multipart/form-data с полями file: выписки .xlsx и zip-архивы с ними. Наш счёт берётся из шапки
-// выписки и должен быть заведён в системе. Каждый файл грузится отдельной транзакцией; ответ 200: {files, summary}.
+// importFiles принимает multipart/form-data с полями file: файлы обмена 1С (формат 1CClientBankExchange 1.03, .txt) и zip-архивы с ними.
+// Наши счета берутся из файла и должны быть заведены в системе; файл с несколькими счетами даёт выписку на каждый. Каждый файл грузится отдельной транзакцией; ответ 200: {files, summary}.
 func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -131,12 +130,12 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 		summary    statementImportSummary
 	)
 	for _, hd := range headers {
-		data, err := readUpload(hd.Open, hd.Size)
+		data, err := readUpload(hd.Open, uploadLimit(hd.Filename, maxStatementSize))
 		switch {
 		case err != nil:
 			results = append(results, statementFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 		case isZip(hd.Filename, data):
-			files, skipped, err := expandZip(hd.Filename, data, &unpacked, statementName)
+			files, skipped, err := expandZip(hd.Filename, data, &unpacked, statementName, maxStatementSize)
 			summary.FilesIgnored += skipped
 			if err != nil {
 				results = append(results, statementFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
@@ -154,6 +153,10 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 		base := baseName(f.Name)
 		if !statementName(base) {
 			summary.FilesIgnored++
+			continue
+		}
+		if data, err := f.open(); err == nil && !clientbank.LooksLike(data) {
+			summary.FilesIgnored++ // .txt, но не файл обмена с 1С
 			continue
 		}
 		for _, fr := range h.importOne(r.Context(), f, base) {
@@ -190,14 +193,14 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary})
 }
 
-// importOne разбирает файл и загружает выписку каждого листа с операциями (в старых выгрузках по листу на счёт).
+// importOne разбирает файл и загружает выписку по каждому нашему счёту (в файле их может быть несколько).
 // Результатов столько же, сколько выписок; если разобрать не удалось — один результат с причиной.
 func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, base string) []statementFileResult {
 	data, err := f.open()
 	if err != nil {
 		return []statementFileResult{{FileName: f.Name, Status: fileError, Error: err.Error()}}
 	}
-	statements, rowErrs, err := bankstatement.Parse(data)
+	statements, rowErrs, err := clientbank.Parse(data)
 	switch {
 	case err != nil:
 		return []statementFileResult{{FileName: f.Name, Status: fileInvalid, Error: err.Error()}}
@@ -207,8 +210,8 @@ func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, ba
 	var out []statementFileResult
 	for _, st := range statements {
 		name, shown := base, f.Name
-		if st.MultiSheet {
-			name, shown = base+" — лист "+st.Sheet, f.Name+" — лист "+st.Sheet
+		if st.MultiPart {
+			name, shown = base+" — счёт "+st.Part, f.Name+" — счёт "+st.Part
 		}
 		out = append(out, h.importStatement(ctx, name, shown, data, st))
 	}
@@ -217,11 +220,6 @@ func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, ba
 
 func (h bankStatementHandlers) importStatement(ctx context.Context, name, shown string, data []byte, st *model.ParsedStatement) statementFileResult {
 	fr := statementFileResult{FileName: shown}
-	// Номер счёта в имени файла, если он есть, должен совпадать со счётом выписки (у файла с несколькими листами имя о счёте не говорит).
-	if named := sberregistry.AccountsInName(name); !st.MultiSheet && len(named) > 0 && !contains(named, st.Account) {
-		fr.Status, fr.Error = fileInvalid, "file name refers to account "+named[0]+", but the statement is for account "+st.Account
-		return fr
-	}
 	res, err := h.s.Import(ctx, name, data, st)
 	var exists *store.StatementExistsError
 	var allDup *store.StatementAllDuplicatesError

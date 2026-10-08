@@ -48,8 +48,8 @@ type StatementOperation struct {
 
 // ParsedStatement — разобранный файл выписки. Суммы в копейках.
 type ParsedStatement struct {
-	Sheet          string // лист файла, из которого разобрана выписка
-	MultiSheet     bool   // в файле несколько выписок (по листу на счёт)
+	Part           string // часть файла, из которой разобрана выписка (расчётный счёт)
+	MultiPart      bool   // в файле несколько выписок (по одной на счёт)
 	Account        string // наш счёт
 	PeriodFrom     *Date
 	PeriodTo       *Date

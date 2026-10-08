@@ -14,6 +14,7 @@ import (
 // Пределы загрузки реестров. Файлы читаются в память, на диск ничего не пишется.
 const (
 	maxRegistrySize  = 5 << 20   // один файл реестра
+	maxStatementSize = 50 << 20  // один файл выписки (1С за несколько лет — десятки мегабайт)
 	maxArchiveSize   = 50 << 20  // сам zip-архив
 	maxUnpackedTotal = 200 << 20 // всё распакованное за один запрос
 	maxRequestSize   = 100 << 20
@@ -48,7 +49,7 @@ func validUTF8(s string) string { return strings.ToValidUTF8(s, "?") }
 // считаются в ignored и сразу отбрасываются, чтобы не держать в памяти список всех записей большого архива.
 // Служебные записи macOS (__MACOSX/, ._имя) и каталоги пропускаются без счёта. Вложенные архивы не раскрываются.
 // unpacked — общий счётчик распакованных байт на запрос.
-func expandZip(archiveName string, data []byte, unpacked *int64, accept func(base string) bool) (files []registryFile, ignored int, err error) {
+func expandZip(archiveName string, data []byte, unpacked *int64, accept func(base string) bool, maxEntry int64) (files []registryFile, ignored int, err error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, 0, fmt.Errorf("not a valid zip archive")
@@ -68,28 +69,28 @@ func expandZip(archiveName string, data []byte, unpacked *int64, accept func(bas
 		f := f
 		files = append(files, registryFile{
 			Name: validUTF8(archiveName + "/" + name),
-			open: func() ([]byte, error) { return readZipEntry(f, unpacked) },
+			open: func() ([]byte, error) { return readZipEntry(f, unpacked, maxEntry) },
 		})
 	}
 	return files, ignored, nil
 }
 
 // readZipEntry читает запись с ограничением по фактическому объёму: заголовок архива может лгать о размере.
-func readZipEntry(f *zip.File, unpacked *int64) ([]byte, error) {
-	if f.UncompressedSize64 > maxRegistrySize {
-		return nil, fmt.Errorf("file is too large (max %d MB)", maxRegistrySize>>20)
+func readZipEntry(f *zip.File, unpacked *int64, maxEntry int64) ([]byte, error) {
+	if int64(f.UncompressedSize64) > maxEntry {
+		return nil, fmt.Errorf("file is too large (max %d MB)", maxEntry>>20)
 	}
 	rc, err := f.Open()
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the archive entry")
 	}
 	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, maxRegistrySize+1))
+	data, err := io.ReadAll(io.LimitReader(rc, maxEntry+1))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the archive entry")
 	}
-	if len(data) > maxRegistrySize {
-		return nil, fmt.Errorf("file is too large (max %d MB)", maxRegistrySize>>20)
+	if int64(len(data)) > maxEntry {
+		return nil, fmt.Errorf("file is too large (max %d MB)", maxEntry>>20)
 	}
 	*unpacked += int64(len(data))
 	if *unpacked > maxUnpackedTotal {

@@ -121,10 +121,10 @@ func (s *BankStatements) Import(ctx context.Context, fileName string, data []byt
 		return res, mapErr(err)
 	}
 
-	// Ключ файла: содержимое; у файла с несколькими выписками (по листу на счёт) ещё и лист, иначе уникальность ломала бы вторую.
+	// Ключ файла: содержимое; у файла с несколькими выписками (по одной на счёт) ещё и часть, иначе уникальность ломала бы вторую.
 	keyed := data
-	if st.MultiSheet {
-		keyed = append(append(append([]byte{}, data...), 0), st.Sheet...)
+	if st.MultiPart {
+		keyed = append(append(append([]byte{}, data...), 0), st.Part...)
 	}
 	sum := sha256.Sum256(keyed)
 	hash := hex.EncodeToString(sum[:])
@@ -195,7 +195,6 @@ func kopecksToRub(v *int64) *float64 {
 }
 
 func insertOperation(ctx context.Context, tx pgx.Tx, bankID, statementID int64, op model.StatementOperation) error {
-	clock := model.Clock(op.At.Format("15:04:05"))
 	date := model.Date{Time: day(op)}
 	amount := float64(op.Amount) / 100
 	if op.Outgoing {
@@ -211,7 +210,7 @@ func insertOperation(ctx context.Context, tx pgx.Tx, bankID, statementID int64, 
 		`INSERT INTO incoming_payments (bank_account_id, statement_id, payment_date, payment_time, amount, payer_name, payer_inn,
 		        payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, raw_line, dedup_key)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		bankID, statementID, date, clock, amount, op.CounterName, nilIfEmpty(op.CounterINN), nilIfEmpty(op.CounterAccount),
+		bankID, statementID, date, nil, amount, op.CounterName, nilIfEmpty(op.CounterINN), nilIfEmpty(op.CounterAccount),
 		nilIfEmpty(op.BIK), nilIfEmpty(op.BankName), nilIfEmpty(op.DocNumber), nilIfEmpty(op.OperationType), nilIfEmpty(op.Purpose), nilIfEmpty(op.Raw), op.DedupKey)
 	return err
 }

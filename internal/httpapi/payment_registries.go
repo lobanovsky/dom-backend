@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -136,12 +135,12 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		summary    registryImportSummary
 	)
 	for _, hd := range headers {
-		data, err := readUpload(hd.Open, hd.Size)
+		data, err := readUpload(hd.Open, uploadLimit(hd.Filename, maxRegistrySize))
 		switch {
 		case err != nil:
 			results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 		case isZip(hd.Filename, data):
-			files, skipped, err := expandZip(hd.Filename, data, &unpacked, registryName)
+			files, skipped, err := expandZip(hd.Filename, data, &unpacked, registryName, maxRegistrySize)
 			summary.FilesIgnored += skipped
 			if err != nil {
 				results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
@@ -249,20 +248,14 @@ func (h paymentRegistryHandlers) importOne(ctx context.Context, f registryFile, 
 	return fr
 }
 
-// readUpload читает загруженный файл с ограничением размера (zip — больше, чем одиночный реестр).
-func readUpload(open func() (multipart.File, error), size int64) ([]byte, error) {
+// readUpload читает загруженный файл с ограничением размера limit (архив — maxArchiveSize).
+func readUpload(open func() (multipart.File, error), limit int64) ([]byte, error) {
 	f, err := open()
 	if err != nil {
 		return nil, errors.New("cannot read the uploaded file")
 	}
 	defer f.Close()
-	limit := int64(maxRegistrySize)
-	head := make([]byte, 4)
-	n, _ := io.ReadFull(f, head)
-	if bytes.HasPrefix(head[:n], []byte("PK\x03\x04")) {
-		limit = maxArchiveSize
-	}
-	data, err := io.ReadAll(io.LimitReader(io.MultiReader(bytes.NewReader(head[:n]), f), limit+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, errors.New("cannot read the uploaded file")
 	}
@@ -270,6 +263,14 @@ func readUpload(open func() (multipart.File, error), size int64) ([]byte, error)
 		return nil, fmt.Errorf("file is too large (max %d MB)", limit>>20)
 	}
 	return data, nil
+}
+
+// uploadLimit: архив может быть больше одиночного файла.
+func uploadLimit(filename string, single int64) int64 {
+	if isZip(filename, nil) {
+		return maxArchiveSize
+	}
+	return single
 }
 
 // logRegistryFile пишет итог по файлу реестра: причина отказа попадает в журнал.

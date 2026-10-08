@@ -323,7 +323,7 @@ func TestStatementImportAndOverlap(t *testing.T) {
 			ivan = p
 		}
 	}
-	if ivan.Amount != 100 || ivan.PaymentTime == nil || *ivan.PaymentTime != "09:30:15" || ivan.PayerINN == nil || *ivan.PayerINN != "504908996115" ||
+	if ivan.Amount != 100 || ivan.PaymentTime != nil || ivan.PayerINN == nil || *ivan.PayerINN != "504908996115" ||
 		ivan.DocNumber == nil || *ivan.DocNumber != "dk1" || ivan.RawLine == nil || ivan.PersonalAccountID != nil || ivan.StatementID == nil {
 		t.Errorf("imported incoming payment: %+v", ivan)
 	}
@@ -353,7 +353,7 @@ func TestStatementImportAndOverlap(t *testing.T) {
 	}
 	// выписки по двум листам одного файла: ключ файла включает лист, поэтому вторая не считается дублем первой
 	two := func(sheet string) *model.ParsedStatement {
-		return &model.ParsedStatement{Account: acct, Sheet: sheet, MultiSheet: true, DebitCount: 0, CreditCount: 1,
+		return &model.ParsedStatement{Account: acct, Part: sheet, MultiPart: true, DebitCount: 0, CreditCount: 1,
 			Operations: []model.StatementOperation{in("k-"+sheet, 15, 3000, "СИДОРОВ")}}
 	}
 	if _, err := stmts.Import(ctx, "multi.xlsx — лист a", []byte("multi file"), two("a")); err != nil {

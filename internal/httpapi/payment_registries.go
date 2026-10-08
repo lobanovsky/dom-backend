@@ -118,6 +118,7 @@ type registryImportSummary struct {
 func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		slog.Warn("upload failed", "path", r.URL.Path, "content_length", r.ContentLength, "err", err)
 		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
 		return
 	}
@@ -148,7 +149,12 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 			}
 			candidates = append(candidates, files...)
 		default:
-			candidates = append(candidates, plainFile(hd.Filename, data))
+			name, data, err := inflate(hd.Filename, data, maxRegistrySize)
+			if err != nil {
+				results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
+				continue
+			}
+			candidates = append(candidates, plainFile(name, data))
 		}
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })

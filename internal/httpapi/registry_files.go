@@ -3,6 +3,7 @@ package httpapi
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"path"
@@ -107,4 +108,26 @@ func plainFile(name string, data []byte) registryFile {
 // registryName: реестр Сбера — .txt с 20-значным номером счёта в имени.
 func registryName(base string) bool {
 	return isTxt(base) && len(sberregistry.AccountsInName(base)) > 0
+}
+
+// inflate распаковывает файл, который браузер сжал gzip перед отправкой (большие текстовые выписки иначе не укладываются
+// в таймаут прокси на медленном канале); имя возвращается без «.gz». Файлы без суффикса .gz возвращаются как есть.
+// Защита от «gzip-бомбы»: распакованное не больше limit.
+func inflate(name string, data []byte, limit int64) (string, []byte, error) {
+	if !strings.EqualFold(path.Ext(name), ".gz") {
+		return name, data, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return name, nil, fmt.Errorf("not a valid gzip file")
+	}
+	defer zr.Close()
+	out, err := io.ReadAll(io.LimitReader(zr, limit+1))
+	if err != nil {
+		return name, nil, fmt.Errorf("not a valid gzip file")
+	}
+	if int64(len(out)) > limit {
+		return name, nil, fmt.Errorf("file is too large when unpacked (max %d MB)", limit>>20)
+	}
+	return strings.TrimSuffix(name, name[len(name)-3:]), out, nil
 }

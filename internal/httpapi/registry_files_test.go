@@ -3,6 +3,7 @@ package httpapi
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"mime/multipart"
@@ -216,5 +217,17 @@ func TestExpandZipLimits(t *testing.T) {
 	many := map[string]string{"a.txt": "", "b.txt": "", "c.txt": "", "d.txt": ""}
 	if _, _, err := expandZip("many.zip", zipOf(t, many), &total, registryName, maxRegistrySize); err == nil {
 		t.Error("an archive with too many entries must be rejected")
+	}
+}
+
+func TestGzippedRegistryUpload(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(registryText))
+	_ = zw.Close()
+	fake := &fakeRegistries{}
+	code, out := postRegistries(t, fake, upload{"a_" + acct + "_1.txt.gz", buf.String()})
+	if code != http.StatusOK || statuses(out)["a_"+acct+"_1.txt"] != "imported" || len(fake.imported) != 1 || fake.imported[0] != "a_"+acct+"_1.txt" {
+		t.Errorf("gzipped registry: status = %d, out = %v, imported = %v", code, out, fake.imported)
 	}
 }

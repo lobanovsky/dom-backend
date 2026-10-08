@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -165,5 +166,35 @@ func TestStatementFileLargerThanRegistryLimit(t *testing.T) {
 	code, out := postStatements(t, &fakeStatements{}, upload{"kl_to_1c.txt", big})
 	if code != http.StatusOK || statuses(out)["kl_to_1c.txt"] != "imported" {
 		t.Errorf("a statement file over the registry size limit must be accepted: status = %d, out = %v", code, out)
+	}
+}
+
+func gz(t *testing.T, s string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write([]byte(s)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// Браузер сжимает большие текстовые выписки перед отправкой, чтобы загрузка укладывалась в таймаут прокси.
+func TestGzippedStatementUpload(t *testing.T) {
+	fake := &fakeStatements{}
+	code, out := postStatements(t, fake, upload{"kl_to_1c.txt.gz", gz(t, oneC(stmtAcct))})
+	if code != http.StatusOK || statuses(out)["kl_to_1c.txt"] != "imported" || len(fake.imported) != 1 || fake.imported[0] != "kl_to_1c.txt" {
+		t.Errorf("gzipped upload: status = %d, out = %v, imported = %v", code, out, fake.imported)
+	}
+	if _, out := postStatements(t, &fakeStatements{}, upload{"broken.txt.gz", "это не gzip"}); statuses(out)["broken.txt.gz"] != "error" {
+		t.Errorf("a corrupted gzip must be reported: %v", out)
+	}
+	// «gzip-бомба»: распакованное больше лимита
+	bomb := gz(t, strings.Repeat("0", maxStatementSize+1024))
+	if _, out := postStatements(t, &fakeStatements{}, upload{"bomb.txt.gz", bomb}); statuses(out)["bomb.txt.gz"] != "error" {
+		t.Errorf("an oversized gzip must be rejected: %v", out)
 	}
 }

@@ -402,3 +402,28 @@ func TestUnknownLayoutErrorListsHeaderLabels(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Банк иногда склеивает счёт и название в одной строке без ИНН: «40703810338000004376ТСН "МР17ДОМ1"».
+func TestBlockWithoutNewlines(t *testing.T) {
+	rows := sampleRows()
+	rows[0].debit = ours + `ТСН "ТЕСТ"`
+	rows[0].credit = `70601810038002720211ПАО Сбербанк`
+	rows[1].debit = `40817810400075911534Иванов Иван Иванович`
+	st, errs, err := parseOne(workbook(t, rows, standardFooter("1", "2", "10,00", "29,00")))
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("err = %v, errs = %v", err, errs)
+	}
+	if out := st.Operations[0]; !out.Outgoing || out.CounterAccount != "70601810038002720211" || out.CounterName != "ПАО Сбербанк" || out.CounterINN != "" {
+		t.Errorf("outgoing with a glued block: %+v", out)
+	}
+	if in := st.Operations[1]; in.CounterAccount != "40817810400075911534" || in.CounterName != "Иванов Иван Иванович" {
+		t.Errorf("incoming with a glued block: %+v", in)
+	}
+}
+
+func TestTurnoverMismatchShowsAmounts(t *testing.T) {
+	_, _, err := parseOne(workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "67,00")))
+	if err == nil || !strings.Contains(err.Error(), "credit 67.00 in the summary, 29.00 in rows") {
+		t.Errorf("err = %v", err)
+	}
+}

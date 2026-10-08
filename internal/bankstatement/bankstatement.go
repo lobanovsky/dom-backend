@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	accountRe = regexp.MustCompile(`(?:^|\D)(\d{20})(?:\D|$)`)
-	dateRu    = regexp.MustCompile(`(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})`)
-	bikRe     = regexp.MustCompile(`БИК\s*[:,]?\s*(\d{9})[\s,;]*(.*)`)
-	months    = map[string]time.Month{
+	accountRe       = regexp.MustCompile(`(?:^|\D)(\d{20})(?:\D|$)`)
+	dateRu          = regexp.MustCompile(`(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})`)
+	accountPrefixRe = regexp.MustCompile(`^(\d{20})\s*(.*)$`)
+	bikRe           = regexp.MustCompile(`БИК\s*[:,]?\s*(\d{9})[\s,;]*(.*)`)
+	months          = map[string]time.Month{
 		"января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
 		"июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
 	}
@@ -289,6 +290,11 @@ func parseBlock(s string) block {
 	if len(lines) > 0 {
 		b.account = lines[0]
 		lines = lines[1:]
+		// Бывает, что банк склеивает счёт и название без перевода строки и без ИНН: «40703810338000004376ТСН "МР17ДОМ1"».
+		if m := accountPrefixRe.FindStringSubmatch(b.account); m != nil && m[2] != "" {
+			b.account = m[1]
+			lines = append([]string{m[2]}, lines...)
+		}
 	}
 	if len(lines) > 0 && (isINN(lines[0]) || lines[0] == "0") { // «0» — у плательщика нет ИНН
 		if lines[0] != "0" {
@@ -443,7 +449,8 @@ func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row i
 	dt, err1 := value("Итого оборотов", debitCol)
 	ct, err2 := value("Итого оборотов", creditCol)
 	if err1 != nil || err2 != nil || dt != st.DebitTotal || ct != st.CreditTotal {
-		return fmt.Errorf("summary turnover does not match the sum of operations")
+		return fmt.Errorf("summary turnover does not match the sum of operations: debit %s in the summary, %s in rows; credit %s in the summary, %s in rows",
+			money(dt), money(st.DebitTotal), money(ct), money(st.CreditTotal))
 	}
 	// Остатки со знаком: кредитовый положительный.
 	signed := func(label string) *int64 {
@@ -518,3 +525,6 @@ func headerLabels(rows [][]string, headerRow int) string {
 	}
 	return strings.Join(found, ", ")
 }
+
+// money форматирует копейки как «1803923.98».
+func money(k int64) string { return fmt.Sprintf("%d.%02d", k/100, k%100) }

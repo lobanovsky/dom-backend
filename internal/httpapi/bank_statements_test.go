@@ -24,10 +24,19 @@ const stmtAcct = "40703810338000009999"
 func statementXLSX(t *testing.T, doc string) []byte {
 	t.Helper()
 	f := excelize.NewFile()
-	sheet := stmtAcct
-	f.SetSheetName("Sheet1", sheet)
+	f.SetSheetName("Sheet1", stmtAcct)
+	statementSheet(f, stmtAcct, stmtAcct, doc)
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// statementSheet заполняет лист выписки по счёту account.
+func statementSheet(f *excelize.File, sheet, account, doc string) {
 	set := func(cell string, v any) { _ = f.SetCellValue(sheet, cell, v) }
-	set("M5", stmtAcct)
+	set("M5", account)
 	for cell, v := range map[string]string{"B10": "Дата проводки", "E10": "Счет", "J10": "Сумма по дебету", "N10": "Сумма по кредиту",
 		"O10": "№ документа", "Q10": "ВО", "R10": "Банк (БИК и наименование)", "U10": "Назначение платежа", "E11": "Дебет", "I11": "Кредит",
 		"B15": "б/с", "H15": "Дебет", "L15": "Кредит", "B17": "Количество операций", "B19": "Итого оборотов"} {
@@ -35,7 +44,7 @@ func statementXLSX(t *testing.T, doc string) []byte {
 	}
 	set("B12", time.Date(2026, 1, 5, 4, 31, 38, 0, time.UTC))
 	set("E12", "40817810100044521912\n504908996115\nИВАНОВ ИВАН")
-	set("I12", stmtAcct+"\n9715357654\nТСН")
+	set("I12", account+"\n9715357654\nТСН")
 	set("N12", 100.5)
 	set("O12", doc)
 	set("Q12", "01")
@@ -45,11 +54,6 @@ func statementXLSX(t *testing.T, doc string) []byte {
 	set("L17", "1")
 	set("H19", "0,00")
 	set("L19", "100.50")
-	var buf bytes.Buffer
-	if err := f.Write(&buf); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
 }
 
 type fakeStatements struct {
@@ -146,5 +150,32 @@ func TestImportStatementsPlainFilesAndErrors(t *testing.T) {
 	}
 	if code, _ := postStatements(t, &fakeStatements{}); code != http.StatusBadRequest {
 		t.Errorf("no files: status = %d, want 400", code)
+	}
+}
+
+func TestImportStatementWithSeveralSheets(t *testing.T) {
+	f := excelize.NewFile()
+	f.SetSheetName("Sheet1", stmtAcct)
+	statementSheet(f, stmtAcct, stmtAcct, "1")
+	const second = "40705810238000000478"
+	if _, err := f.NewSheet(second); err != nil {
+		t.Fatal(err)
+	}
+	statementSheet(f, second, second, "2")
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeStatements{}
+	code, out := postStatements(t, fake, upload{"2020.xlsx", buf.String()})
+	got := statuses(out)
+	if code != http.StatusOK || len(got) != 2 || got["2020.xlsx — лист "+stmtAcct] != "imported" || got["2020.xlsx — лист "+second] != "imported" {
+		t.Fatalf("several sheets: status = %d, got = %v", code, got)
+	}
+	if len(fake.imported) != 2 || fake.imported[0] != "2020.xlsx — лист "+stmtAcct {
+		t.Errorf("imported = %v", fake.imported)
+	}
+	if s := out["summary"].(map[string]any); s["files_imported"] != 2.0 || s["incoming_created"] != 2.0 {
+		t.Errorf("summary = %v", s)
 	}
 }

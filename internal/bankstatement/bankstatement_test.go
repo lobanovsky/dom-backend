@@ -7,9 +7,20 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
+
+	"dom-backend/internal/model"
 )
 
 const ours = "40703810338000009999"
+
+// parseOne разбирает файл с одним листом и возвращает его выписку.
+func parseOne(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) {
+	sts, errs, err := Parse(data)
+	if len(sts) > 0 {
+		return sts[0], errs, err
+	}
+	return nil, errs, err
+}
 
 type row struct {
 	at       time.Time
@@ -27,15 +38,25 @@ type row struct {
 func workbook(t *testing.T, rows []row, footer func(f *excelize.File, sheet string, nextRow int)) []byte {
 	t.Helper()
 	f := excelize.NewFile()
-	sheet := ours
-	f.SetSheetName("Sheet1", sheet)
+	f.SetSheetName("Sheet1", ours)
+	buildSheet(t, f, ours, ours, rows, footer)
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// buildSheet заполняет лист выписки по счёту account.
+func buildSheet(t *testing.T, f *excelize.File, sheet, account string, rows []row, footer func(f *excelize.File, sheet string, nextRow int)) {
+	t.Helper()
 	set := func(cell string, v any) {
 		if err := f.SetCellValue(sheet, cell, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 	set("B5", "ВЫПИСКА ОПЕРАЦИЙ ПО ЛИЦЕВОМУ СЧЕТУ")
-	set("M5", ours)
+	set("M5", account)
 	set("C7", "за период с 04 января 2026 г.")
 	set("O7", " по ")
 	set("P7", "26 января 2026 г.")
@@ -46,8 +67,8 @@ func workbook(t *testing.T, rows []row, footer func(f *excelize.File, sheet stri
 	r := 12
 	for _, x := range rows {
 		set("B"+itoa(r), x.at)
-		set("E"+itoa(r), x.debit)
-		set("I"+itoa(r), x.credit)
+		set("E"+itoa(r), strings.ReplaceAll(x.debit, ours, account))
+		set("I"+itoa(r), strings.ReplaceAll(x.credit, ours, account))
 		if x.debitSum != nil {
 			set("J"+itoa(r), x.debitSum)
 		}
@@ -63,11 +84,6 @@ func workbook(t *testing.T, rows []row, footer func(f *excelize.File, sheet stri
 	if footer != nil {
 		footer(f, sheet, r+2)
 	}
-	var buf bytes.Buffer
-	if err := f.Write(&buf); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
 }
 
 func itoa(n int) string {
@@ -113,7 +129,7 @@ func sampleRows() []row {
 }
 
 func TestParse(t *testing.T) {
-	st, errs, err := Parse(workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00")))
+	st, errs, err := parseOne(workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00")))
 	if err != nil || len(errs) != 0 {
 		t.Fatalf("err = %v, errs = %v", err, errs)
 	}
@@ -137,7 +153,7 @@ func TestParse(t *testing.T) {
 }
 
 func TestDedupKeys(t *testing.T) {
-	st, _, err := Parse(workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00")))
+	st, _, err := parseOne(workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +161,7 @@ func TestDedupKeys(t *testing.T) {
 	if st.Operations[1].DedupKey == st.Operations[2].DedupKey {
 		t.Error("identical rows inside one statement must get different keys")
 	}
-	again, _, err := Parse(workbook(t, sampleRows()[1:], standardFooter("0", "2", "0,00", "29,00")))
+	again, _, err := parseOne(workbook(t, sampleRows()[1:], standardFooter("0", "2", "0,00", "29,00")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +171,7 @@ func TestDedupKeys(t *testing.T) {
 	// ключ не зависит от времени суток
 	rows := sampleRows()
 	rows[1].at = rows[1].at.Add(3 * time.Hour)
-	shifted, _, err := Parse(workbook(t, rows, standardFooter("1", "2", "10,00", "29,00")))
+	shifted, _, err := parseOne(workbook(t, rows, standardFooter("1", "2", "10,00", "29,00")))
 	if err != nil || shifted.Operations[1].DedupKey != st.Operations[1].DedupKey {
 		t.Errorf("key must ignore time of day: %v", err)
 	}
@@ -172,11 +188,11 @@ func TestParseRejects(t *testing.T) {
 		"wrong turnover": {good, standardFooter("1", "2", "10,00", "30,00"), "turnover"},
 		"no footer":      {good, nil, "incomplete"},
 	} {
-		if _, errs, err := Parse(workbook(t, c.rows, c.footer)); err == nil || len(errs) > 0 || !strings.Contains(err.Error(), c.want) {
+		if _, errs, err := parseOne(workbook(t, c.rows, c.footer)); err == nil || len(errs) > 0 || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, errs = %v, want containing %q", name, err, errs, c.want)
 		}
 	}
-	if _, _, err := Parse([]byte("not xlsx")); err == nil {
+	if _, _, err := parseOne([]byte("not xlsx")); err == nil {
 		t.Error("garbage must be rejected")
 	}
 }
@@ -185,14 +201,15 @@ func TestParseRowErrors(t *testing.T) {
 	rows := sampleRows()
 	rows[0].debit = "40702810000000000000\n1\nЧУЖОЙ СЧЁТ" // не наш счёт на стороне дебета
 	rows[1].credSum, rows[1].debitSum = 14.5, 3.0         // обе суммы
-	_, errs, err := Parse(workbook(t, rows, standardFooter("1", "2", "10,00", "29,00")))
+	_, errs, err := parseOne(workbook(t, rows, standardFooter("1", "2", "10,00", "29,00")))
 	if err != nil || len(errs) != 2 || errs[0].Row != 12 || errs[1].Row != 13 {
 		t.Fatalf("errs = %v, err = %v", errs, err)
 	}
 }
 
 func TestKopecks(t *testing.T) {
-	for in, want := range map[string]int64{"4590": 459000, "3070.49": 307049, "0,00": 0, "": 0, "10": 1000, "67437.97": 6743797} {
+	for in, want := range map[string]int64{"4590": 459000, "3070.49": 307049, "0,00": 0, "": 0, "10": 1000, "67437.97": 6743797,
+		"740 895,36 (П)": 74089536, "1\u00a0000,50": 100050, "0,00 (П)": 0, "10.0": 1000} {
 		if got, err := kopecks(in); err != nil || got != want {
 			t.Errorf("kopecks(%q) = %d, %v; want %d", in, got, err, want)
 		}
@@ -221,7 +238,7 @@ func TestParseTextDates(t *testing.T) {
 	if err := wb.Write(&buf); err != nil {
 		t.Fatal(err)
 	}
-	st, errs, err := Parse(buf.Bytes())
+	st, errs, err := parseOne(buf.Bytes())
 	if err != nil || len(errs) != 0 || len(st.Operations) != 3 {
 		t.Fatalf("text dates: err = %v, errs = %v, ops = %d", err, errs, len(st.Operations))
 	}
@@ -243,8 +260,145 @@ func TestMismatchMentionsUnreadableDates(t *testing.T) {
 	if err := wb.Write(&buf); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = Parse(buf.Bytes())
+	_, _, err = parseOne(buf.Bytes())
 	if err == nil || !strings.Contains(err.Error(), "summary says 1 debit and 2 credit") || !strings.Contains(err.Error(), "has 1 and 1") || !strings.Contains(err.Error(), "unreadable date: 1") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// oldFooter — итог выгрузки прошлых лет: числа вместо строк, остатки с пробелами-разделителями и пометкой «(П)».
+func oldFooter(dc, cc float64, debit, credit string) func(*excelize.File, string, int) {
+	return func(f *excelize.File, sheet string, r int) {
+		set := func(cell string, v any) { _ = f.SetCellValue(sheet, cell, v) }
+		n := func(i int) string { return itoa(r + i) }
+		set("B"+n(0), "б/с")
+		set("H"+n(0), "Дебет")
+		set("L"+n(0), "Кредит")
+		set("T"+n(0), "Всего")
+		set("B"+n(2), "Количество операций")
+		set("H"+n(2), dc)
+		set("L"+n(2), cc)
+		set("B"+n(3), "Входящий остаток")
+		set("H"+n(3), "0,00")
+		set("L"+n(3), "1 000,00 (П)")
+		set("T"+n(3), "1 января 2020 г.")
+		set("B"+n(4), "Итого оборотов")
+		set("H"+n(4), debit)
+		set("L"+n(4), credit)
+		set("B"+n(5), "Исходящий остаток")
+		set("H"+n(5), "0,00")
+		set("L"+n(5), "1 004,50 (П)")
+	}
+}
+
+// oldRows — те же операции в оформлении прошлых лет: у плательщика-физлица ИНН «0», банк через запятую.
+func oldRows() []row {
+	rows := sampleRows()
+	rows[1].debit = "40817810505004023978\n0\nЗВЯГИНЦЕВА ЮЛИЯ ВИКТОРОВНА //"
+	for i := range rows {
+		rows[i].bank = "БИК 044525974, АО \"Тинькофф Банк\" Г. Москва"
+	}
+	return rows
+}
+
+func TestParseOldFormat(t *testing.T) {
+	st, errs, err := parseOne(workbook(t, oldRows(), oldFooter(1, 2, "10.0", "29.0")))
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("old format: err = %v, errs = %v", err, errs)
+	}
+	if st.DebitCount != 1 || st.CreditCount != 2 || *st.OpeningBalance != 100000 || *st.ClosingBalance != 100450 {
+		t.Errorf("totals: %+v opening=%d closing=%d", st, *st.OpeningBalance, *st.ClosingBalance)
+	}
+	in := st.Operations[1]
+	if in.CounterName != "ЗВЯГИНЦЕВА ЮЛИЯ ВИКТОРОВНА" || in.CounterINN != "" || in.BIK != "044525974" || in.BankName != `АО "Тинькофф Банк" Г. Москва` {
+		t.Errorf("counterparty of an old-format row: %+v", in)
+	}
+}
+
+func TestParseSeveralSheets(t *testing.T) {
+	const other = "40703810838000014811"
+	f := excelize.NewFile()
+	f.SetSheetName("Sheet1", ours)
+	buildSheet(t, f, ours, ours, sampleRows(), standardFooter("1", "2", "10,00", "29,00"))
+	// второй лист — пустой (по этому счёту операций за период не было), третий — с операциями
+	if _, err := f.NewSheet(other); err != nil {
+		t.Fatal(err)
+	}
+	buildSheet(t, f, other, other, nil, oldFooter(0, 0, "0.0", "0.0"))
+	const third = "40703810338000004376"
+	if _, err := f.NewSheet(third); err != nil {
+		t.Fatal(err)
+	}
+	buildSheet(t, f, third, third, sampleRows()[1:2], oldFooter(0, 1, "0.0", "14.5"))
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	sts, errs, err := Parse(buf.Bytes())
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("err = %v, errs = %v", err, errs)
+	}
+	if len(sts) != 2 || sts[0].Account != ours || sts[1].Account != third || !sts[0].MultiSheet || !sts[1].MultiSheet || sts[1].Sheet != third {
+		t.Fatalf("statements: %+v", sts)
+	}
+	// файл, где все листы пусты, — не выписка
+	f2 := excelize.NewFile()
+	f2.SetSheetName("Sheet1", other)
+	buildSheet(t, f2, other, other, nil, oldFooter(0, 0, "0.0", "0.0"))
+	var buf2 bytes.Buffer
+	_ = f2.Write(&buf2)
+	if _, _, err := Parse(buf2.Bytes()); err == nil || !strings.Contains(err.Error(), "no operations") {
+		t.Errorf("all-empty workbook: err = %v", err)
+	}
+}
+
+func TestColumnSynonyms(t *testing.T) {
+	data := workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00"))
+	wb, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = wb.SetCellValue(ours, "B10", "Дата операции")
+	_ = wb.SetCellValue(ours, "U10", "Назначение")
+	var buf bytes.Buffer
+	_ = wb.Write(&buf)
+	if st, errs, err := parseOne(buf.Bytes()); err != nil || len(errs) != 0 || len(st.Operations) != 3 {
+		t.Fatalf("synonyms: err = %v, errs = %v", err, errs)
+	}
+}
+
+// В старых выгрузках строки склеены вертикальным объединением ячеек; пустая строка внутри объединения не должна
+// читаться как повтор операции выше (excelize отдаёт значение якорной ячейки для всего диапазона).
+func TestMergedCellsAreNotDuplicatedOperations(t *testing.T) {
+	data := workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00"))
+	wb, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range []string{"B", "E", "I", "J", "N", "O", "Q", "R", "U"} {
+		if err := wb.MergeCell(ours, col+"14", col+"15"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	_ = wb.Write(&buf)
+	st, errs, err := parseOne(buf.Bytes())
+	if err != nil || len(errs) != 0 || len(st.Operations) != 3 || st.CreditCount != 2 {
+		t.Fatalf("merged rows must not add operations: err = %v, errs = %v, ops = %d", err, errs, len(st.Operations))
+	}
+}
+
+func TestUnknownLayoutErrorListsHeaderLabels(t *testing.T) {
+	data := workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00"))
+	wb, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = wb.SetCellValue(ours, "N10", "Приход") // колонка с новой подписью
+	var buf bytes.Buffer
+	_ = wb.Write(&buf)
+	_, _, err = Parse(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), `column "Сумма по кредиту" not found`) || !strings.Contains(err.Error(), `"Приход"`) || !strings.Contains(err.Error(), `"Назначение платежа"`) {
 		t.Errorf("err = %v", err)
 	}
 }

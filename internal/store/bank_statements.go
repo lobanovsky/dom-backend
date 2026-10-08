@@ -121,7 +121,12 @@ func (s *BankStatements) Import(ctx context.Context, fileName string, data []byt
 		return res, mapErr(err)
 	}
 
-	sum := sha256.Sum256(data)
+	// Ключ файла: содержимое; у файла с несколькими выписками (по листу на счёт) ещё и лист, иначе уникальность ломала бы вторую.
+	keyed := data
+	if st.MultiSheet {
+		keyed = append(append(append([]byte{}, data...), 0), st.Sheet...)
+	}
+	sum := sha256.Sum256(keyed)
 	hash := hex.EncodeToString(sum[:])
 	var existing int64
 	var existingName string

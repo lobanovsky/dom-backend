@@ -156,16 +156,17 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 			summary.FilesIgnored++
 			continue
 		}
-		fr := h.importOne(r.Context(), f, base)
-		switch fr.Status {
-		case fileImported:
-			loadedAs[fr.Result.StatementID] = f.Name
-		case fileDuplicate:
-			if path, ok := loadedAs[fr.StatementID]; ok {
-				fr.DuplicateOf = path
+		for _, fr := range h.importOne(r.Context(), f, base) {
+			switch fr.Status {
+			case fileImported:
+				loadedAs[fr.Result.StatementID] = fr.FileName
+			case fileDuplicate:
+				if path, ok := loadedAs[fr.StatementID]; ok {
+					fr.DuplicateOf = path
+				}
 			}
+			results = append(results, fr)
 		}
-		results = append(results, fr)
 	}
 
 	for _, fr := range results {
@@ -189,28 +190,39 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary})
 }
 
-func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, base string) statementFileResult {
-	fr := statementFileResult{FileName: f.Name}
+// importOne разбирает файл и загружает выписку каждого листа с операциями (в старых выгрузках по листу на счёт).
+// Результатов столько же, сколько выписок; если разобрать не удалось — один результат с причиной.
+func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, base string) []statementFileResult {
 	data, err := f.open()
 	if err != nil {
-		fr.Status, fr.Error = fileError, err.Error()
-		return fr
+		return []statementFileResult{{FileName: f.Name, Status: fileError, Error: err.Error()}}
 	}
-	st, rowErrs, err := bankstatement.Parse(data)
+	statements, rowErrs, err := bankstatement.Parse(data)
 	switch {
 	case err != nil:
-		fr.Status, fr.Error = fileInvalid, err.Error()
-		return fr
+		return []statementFileResult{{FileName: f.Name, Status: fileInvalid, Error: err.Error()}}
 	case len(rowErrs) > 0:
-		fr.Status, fr.Error, fr.Rows = fileInvalid, "file contains invalid rows, nothing was imported", rowErrs
-		return fr
+		return []statementFileResult{{FileName: f.Name, Status: fileInvalid, Error: "file contains invalid rows, nothing was imported", Rows: rowErrs}}
 	}
-	// Номер счёта в имени файла, если он есть, должен совпадать со счётом выписки.
-	if named := sberregistry.AccountsInName(base); len(named) > 0 && !contains(named, st.Account) {
+	var out []statementFileResult
+	for _, st := range statements {
+		name, shown := base, f.Name
+		if st.MultiSheet {
+			name, shown = base+" — лист "+st.Sheet, f.Name+" — лист "+st.Sheet
+		}
+		out = append(out, h.importStatement(ctx, name, shown, data, st))
+	}
+	return out
+}
+
+func (h bankStatementHandlers) importStatement(ctx context.Context, name, shown string, data []byte, st *model.ParsedStatement) statementFileResult {
+	fr := statementFileResult{FileName: shown}
+	// Номер счёта в имени файла, если он есть, должен совпадать со счётом выписки (у файла с несколькими листами имя о счёте не говорит).
+	if named := sberregistry.AccountsInName(name); !st.MultiSheet && len(named) > 0 && !contains(named, st.Account) {
 		fr.Status, fr.Error = fileInvalid, "file name refers to account "+named[0]+", but the statement is for account "+st.Account
 		return fr
 	}
-	res, err := h.s.Import(ctx, base, data, st)
+	res, err := h.s.Import(ctx, name, data, st)
 	var exists *store.StatementExistsError
 	var allDup *store.StatementAllDuplicatesError
 	var unknown *store.UnknownBankAccountError
@@ -227,7 +239,7 @@ func (h bankStatementHandlers) importOne(ctx context.Context, f registryFile, ba
 	case errors.As(err, &se):
 		fr.Status, fr.Error = fileError, se.Msg
 	default:
-		slog.Error("statement import", "file", f.Name, "err", err)
+		slog.Error("statement import", "file", shown, "err", err)
 		fr.Status, fr.Error = fileError, "internal error"
 	}
 	return fr

@@ -23,7 +23,7 @@ import (
 var (
 	accountRe = regexp.MustCompile(`(?:^|\D)(\d{20})(?:\D|$)`)
 	dateRu    = regexp.MustCompile(`(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})`)
-	bikRe     = regexp.MustCompile(`БИК\s*(\d{9})\s*(.*)`)
+	bikRe     = regexp.MustCompile(`БИК\s*[:,]?\s*(\d{9})[\s,;]*(.*)`)
 	months    = map[string]time.Month{
 		"января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
 		"июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
@@ -35,31 +35,77 @@ type columns struct {
 	date, debitBlock, creditBlock, debitSum, creditSum, doc, vo, bank, purpose int
 }
 
-// Parse разбирает файл. Ошибки данных собираются по строкам; err — файл в целом непригоден.
-func Parse(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) {
+// Parse разбирает файл: по выписке на каждый лист с таблицей операций. Листы без операций (в старых выгрузках бывает
+// лист на каждый счёт организации, и часть из них пуста) пропускаются. Ошибки данных собираются по строкам;
+// err возвращается, если файл в целом непригоден или итоги не сходятся.
+func Parse(data []byte) ([]*model.ParsedStatement, []model.ImportRowError, error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, fmt.Errorf("not a valid xlsx file")
 	}
 	defer f.Close()
 
-	sheet, headerRow, rows := findSheet(f)
-	if sheet == "" {
-		return nil, nil, fmt.Errorf(`statement header "Дата проводки" not found: not a СберБизнес statement`)
+	var (
+		out    []*model.ParsedStatement
+		errs   []model.ImportRowError
+		tables int
+	)
+	for _, sheet := range f.GetSheetList() {
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			continue
+		}
+		headerRow := findHeaderRow(rows)
+		if headerRow == 0 {
+			continue
+		}
+		tables++
+		st, rowErrs, err := parseSheet(f, sheet, rows, headerRow)
+		if err != nil {
+			if tables > 1 || len(f.GetSheetList()) > 1 {
+				return nil, nil, fmt.Errorf("sheet %q: %w", sheet, err)
+			}
+			return nil, nil, err
+		}
+		errs = append(errs, rowErrs...)
+		if st != nil {
+			out = append(out, st)
+		}
 	}
+	switch {
+	case tables == 0:
+		return nil, nil, fmt.Errorf(`statement header "Дата проводки" not found: not a СберБизнес statement`)
+	case len(errs) > 0:
+		return out, errs, nil
+	case len(out) == 0:
+		return nil, nil, fmt.Errorf("statement has no operations")
+	}
+	for _, st := range out {
+		st.MultiSheet = len(out) > 1
+	}
+	return out, nil, nil
+}
+
+// parseSheet разбирает один лист. Пустой лист (по итогу 0 операций) даёт (nil, nil, nil).
+func parseSheet(f *excelize.File, sheet string, rows [][]string, headerRow int) (*model.ParsedStatement, []model.ImportRowError, error) {
 	cols, err := findColumns(rows, headerRow)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	st := &model.ParsedStatement{}
+	st := &model.ParsedStatement{Sheet: sheet}
 	st.Account = findAccount(rows, headerRow, sheet)
 	if st.Account == "" {
 		return nil, nil, fmt.Errorf("our account number is not found in the statement header")
 	}
 	st.PeriodFrom, st.PeriodTo = findPeriod(rows, headerRow)
 
+	// В объединённых ячейках (старые выгрузки склеивают соседние строки и колонки) значение хранится только в левой верхней;
+	// excelize для остальных ячеек диапазона отдаёт то же значение, и пустая строка выглядела бы повторной операцией.
+	covered := coveredCells(f, sheet)
 	raw := func(col, row int) string {
+		if covered[[2]int{col, row}] {
+			return ""
+		}
 		name, _ := excelize.CoordinatesToCellName(col, row)
 		v, _ := f.GetCellValue(sheet, name, excelize.Options{RawCellValue: true})
 		return strings.TrimSpace(v)
@@ -95,11 +141,11 @@ func Parse(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) 
 	if len(errs) > 0 {
 		return st, errs, nil
 	}
-	if len(st.Operations) == 0 {
-		return nil, nil, fmt.Errorf("statement has no operations")
-	}
 	if err := checkFooter(st, rows, raw, headerRow, unreadable); err != nil {
 		return nil, nil, err
+	}
+	if len(st.Operations) == 0 {
+		return nil, nil, nil // итог сошёлся на нуле: пустой лист
 	}
 	if st.PeriodFrom == nil || st.PeriodTo == nil {
 		first, last := st.Operations[0].At, st.Operations[0].At
@@ -118,56 +164,77 @@ func Parse(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) 
 
 func day(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC) }
 
-// findSheet ищет лист с заголовком таблицы и возвращает строки листа (для поиска подписей).
-func findSheet(f *excelize.File) (sheet string, headerRow int, rows [][]string) {
-	for _, name := range f.GetSheetList() {
-		rs, err := f.GetRows(name)
-		if err != nil {
-			continue
-		}
-		for i, row := range rs {
-			for _, c := range row {
-				if label(c) == "Дата проводки" {
-					return name, i + 1, rs
-				}
+// findHeaderRow возвращает номер строки (с 1) с заголовком таблицы операций или 0.
+func findHeaderRow(rows [][]string) int {
+	for i, row := range rows {
+		for _, c := range row {
+			if matches(c, labels.date) {
+				return i + 1
 			}
 		}
 	}
-	return "", 0, nil
+	return 0
 }
 
 // label приводит подпись к виду без переводов строк и лишних пробелов.
 func label(s string) string { return strings.Join(strings.Fields(s), " ") }
 
+// labels — допустимые подписи колонок. Форматы выписок отличаются по годам и версиям СберБизнеса; новая подпись
+// добавляется сюда, остальной разбор не меняется. Сравнение без учёта регистра и лишних пробелов.
+var labels = struct {
+	date, debitSum, creditSum, doc, vo, bank, purpose, debit, credit []string
+}{
+	date:      []string{"Дата проводки", "Дата операции"},
+	debitSum:  []string{"Сумма по дебету", "Дебет, сумма"},
+	creditSum: []string{"Сумма по кредиту", "Кредит, сумма"},
+	doc:       []string{"№ документа", "Номер документа", "№ док."},
+	vo:        []string{"ВО", "Вид операции"},
+	bank:      []string{"Банк (БИК и наименование)", "Банк (БИК и наименование банка)"},
+	purpose:   []string{"Назначение платежа", "Назначение"},
+	debit:     []string{"Дебет"},
+	credit:    []string{"Кредит"},
+}
+
+func matches(cell string, variants []string) bool {
+	c := strings.ToLower(label(cell))
+	for _, v := range variants {
+		if c == strings.ToLower(v) {
+			return true
+		}
+	}
+	return false
+}
+
 func findColumns(rows [][]string, headerRow int) (columns, error) {
 	var c columns
-	find := func(row []string, want string) int {
+	find := func(row []string, variants []string) int {
 		for i, v := range row {
-			if label(v) == want {
+			if matches(v, variants) {
 				return i + 1
 			}
 		}
 		return 0
 	}
 	head := rows[headerRow-1]
-	c.date = find(head, "Дата проводки")
-	c.debitSum = find(head, "Сумма по дебету")
-	c.creditSum = find(head, "Сумма по кредиту")
-	c.doc = find(head, "№ документа")
-	c.vo = find(head, "ВО")
-	c.bank = find(head, "Банк (БИК и наименование)")
-	c.purpose = find(head, "Назначение платежа")
+	c.date = find(head, labels.date)
+	c.debitSum = find(head, labels.debitSum)
+	c.creditSum = find(head, labels.creditSum)
+	c.doc = find(head, labels.doc)
+	c.vo = find(head, labels.vo)
+	c.bank = find(head, labels.bank)
+	c.purpose = find(head, labels.purpose)
 	if headerRow < len(rows) {
 		sub := rows[headerRow]
-		c.debitBlock = find(sub, "Дебет")
-		c.creditBlock = find(sub, "Кредит")
+		c.debitBlock = find(sub, labels.debit)
+		c.creditBlock = find(sub, labels.credit)
 	}
 	for name, v := range map[string]int{
-		"Дата проводки": c.date, "Сумма по дебету": c.debitSum, "Сумма по кредиту": c.creditSum, "№ документа": c.doc,
-		"Банк (БИК и наименование)": c.bank, "Назначение платежа": c.purpose, "Дебет": c.debitBlock, "Кредит": c.creditBlock,
+		labels.date[0]: c.date, labels.debitSum[0]: c.debitSum, labels.creditSum[0]: c.creditSum, labels.doc[0]: c.doc,
+		labels.bank[0]: c.bank, labels.purpose[0]: c.purpose, labels.debit[0]: c.debitBlock, labels.credit[0]: c.creditBlock,
 	} {
 		if v == 0 {
-			return c, fmt.Errorf("column %q not found in the statement header", name)
+			// Перечень найденных подписей попадает в журнал: по нему видно, как выглядит новый формат выписки.
+			return c, fmt.Errorf("column %q not found in the statement header (found: %s)", name, headerLabels(rows, headerRow))
 		}
 	}
 	return c, nil
@@ -223,8 +290,10 @@ func parseBlock(s string) block {
 		b.account = lines[0]
 		lines = lines[1:]
 	}
-	if len(lines) > 0 && isINN(lines[0]) {
-		b.inn = lines[0]
+	if len(lines) > 0 && (isINN(lines[0]) || lines[0] == "0") { // «0» — у плательщика нет ИНН
+		if lines[0] != "0" {
+			b.inn = lines[0]
+		}
 		lines = lines[1:]
 	}
 	name := strings.Join(lines, " ")
@@ -296,9 +365,14 @@ func parseOperation(ours string, c columns, raw func(col, row int) string, r int
 	return op, nil
 }
 
-// kopecks разбирает сумму «4590», «3070.49», «0,00» в копейки; пусто — 0.
+// kopecks разбирает сумму в копейки: «4590», «3070.49», «0,00», «740 895,36 (П)» (пробелы-разделители тысяч и пометка
+// «(П)»/«(А)» допускаются); пусто — 0.
 func kopecks(s string) (int64, error) {
-	s = strings.ReplaceAll(strings.TrimSpace(s), ",", ".")
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, "("); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	s = strings.NewReplacer(",", ".", " ", "", "\u00a0", "", "\u202f", "").Replace(s)
 	if s == "" {
 		return 0, nil
 	}
@@ -307,6 +381,15 @@ func kopecks(s string) (int64, error) {
 		return 0, fmt.Errorf("%q is not an amount", s)
 	}
 	return int64(v*100 + 0.5), nil
+}
+
+// count читает число операций: «23» или «23.0».
+func count(s string) (int, bool) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v < 0 || v != float64(int(v)) {
+		return 0, false
+	}
+	return int(v), true
 }
 
 // dedupKey опознаёт операцию в пересекающихся выписках: направление, дата (без времени), номер документа,
@@ -347,9 +430,9 @@ func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row i
 	}
 	value := func(label string, col int) (int64, error) { return kopecks(raw(col, rowOf[label])) }
 
-	dc, err1 := strconv.Atoi(raw(debitCol, rowOf["Количество операций"]))
-	cc, err2 := strconv.Atoi(raw(creditCol, rowOf["Количество операций"]))
-	if err1 != nil || err2 != nil || dc != st.DebitCount || cc != st.CreditCount {
+	dc, ok1 := count(raw(debitCol, rowOf["Количество операций"]))
+	cc, ok2 := count(raw(creditCol, rowOf["Количество операций"]))
+	if !ok1 || !ok2 || dc != st.DebitCount || cc != st.CreditCount {
 		msg := fmt.Sprintf("summary says %s debit and %s credit operations, the statement has %d and %d",
 			raw(debitCol, rowOf["Количество операций"]), raw(creditCol, rowOf["Количество операций"]), st.DebitCount, st.CreditCount)
 		if unreadable > 0 {
@@ -394,4 +477,44 @@ func cellDate(v string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// coveredCells возвращает ячейки объединённых диапазонов, кроме левой верхней (в ней лежит значение).
+func coveredCells(f *excelize.File, sheet string) map[[2]int]bool {
+	out := map[[2]int]bool{}
+	merged, err := f.GetMergeCells(sheet)
+	if err != nil {
+		return out
+	}
+	for _, m := range merged {
+		c1, r1, err1 := excelize.CellNameToCoordinates(m.GetStartAxis())
+		c2, r2, err2 := excelize.CellNameToCoordinates(m.GetEndAxis())
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		for c := c1; c <= c2; c++ {
+			for r := r1; r <= r2; r++ {
+				if c != c1 || r != r1 {
+					out[[2]int{c, r}] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+// headerLabels перечисляет непустые подписи строки заголовка и строки под ней.
+func headerLabels(rows [][]string, headerRow int) string {
+	var found []string
+	for _, i := range []int{headerRow - 1, headerRow} {
+		if i >= len(rows) {
+			continue
+		}
+		for _, c := range rows[i] {
+			if l := label(c); l != "" {
+				found = append(found, strconv.Quote(l))
+			}
+		}
+	}
+	return strings.Join(found, ", ")
 }

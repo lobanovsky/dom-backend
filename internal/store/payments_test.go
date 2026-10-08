@@ -351,11 +351,25 @@ func TestStatementImportAndOverlap(t *testing.T) {
 	if _, err := stmts.Import(ctx, "C.xlsx", []byte("file C"), stC); !errors.As(err, &allDup) || allDup.Total != 2 || !errors.Is(err, ErrConflict) {
 		t.Errorf("all known: err = %v", err)
 	}
+	// выписки по двум листам одного файла: ключ файла включает лист, поэтому вторая не считается дублем первой
+	two := func(sheet string) *model.ParsedStatement {
+		return &model.ParsedStatement{Account: acct, Sheet: sheet, MultiSheet: true, DebitCount: 0, CreditCount: 1,
+			Operations: []model.StatementOperation{in("k-"+sheet, 15, 3000, "СИДОРОВ")}}
+	}
+	if _, err := stmts.Import(ctx, "multi.xlsx — лист a", []byte("multi file"), two("a")); err != nil {
+		t.Fatalf("sheet a: %v", err)
+	}
+	if _, err := stmts.Import(ctx, "multi.xlsx — лист b", []byte("multi file"), two("b")); err != nil {
+		t.Fatalf("sheet b of the same file must be accepted: %v", err)
+	}
+	if _, err := stmts.Import(ctx, "multi.xlsx — лист a", []byte("multi file"), two("a")); !errors.As(err, &exists) {
+		t.Errorf("the same sheet twice must be a duplicate: %v", err)
+	}
 	var unknown *UnknownBankAccountError
 	if _, err := stmts.Import(ctx, "D.xlsx", []byte("file D"), &model.ParsedStatement{Account: "40703810000000000000", Operations: stC.Operations}); !errors.As(err, &unknown) || !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown account: err = %v", err)
 	}
-	if list, err := stmts.List(ctx, model.BankStatementFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 2 {
+	if list, err := stmts.List(ctx, model.BankStatementFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 4 {
 		t.Errorf("failed imports must not leave statements: %d, err = %v", len(list), err)
 	}
 	if list, err := stmts.List(ctx, model.BankStatementFilter{BankAccountID: &bank.ID, Q: ptr("b.xl")}, 50, 0); err != nil || len(list) != 1 {

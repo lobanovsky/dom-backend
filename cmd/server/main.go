@@ -14,16 +14,20 @@ import (
 	"dom-backend/internal/config"
 	"dom-backend/internal/db"
 	"dom-backend/internal/httpapi"
+	"dom-backend/internal/logx"
 	"dom-backend/internal/store"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// LOG_FILE (необязательно): журнал ещё и в файл с ротацией; читается до загрузки конфига, чтобы ошибки конфига тоже попали в журнал.
+	log, closeLog := logx.New(os.Getenv("LOG_FILE"))
 	slog.SetDefault(log)
 	if err := run(log); err != nil {
 		log.Error("fatal", "err", err)
+		closeLog()
 		os.Exit(1)
 	}
+	closeLog()
 }
 
 func run(log *slog.Logger) error {

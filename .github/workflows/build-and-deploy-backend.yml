@@ -138,6 +138,9 @@ jobs:
 
             docker network inspect dom-network >/dev/null 2>&1 || docker network create dom-network
 
+            # Каталог журнала на хосте (монтируется в контейнер); создаём от имени пользователя деплоя, чтобы его можно было читать.
+            mkdir -p logs
+
             had_previous=false
             if [ -f .env ] && [ -f docker-compose.yml ]; then
               cp .env .env.rollback

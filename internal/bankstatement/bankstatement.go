@@ -67,12 +67,17 @@ func Parse(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) 
 
 	var errs []model.ImportRowError
 	seen := map[string]int{}
+	unreadable := 0 // строки с суммой, но с датой, которую не удалось прочитать
 	for r := headerRow + 2; r <= len(rows); r++ {
-		serial, err := strconv.ParseFloat(raw(cols.date, r), 64)
-		if err != nil || serial < 20000 {
-			continue // пустая строка, итог или подпись
+		at, ok := cellDate(raw(cols.date, r))
+		if !ok {
+			// пустая строка, итог или подпись; но строка с суммой и непонятной датой — потерянная операция
+			if raw(cols.date, r) != "" && (raw(cols.debitSum, r) != "" || raw(cols.creditSum, r) != "") {
+				unreadable++
+			}
+			continue
 		}
-		op, err := parseOperation(st.Account, cols, raw, r, serial)
+		op, err := parseOperation(st.Account, cols, raw, r, at)
 		if err != nil {
 			errs = append(errs, model.ImportRowError{Row: r, Error: err.Error()})
 			continue
@@ -93,7 +98,7 @@ func Parse(data []byte) (*model.ParsedStatement, []model.ImportRowError, error) 
 	if len(st.Operations) == 0 {
 		return nil, nil, fmt.Errorf("statement has no operations")
 	}
-	if err := checkFooter(st, rows, raw, headerRow, cols.date); err != nil {
+	if err := checkFooter(st, rows, raw, headerRow, unreadable); err != nil {
 		return nil, nil, err
 	}
 	if st.PeriodFrom == nil || st.PeriodTo == nil {
@@ -242,13 +247,8 @@ func isINN(s string) bool {
 	return true
 }
 
-func parseOperation(ours string, c columns, raw func(col, row int) string, r int, serial float64) (model.StatementOperation, error) {
-	op := model.StatementOperation{Row: r}
-	at, err := excelize.ExcelDateToTime(serial, false)
-	if err != nil {
-		return op, fmt.Errorf("date is not valid")
-	}
-	op.At = at
+func parseOperation(ours string, c columns, raw func(col, row int) string, r int, at time.Time) (model.StatementOperation, error) {
+	op := model.StatementOperation{Row: r, At: at}
 
 	debit, err := kopecks(raw(c.debitSum, r))
 	if err != nil {
@@ -323,7 +323,7 @@ func dedupKey(op model.StatementOperation, seen map[string]int) string {
 }
 
 // checkFooter сверяет число операций и обороты с итогом внизу выписки и читает остатки.
-func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row int) string, headerRow, labelCol int) error {
+func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row int) string, headerRow, unreadable int) error {
 	rowOf := map[string]int{}
 	debitCol, creditCol := 0, 0
 	for i := headerRow; i < len(rows); i++ {
@@ -350,8 +350,12 @@ func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row i
 	dc, err1 := strconv.Atoi(raw(debitCol, rowOf["Количество операций"]))
 	cc, err2 := strconv.Atoi(raw(creditCol, rowOf["Количество операций"]))
 	if err1 != nil || err2 != nil || dc != st.DebitCount || cc != st.CreditCount {
-		return fmt.Errorf("summary says %s debit and %s credit operations, the statement has %d and %d",
+		msg := fmt.Sprintf("summary says %s debit and %s credit operations, the statement has %d and %d",
 			raw(debitCol, rowOf["Количество операций"]), raw(creditCol, rowOf["Количество операций"]), st.DebitCount, st.CreditCount)
+		if unreadable > 0 {
+			msg += fmt.Sprintf(" (rows with an unreadable date: %d)", unreadable)
+		}
+		return fmt.Errorf("%s", msg)
 	}
 	dt, err1 := value("Итого оборотов", debitCol)
 	ct, err2 := value("Итого оборотов", creditCol)
@@ -372,6 +376,22 @@ func checkFooter(st *model.ParsedStatement, rows [][]string, raw func(col, row i
 		return &v
 	}
 	st.OpeningBalance, st.ClosingBalance = signed("Входящий остаток"), signed("Исходящий остаток")
-	_ = labelCol
 	return nil
+}
+
+// cellDate читает дату проводки: число Excel (дата-время) или текст «05.01.2026», «05.01.2026 04:31:38», «2026-01-05 04:31:38».
+func cellDate(v string) (time.Time, bool) {
+	if serial, err := strconv.ParseFloat(v, 64); err == nil {
+		if serial < 20000 {
+			return time.Time{}, false
+		}
+		t, err := excelize.ExcelDateToTime(serial, false)
+		return t, err == nil
+	}
+	for _, layout := range []string{"02.01.2006 15:04:05", "02.01.2006 15:04", "02.01.2006", "2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02", "02.01.06 15:04:05", "02.01.06"} {
+		if t, err := time.Parse(layout, strings.TrimSpace(v)); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

@@ -39,3 +39,4 @@ tmp/
 
 # Локальные настройки Claude Code
 .claude/settings.local.json
+logs/

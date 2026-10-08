@@ -169,6 +169,7 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 	}
 
 	for _, fr := range results {
+		logStatementFile(fr)
 		switch fr.Status {
 		case fileImported:
 			summary.FilesImported++
@@ -183,6 +184,8 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 	if results == nil {
 		results = []statementFileResult{}
 	}
+	slog.Info("bank statements import", "files", len(results), "imported", summary.FilesImported, "failed", summary.FilesFailed,
+		"ignored", summary.FilesIgnored, "incoming", summary.IncomingCreated, "outgoing", summary.OutgoingCreated, "skipped", summary.OperationsSkipped)
 	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary})
 }
 
@@ -237,4 +240,23 @@ func contains(items []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// logStatementFile пишет итог по файлу: причина отказа попадает в журнал, чтобы её можно было найти без браузера.
+func logStatementFile(fr statementFileResult) {
+	attrs := []any{"file", fr.FileName, "status", fr.Status}
+	if fr.Result != nil {
+		attrs = append(attrs, "statement_id", fr.Result.StatementID, "incoming", fr.Result.Incoming, "outgoing", fr.Result.Outgoing, "skipped", fr.Result.SkippedDuplicates)
+	}
+	if fr.Error != "" {
+		attrs = append(attrs, "error", fr.Error)
+	}
+	if len(fr.Rows) > 0 {
+		attrs = append(attrs, "bad_rows", len(fr.Rows), "first_bad_row", fr.Rows[0])
+	}
+	if fr.Status == fileImported || fr.Status == fileDuplicate || fr.Status == fileAllDuplicates {
+		slog.Info("statement file", attrs...)
+		return
+	}
+	slog.Warn("statement file", attrs...)
 }

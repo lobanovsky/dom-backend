@@ -201,3 +201,50 @@ func TestKopecks(t *testing.T) {
 		t.Error("expected error")
 	}
 }
+
+func TestParseTextDates(t *testing.T) {
+	rows := sampleRows()
+	f := excelize.NewFile()
+	_ = f
+	// те же операции, но дата проводки записана текстом: выписки старых лет бывают такими
+	data := workbook(t, rows, standardFooter("1", "2", "10,00", "29,00"))
+	wb, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range []string{"05.01.2026 04:31:38", "06.01.2026", "2026-01-06 11:02:03"} {
+		if err := wb.SetCellValue(ours, "B"+itoa(12+i), text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := wb.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	st, errs, err := Parse(buf.Bytes())
+	if err != nil || len(errs) != 0 || len(st.Operations) != 3 {
+		t.Fatalf("text dates: err = %v, errs = %v, ops = %d", err, errs, len(st.Operations))
+	}
+	if st.Operations[0].At.Format("2006-01-02 15:04:05") != "2026-01-05 04:31:38" || st.Operations[1].At.Format("2006-01-02") != "2026-01-06" {
+		t.Errorf("dates: %v %v", st.Operations[0].At, st.Operations[1].At)
+	}
+}
+
+func TestMismatchMentionsUnreadableDates(t *testing.T) {
+	data := workbook(t, sampleRows(), standardFooter("1", "2", "10,00", "29,00"))
+	wb, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wb.SetCellValue(ours, "B13", "вчера"); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := wb.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = Parse(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "summary says 1 debit and 2 credit") || !strings.Contains(err.Error(), "has 1 and 1") || !strings.Contains(err.Error(), "unreadable date: 1") {
+		t.Errorf("err = %v", err)
+	}
+}

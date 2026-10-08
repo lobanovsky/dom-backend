@@ -192,6 +192,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 	}
 
 	for _, fr := range results {
+		logRegistryFile(fr)
 		switch fr.Status {
 		case fileImported:
 			summary.FilesImported++
@@ -207,6 +208,8 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 	if results == nil {
 		results = []registryFileResult{}
 	}
+	slog.Info("payment registries import", "files", len(results), "imported", summary.FilesImported, "failed", summary.FilesFailed,
+		"ignored", summary.FilesIgnored, "payments", summary.PaymentsCreated, "skipped", summary.PaymentsSkipped, "linked", summary.Linked, "unlinked", summary.Unlinked)
 	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary})
 }
 
@@ -267,4 +270,23 @@ func readUpload(open func() (multipart.File, error), size int64) ([]byte, error)
 		return nil, fmt.Errorf("file is too large (max %d MB)", limit>>20)
 	}
 	return data, nil
+}
+
+// logRegistryFile пишет итог по файлу реестра: причина отказа попадает в журнал.
+func logRegistryFile(fr registryFileResult) {
+	attrs := []any{"file", fr.FileName, "status", fr.Status}
+	if fr.Result != nil {
+		attrs = append(attrs, "registry_id", fr.Result.RegistryID, "created", fr.Result.Created, "linked", fr.Result.Linked, "unlinked", fr.Result.Unlinked, "skipped", fr.Result.SkippedDuplicates)
+	}
+	if fr.Error != "" {
+		attrs = append(attrs, "error", fr.Error)
+	}
+	if len(fr.Rows) > 0 {
+		attrs = append(attrs, "bad_rows", len(fr.Rows), "first_bad_row", fr.Rows[0])
+	}
+	if fr.Status == fileImported || fr.Status == fileDuplicate || fr.Status == fileAllDuplicates {
+		slog.Info("registry file", attrs...)
+		return
+	}
+	slog.Warn("registry file", attrs...)
 }

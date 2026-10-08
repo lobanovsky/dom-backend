@@ -51,6 +51,10 @@ Adding an entity: migration → model + `Validate()` → store file → httpapi 
 - `PUT` replaces the whole record (omitted optional fields become `null`); there is no `PATCH`.
 - Defaults applied by handlers before `Validate()`: ownership share 1/1, residency `relation=other`, account `purpose=utilities`/`status=active`.
 
+## Logging
+
+`internal/logx` sets up slog JSON to stdout plus, when `LOG_FILE` is set, a lumberjack-rotated file; `docker-compose.yml` sets `LOG_FILE=/logs/dom-backend.log` and mounts `./logs` (the deploy script does `mkdir -p logs`), so logs survive container re-creation. `httpapi.logRequests` (wraps the whole router) logs one `request` line per call without query/body (names appear in search params) and skips `/healthz`. Import handlers log each file's status and failure reason (`registry file` / `statement file`) — validation failures are not HTTP errors, so without these lines they would leave no trace.
+
 ## CI/CD
 
 `.github/workflows/build-and-deploy-backend.yml` (adapted from the author's `dr-notif-backend` project): test → publish image to Docker Hub → SSH deploy to the directory in secret `DEPLOY_HOST_PROJECT_PATH`, with `/healthz` check and rollback. Triggers on branch `master`. Production DB location is still undecided; secrets are listed in README. `ADMIN_PASSWORD_HASH` must have every `$` doubled (`$$`) in any `.env` read by docker compose.

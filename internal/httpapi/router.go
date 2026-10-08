@@ -69,5 +69,5 @@ func NewRouter(d Deps) http.Handler {
 	accountHandlers{d.Accounts}.register(api)
 	accountHolderHandlers{d.Holders}.register(api)
 	mux.Handle("/api/v1/", a.require(api))
-	return mux
+	return logRequests(mux)
 }

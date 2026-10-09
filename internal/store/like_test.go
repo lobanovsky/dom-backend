@@ -27,3 +27,12 @@ func deref(p *string) string {
 	}
 	return *p
 }
+
+func TestExactPattern(t *testing.T) {
+	if exactPattern(nil) != nil || exactPattern(ptr(" ")) != nil {
+		t.Error("empty input must give nil")
+	}
+	if got := *exactPattern(ptr(" 5_% ")); got != `5\_\%` {
+		t.Errorf("exactPattern = %q", got)
+	}
+}

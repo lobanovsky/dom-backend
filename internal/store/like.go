@@ -22,3 +22,12 @@ func prefixPattern(q *string) *string {
 	p := likeEscaper.Replace(strings.TrimSpace(*q)) + "%"
 	return &p
 }
+
+// exactPattern — шаблон ILIKE «совпадает целиком» (спецсимволы экранируются); nil или пустая строка — nil.
+func exactPattern(q *string) *string {
+	if q == nil || strings.TrimSpace(*q) == "" {
+		return nil
+	}
+	p := likeEscaper.Replace(strings.TrimSpace(*q))
+	return &p
+}

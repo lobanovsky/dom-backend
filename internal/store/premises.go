@@ -20,7 +20,8 @@ func (s *PremisesStore) List(ctx context.Context, f model.PremisesFilter, limit,
 		   AND ($3::text IS NULL OR number = $3)
 		   AND ($4::text IS NULL OR number ILIKE $4)
 		   AND (deleted_at IS NOT NULL) = $5
-		 ORDER BY id LIMIT $6 OFFSET $7`, f.BuildingID, f.Kind, f.Number, prefixPattern(f.Q), f.Deleted, limit, offset))
+		 ORDER BY (number ILIKE $8) DESC NULLS LAST, id LIMIT $6 OFFSET $7`, // при поиске по q точное совпадение номера идёт первым
+		f.BuildingID, f.Kind, f.Number, prefixPattern(f.Q), f.Deleted, limit, offset, exactPattern(f.Q)))
 }
 
 func (s *PremisesStore) Get(ctx context.Context, id int64) (model.Premises, error) {

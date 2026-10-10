@@ -119,6 +119,9 @@ func (r *run) exec(ctx context.Context) (Result, error) {
 		_ = s.Journal.FinishRun(context.WithoutCancel(ctx), r.id, 0, 0, 0, 0, err.Error())
 		return res, err
 	}
+	if len(accounts) == 0 {
+		res.Errors = append(res.Errors, "no bank accounts to sync")
+	}
 	for _, acc := range accounts {
 		res.Accounts++
 		in, out, skipped, err := s.syncAccount(ctx, acc, r.from, r.to)

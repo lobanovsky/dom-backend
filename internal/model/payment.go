@@ -50,6 +50,7 @@ type IncomingPayment struct {
 	// Только чтение: название правила, номер лицевого счёта и номер реестра для отображения в списках.
 	RuleName              *string `json:"rule_name" db:"rule_name"`
 	PersonalAccountNumber *string `json:"personal_account_number" db:"personal_account_number"`
+	PremisesID            *int64  `json:"premises_id" db:"premises_id"` // помещение лицевого счёта: по нему в списке строится ссылка
 	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
 }
 

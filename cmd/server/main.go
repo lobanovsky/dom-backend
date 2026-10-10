@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"dom-backend/internal/db"
 	"dom-backend/internal/httpapi"
 	"dom-backend/internal/logx"
+	"dom-backend/internal/sberapi"
+	"dom-backend/internal/sbersync"
 	"dom-backend/internal/store"
 )
 
@@ -55,6 +58,25 @@ func run(log *slog.Logger) error {
 	accounts := store.NewAccounts(pool)
 	paymentRules := store.NewPaymentRules(pool)
 
+	sberStore := store.NewSber(pool)
+	if err := sberStore.AbortUnfinished(ctx); err != nil {
+		return err
+	}
+	bankStatements := store.NewBankStatements(pool)
+	var syncer httpapi.SberSyncer
+	sberInfo := httpapi.SberInfo{Ctx: ctx, Days: cfg.Sber.SyncDays}
+	if cfg.Sber.Enabled() {
+		sc, certExpires, err := newSberSyncer(cfg.Sber, sberStore, bankStatements, log)
+		if err != nil {
+			return err
+		}
+		syncer = sc
+		sberInfo.Configured, sberInfo.CertExpires, sberInfo.Interval = true, &certExpires, cfg.Sber.SyncInterval
+		go sc.Run(ctx, cfg.Sber.SyncInterval, cfg.Sber.SyncDays)
+	} else {
+		log.Info("sber api is not configured (SBER_CLIENT_ID is empty)")
+	}
+
 	srv := &http.Server{
 		Addr: cfg.ListenAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -71,7 +93,10 @@ func run(log *slog.Logger) error {
 			Importer:           store.NewImporter(pool),
 			Properties:         store.NewProperties(pool),
 			PaymentRegistries:  store.NewPaymentRegistries(pool),
-			BankStatements:     store.NewBankStatements(pool),
+			BankStatements:     bankStatements,
+			Sber:               sberStore,
+			SberSyncer:         syncer,
+			SberInfo:           sberInfo,
 			PaymentRules:       paymentRules,
 			RuleOrder:          paymentRules,
 			Assignments:        store.NewAssignments(pool),
@@ -103,4 +128,21 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// newSberSyncer собирает клиент Sber API (mTLS, токены в БД) и синхронизатор выписок.
+func newSberSyncer(c config.Sber, sber *store.Sber, statements *store.BankStatements, log *slog.Logger) (*sbersync.Syncer, time.Time, error) {
+	secret, err := os.ReadFile(c.ClientSecretFile)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	httpClient, certExpires, err := sberapi.NewHTTPClient(sberapi.TLSFiles{P12: c.TLSP12, PasswordFile: c.TLSP12PassFile, CADir: c.CADir})
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if left := time.Until(certExpires); left < 30*24*time.Hour {
+		log.Warn("sber client certificate expires soon", "expires", certExpires.Format("2006-01-02"))
+	}
+	client := sberapi.New(sberapi.Config{BaseURL: c.BaseURL, ClientID: c.ClientID, ClientSecret: strings.TrimSpace(string(secret))}, httpClient, sber, log)
+	return &sbersync.Syncer{Source: client, Statements: statements, Journal: sber, Tokens: sber, Log: log}, certExpires, nil
 }

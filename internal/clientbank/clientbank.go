@@ -232,7 +232,7 @@ func (f *file) statements() ([]*model.ParsedStatement, []model.ImportRowError, e
 				order = append(order, leg.account)
 			}
 			op := leg.op
-			op.DedupKey = dedupKey(op, seen[leg.account])
+			op.DedupKey = DedupKey(op, seen[leg.account])
 			st.Operations = append(st.Operations, op)
 			k := day{leg.account, op.At.Format("02.01.2006")}
 			if op.Outgoing {
@@ -384,14 +384,15 @@ func (d document) operation(amount int64, at time.Time, outgoing bool) model.Sta
 	}
 	return model.StatementOperation{
 		Row: d.line, At: at, Outgoing: outgoing, Amount: amount,
-		CounterAccount: counterAccount, CounterINN: inn, CounterName: collapse(name),
+		CounterAccount: counterAccount, CounterINN: inn, CounterName: Collapse(name),
 		DocNumber: f["Номер"], OperationType: f["ВидОплаты"],
-		BIK: f[side+"БИК"], BankName: collapse(f[side+"Банк1"]),
-		Purpose: collapse(f["НазначениеПлатежа"]), Raw: strings.Join(d.raw, "; "),
+		BIK: f[side+"БИК"], BankName: Collapse(f[side+"Банк1"]),
+		Purpose: Collapse(f["НазначениеПлатежа"]), Raw: strings.Join(d.raw, "; "),
 	}
 }
 
-func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+// Collapse схлопывает пробелы и переводы строк: так выписки 1С и Sber API дают одинаковый ключ дедупликации.
+func Collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func firstDate(values ...string) (time.Time, error) {
 	for _, v := range values {
@@ -428,9 +429,9 @@ func kopecks(s string) (int64, error) {
 
 func money(k int64) string { return fmt.Sprintf("%d.%02d", k/100, k%100) }
 
-// dedupKey опознаёт операцию в пересекающихся выгрузках: направление, дата, номер документа, сумма, счёт контрагента
+// DedupKey опознаёт операцию в пересекающихся выгрузках: направление, дата, номер документа, сумма, счёт контрагента
 // и назначение; одинаковые документы внутри файла различаются порядковым номером.
-func dedupKey(op model.StatementOperation, seen map[string]int) string {
+func DedupKey(op model.StatementOperation, seen map[string]int) string {
 	dir := "in"
 	if op.Outgoing {
 		dir = "out"

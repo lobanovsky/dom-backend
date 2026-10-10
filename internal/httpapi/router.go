@@ -31,6 +31,9 @@ type Deps struct {
 	IncomingPayments  crudStore[model.IncomingPayment, model.IncomingPaymentFilter]
 	OutgoingPayments  crudStore[model.OutgoingPayment, model.OutgoingPaymentFilter]
 	Properties        PropertiesStore
+	Sber              SberStore
+	SberSyncer        SberSyncer
+	SberInfo          SberInfo
 
 	PremisesOwnerships PremisesOwnershipsStore
 	PremisesAccounts   PremisesAccountsStore
@@ -56,6 +59,7 @@ func NewRouter(d Deps) http.Handler {
 	propertiesHandlers{d.Properties}.register(api)
 	paymentRegistryHandlers{d.PaymentRegistries}.register(api)
 	bankStatementHandlers{d.BankStatements}.register(api)
+	sberHandlers{d.Sber, d.SberSyncer, d.SberInfo}.register(api)
 	crudHandlers[model.PaymentRule, model.PaymentRuleFilter]{path: "/api/v1/payment-rules", store: d.PaymentRules, filter: paymentRuleFilter, prepare: func(r *model.PaymentRule) { r.SetDefaults() }}.register(api)
 	assignmentHandlers{d.Assignments, d.RuleOrder}.register(api)
 	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter}.register(api)

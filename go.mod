@@ -5,7 +5,11 @@ go 1.27.1
 require (
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.57.0
+	golang.org/x/text v0.42.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	software.sslmate.com/src/go-pkcs12 v0.7.3
 )
 
 require (
@@ -17,10 +21,7 @@ require (
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
-	github.com/xuri/excelize/v2 v2.11.0 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )

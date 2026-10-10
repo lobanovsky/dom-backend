@@ -97,6 +97,10 @@ jobs:
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          SBER_CLIENT_ID: ${{ secrets.SBER_CLIENT_ID }}
+          SBER_CLIENT_SECRET: ${{ secrets.SBER_CLIENT_SECRET }}
+          SBER_TLS_P12_BASE64: ${{ secrets.SBER_TLS_P12_BASE64 }}
+          SBER_TLS_P12_PASSWORD: ${{ secrets.SBER_TLS_P12_PASSWORD }}
         run: |
           # ADMIN_PASSWORD_HASH — bcrypt-хеш, всегда содержит "$" (например $2a$10$...).
           # docker compose интерпретирует "$" в .env как начало переменной, поэтому
@@ -112,6 +116,24 @@ jobs:
             echo "ADMIN_SESSION_SECRET=$ADMIN_SESSION_SECRET"
           } > .env.deploy
 
+          # Sber API (необязательно): пока секрет SBER_CLIENT_ID не задан, интеграция выключена.
+          # Публичные сертификаты Сбера (certs/sber) зашиты в образ; секреты (client_secret, .p12 и его пароль)
+          # раскладываем в secrets/ на сервере, откуда docker-compose монтирует их в контейнер только для чтения.
+          mkdir -p sber-secrets
+          : > sber-secrets/.keep
+          if [ -n "$SBER_CLIENT_ID" ]; then
+            printf '%s' "$SBER_CLIENT_SECRET" > sber-secrets/client_secret
+            printf '%s' "$SBER_TLS_P12_PASSWORD" > sber-secrets/tls.pass
+            printf '%s' "$SBER_TLS_P12_BASE64" | base64 -d > sber-secrets/tls.p12
+            {
+              echo "SBER_CLIENT_ID=$SBER_CLIENT_ID"
+              echo "SBER_CLIENT_SECRET_FILE=/secrets/client_secret"
+              echo "SBER_TLS_P12=/secrets/tls.p12"
+              echo "SBER_TLS_P12_PASSWORD_FILE=/secrets/tls.pass"
+              echo "SBER_CA_DIR=/etc/sber-ca"
+            } >> .env.deploy
+          fi
+
           sed "s|image: dom-backend|image: ${DOCKER_USERNAME}/dom-backend:${TAG}|" docker-compose.yml > docker-compose.yml.deploy
 
       - name: Copy deployment files
@@ -123,6 +145,18 @@ jobs:
           key: ${{ secrets.DEPLOY_HOST_KEY }}
           source: ".env.deploy,docker-compose.yml.deploy"
           target: ${{ secrets.DEPLOY_HOST_PROJECT_PATH }}
+
+      - name: Copy Sber API secrets
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST_IP }}
+          username: ${{ secrets.DEPLOY_HOST_USERNAME }}
+          port: ${{ secrets.DEPLOY_HOST_PORT }}
+          key: ${{ secrets.DEPLOY_HOST_KEY }}
+          source: "sber-secrets/*"
+          target: ${{ secrets.DEPLOY_HOST_PROJECT_PATH }}/secrets
+          strip_components: 1
+          overwrite: true
 
       - name: Deploy and verify
         uses: appleboy/ssh-action@v1.2.5
@@ -139,7 +173,9 @@ jobs:
             docker network inspect dom-network >/dev/null 2>&1 || docker network create dom-network
 
             # Каталог журнала на хосте (монтируется в контейнер); создаём от имени пользователя деплоя, чтобы его можно было читать.
-            mkdir -p logs
+            mkdir -p logs secrets
+            chmod 700 secrets
+            chmod 600 secrets/* 2>/dev/null || true
 
             had_previous=false
             if [ -f .env ] && [ -f docker-compose.yml ]; then

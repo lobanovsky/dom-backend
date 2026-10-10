@@ -5,6 +5,7 @@
 *.pem
 *.key
 private/
+sber-secrets/
 
 # Файлы деплоя, которые CI создаёт на лету
 .env.deploy

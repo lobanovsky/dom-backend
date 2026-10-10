@@ -12,6 +12,8 @@ services:
       LOG_FILE: /logs/dom-backend.log
     volumes:
       - ./logs:/logs
+      # сертификат и секреты Sber API (по желанию), см. private/sber/instruction
+      - ./secrets:/secrets:ro
     logging:
       driver: json-file
       options:

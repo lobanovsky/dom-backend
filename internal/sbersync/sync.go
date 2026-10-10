@@ -180,23 +180,43 @@ func (s *Syncer) syncAccount(ctx context.Context, account string, from, to time.
 	return r.Incoming, r.Outgoing, r.SkippedDuplicates, nil
 }
 
-// Run запускает опрос по расписанию, пока не отменён ctx. days — сколько последних дней (включая сегодня) запрашивать.
-func (s *Syncer) Run(ctx context.Context, interval time.Duration, days int) {
-	if interval <= 0 {
+// NextRun — ближайший запуск строго после now: сегодня или завтра в at («ЧЧ:ММ») по часовому поясу loc.
+func NextRun(now time.Time, at string, loc *time.Location) (time.Time, error) {
+	t, err := time.Parse("15:04", at)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("schedule time %q: want HH:MM", at)
+	}
+	n := now.In(loc)
+	next := time.Date(n.Year(), n.Month(), n.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+	if !next.After(n) {
+		next = time.Date(n.Year(), n.Month(), n.Day()+1, t.Hour(), t.Minute(), 0, 0, loc)
+	}
+	return next, nil
+}
+
+// Run запускает опрос раз в сутки в at («ЧЧ:ММ», часовой пояс loc), пока не отменён ctx. days — сколько последних дней
+// (включая сегодняшний) запрашивать: пропущенный запуск догоняется следующим. Пустое at — расписания нет.
+func (s *Syncer) Run(ctx context.Context, at string, loc *time.Location, days int) {
+	if at == "" {
 		return
 	}
-	s.Log.Info("sber sync scheduler started", "interval", interval.String(), "days", days)
-	timer := time.NewTimer(30 * time.Second)
-	defer timer.Stop()
 	for {
+		next, err := NextRun(time.Now(), at, loc)
+		if err != nil {
+			s.Log.Error("sber sync scheduler is not started", "err", err)
+			return
+		}
+		s.Log.Info("sber sync scheduled", "at", next.Format(time.RFC3339), "days", days)
+		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
 		case <-timer.C:
 		}
-		now := time.Now()
-		to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-		_, err := s.Sync(ctx, "schedule", to.AddDate(0, 0, -(days-1)), to)
+		now := time.Now().In(loc)
+		to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC) // календарная дата по loc
+		_, err = s.Sync(ctx, "schedule", to.AddDate(0, 0, -(days-1)), to)
 		switch {
 		case errors.Is(err, ErrBusy):
 			s.Log.Info("sber sync skipped: another run is in progress")
@@ -205,6 +225,5 @@ func (s *Syncer) Run(ctx context.Context, interval time.Duration, days int) {
 		case err != nil && !errors.Is(err, context.Canceled):
 			s.Log.Error("sber sync failed", "err", err)
 		}
-		timer.Reset(interval)
 	}
 }

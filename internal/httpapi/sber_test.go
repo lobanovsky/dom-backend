@@ -94,7 +94,7 @@ func TestSberSync(t *testing.T) {
 
 func TestSberTokensAndStatus(t *testing.T) {
 	st := &fakeSberStore{runs: []model.SberRun{{ID: 2}}}
-	h := sberHandlers{st, &fakeSyncer{}, SberInfo{Configured: true, Interval: time.Hour}}
+	h := sberHandlers{st, &fakeSyncer{}, SberInfo{Configured: true, SyncAt: "01:00", SyncTZ: "Europe/Moscow"}}
 
 	if rec := sberDo(h, "PUT", "/api/v1/sber/tokens", `{"refresh_token":"  "}`); rec.Code != 422 {
 		t.Errorf("empty token: %d", rec.Code)
@@ -106,7 +106,7 @@ func TestSberTokensAndStatus(t *testing.T) {
 	rec := sberDo(h, "GET", "/api/v1/sber/status", ``)
 	body := rec.Body.String()
 	if rec.Code != 200 || !strings.Contains(body, `"configured":true`) || !strings.Contains(body, `"tokens_set":false`) ||
-		!strings.Contains(body, `"running":true`) || !strings.Contains(body, `"schedule_interval":"1h0m0s"`) {
+		!strings.Contains(body, `"running":true`) || !strings.Contains(body, `"schedule_at":"01:00"`) || !strings.Contains(body, `"schedule_tz":"Europe/Moscow"`) {
 		t.Errorf("status: %d %s", rec.Code, body)
 	}
 	if strings.Contains(body, "abc") {

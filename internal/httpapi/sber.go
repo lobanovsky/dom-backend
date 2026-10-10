@@ -26,9 +26,10 @@ type SberSyncer interface {
 
 // SberInfo — настройки, известные только при старте (из окружения).
 type SberInfo struct {
-	Configured  bool       // заданы client_id/секрет/сертификат и сервис собран
-	CertExpires *time.Time // срок действия клиентского сертификата
-	Interval    time.Duration
+	Configured  bool            // заданы client_id/секрет/сертификат и сервис собран
+	CertExpires *time.Time      // срок действия клиентского сертификата
+	SyncAt      string          // «ЧЧ:ММ» ежедневного опроса; пусто — только по кнопке
+	SyncTZ      string          // часовой пояс SyncAt
 	Days        int             // сколько последних дней запрашивает опрос по расписанию
 	Ctx         context.Context // время жизни сервера: запуск в фоне не должен прерываться вместе с HTTP-запросом
 }
@@ -46,19 +47,20 @@ func (h sberHandlers) register(mux *http.ServeMux) {
 }
 
 type sberStatus struct {
-	Configured       bool            `json:"configured"`
-	TokensSet        bool            `json:"tokens_set"`
-	TokensUpdatedAt  *time.Time      `json:"tokens_updated_at"`
-	CertExpires      *time.Time      `json:"cert_expires_at"`
-	ScheduleInterval string          `json:"schedule_interval"`
-	Running          bool            `json:"running"`
-	Runs             []model.SberRun `json:"runs"`
+	Configured      bool            `json:"configured"`
+	TokensSet       bool            `json:"tokens_set"`
+	TokensUpdatedAt *time.Time      `json:"tokens_updated_at"`
+	CertExpires     *time.Time      `json:"cert_expires_at"`
+	ScheduleAt      string          `json:"schedule_at"`
+	ScheduleTZ      string          `json:"schedule_tz"`
+	Running         bool            `json:"running"`
+	Runs            []model.SberRun `json:"runs"`
 }
 
 func (h sberHandlers) status(w http.ResponseWriter, r *http.Request) {
 	st := sberStatus{Configured: h.info.Configured, CertExpires: h.info.CertExpires, Runs: []model.SberRun{}}
-	if h.info.Interval > 0 {
-		st.ScheduleInterval = h.info.Interval.String()
+	if h.info.SyncAt != "" {
+		st.ScheduleAt, st.ScheduleTZ = h.info.SyncAt, h.info.SyncTZ
 	}
 	at, err := h.store.TokensUpdatedAt(r.Context())
 	if err != nil {

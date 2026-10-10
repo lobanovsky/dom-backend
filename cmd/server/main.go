@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // часовой пояс расписания не зависит от tzdata в образе
 
 	"dom-backend/internal/auth"
 	"dom-backend/internal/config"
@@ -71,8 +72,8 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		syncer = sc
-		sberInfo.Configured, sberInfo.CertExpires, sberInfo.Interval = true, &certExpires, cfg.Sber.SyncInterval
-		go sc.Run(ctx, cfg.Sber.SyncInterval, cfg.Sber.SyncDays)
+		sberInfo.Configured, sberInfo.CertExpires, sberInfo.SyncAt, sberInfo.SyncTZ = true, &certExpires, cfg.Sber.SyncAt, cfg.Sber.SyncLocation.String()
+		go sc.Run(ctx, cfg.Sber.SyncAt, cfg.Sber.SyncLocation, cfg.Sber.SyncDays)
 	} else {
 		log.Info("sber api is not configured (SBER_CLIENT_ID is empty)")
 	}

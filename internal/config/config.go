@@ -26,7 +26,8 @@ type Sber struct {
 	TLSP12           string
 	TLSP12PassFile   string
 	CADir            string
-	SyncInterval     time.Duration // 0 = опрос по расписанию выключен, остаётся кнопка
+	SyncAt           string         // «ЧЧ:ММ» — время ежедневного опроса; пусто = только по кнопке
+	SyncLocation     *time.Location // часовой пояс SyncAt
 	SyncDays         int
 }
 
@@ -37,9 +38,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	interval, err := duration("SBER_SYNC_INTERVAL", time.Hour)
+	syncAt := get("SBER_SYNC_AT", "01:00")
+	if syncAt == "off" {
+		syncAt = ""
+	}
+	if syncAt != "" {
+		if _, err := time.Parse("15:04", syncAt); err != nil {
+			return Config{}, fmt.Errorf("SBER_SYNC_AT: want HH:MM (for example 01:00) or off")
+		}
+	}
+	loc, err := time.LoadLocation(get("SBER_SYNC_TZ", "Europe/Moscow"))
 	if err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("SBER_SYNC_TZ: %w", err)
 	}
 	days := 3
 	if v := os.Getenv("SBER_SYNC_DAYS"); v != "" {
@@ -58,7 +68,7 @@ func Load() (Config, error) {
 			BaseURL: os.Getenv("SBER_BASE_URL"), ClientID: os.Getenv("SBER_CLIENT_ID"),
 			ClientSecretFile: os.Getenv("SBER_CLIENT_SECRET_FILE"), TLSP12: os.Getenv("SBER_TLS_P12"),
 			TLSP12PassFile: os.Getenv("SBER_TLS_P12_PASSWORD_FILE"), CADir: os.Getenv("SBER_CA_DIR"),
-			SyncInterval: interval, SyncDays: days,
+			SyncAt: syncAt, SyncLocation: loc, SyncDays: days,
 		},
 	}
 	return c, c.validate()

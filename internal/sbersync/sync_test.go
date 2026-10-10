@@ -135,3 +135,28 @@ func TestSyncIsIdempotent(t *testing.T) {
 	}
 	unlock()
 }
+
+func TestNextRun(t *testing.T) {
+	msk, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(y int, m time.Month, d, h, min int, loc *time.Location) time.Time {
+		return time.Date(y, m, d, h, min, 0, 0, loc)
+	}
+	for name, tc := range map[string]struct{ now, want time.Time }{
+		"до времени запуска — сегодня":     {at(2026, 10, 10, 0, 30, msk), at(2026, 10, 10, 1, 0, msk)},
+		"после времени запуска — завтра":   {at(2026, 10, 10, 1, 30, msk), at(2026, 10, 11, 1, 0, msk)},
+		"ровно в это время — завтра":       {at(2026, 10, 10, 1, 0, msk), at(2026, 10, 11, 1, 0, msk)},
+		"конец месяца":                     {at(2026, 10, 31, 12, 0, msk), at(2026, 11, 1, 1, 0, msk)},
+		"сервер в UTC: в Москве уже 01:30": {at(2026, 10, 10, 22, 30, time.UTC), at(2026, 10, 12, 1, 0, msk)}, // 22:30 UTC = 01:30 МСК 11 октября
+	} {
+		got, err := NextRun(tc.now, "01:00", msk)
+		if err != nil || !got.Equal(tc.want) {
+			t.Errorf("%s: got %v, want %v (err %v)", name, got, tc.want, err)
+		}
+	}
+	if _, err := NextRun(time.Now(), "25:00", msk); err == nil {
+		t.Error("invalid time must be rejected")
+	}
+}

@@ -218,7 +218,7 @@ func TestAssignmentsLifecycle(t *testing.T) {
 	}
 	check(pCat.ID, nil, &cat.ID, "rule", run1)
 
-	runs, err := asg.Runs(ctx, 50, 0)
+	runs, err := asg.Runs(ctx, "incoming", 50, 0)
 	if err != nil || len(runs) < 2 || runs[0].RolledBackAt == nil || runs[0].ID != run2 {
 		t.Errorf("history: %+v, err = %v", runs, err)
 	}
@@ -232,5 +232,138 @@ func TestAssignmentsLifecycle(t *testing.T) {
 	}
 	if list, err := rulesStore.List(ctx, model.PaymentRuleFilter{}, 100, 0); err != nil || list[0].ID != ruleCat.ID || list[1].ID != ruleText.ID {
 		t.Errorf("reorder: %+v, err = %v", list, err)
+	}
+}
+
+// Исходящие платежи: правила ставят только категорию, запуск пишет направление, откат работает по своей таблице.
+func TestOutgoingAssignments(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+
+	org, err := NewOrganizations(pool).Create(ctx, model.Organization{Kind: "tsn", Name: "asg-out-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "organizations", org.ID)
+	bank, err := NewBankAccounts(pool).Create(ctx, model.BankAccount{OrganizationID: org.ID, Number: "40703810000000009977", ValidFrom: date(2020, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "bank_accounts", bank.ID)
+	cats := NewPaymentCategories(pool)
+	taxes, err := cats.Create(ctx, model.PaymentCategory{Name: "asg-out налоги", Direction: "outgoing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "payment_categories", taxes.ID)
+	inCat, err := cats.Create(ctx, model.PaymentCategory{Name: "asg-out входящая", Direction: "incoming"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "payment_categories", inCat.ID)
+
+	rulesStore, asg, pays := NewPaymentRules(pool), NewAssignments(pool), NewOutgoingPayments(pool)
+	// категория другого направления не принимается
+	if _, err := rulesStore.Create(ctx, model.PaymentRule{Name: "bad", Enabled: true, Direction: "outgoing", MatchMode: "all",
+		Action: model.RuleAction{Type: model.ActionSetCategory, CategoryID: &inCat.ID}}); err == nil {
+		t.Error("an outgoing rule must not accept an incoming category")
+	}
+	rule, err := rulesStore.Create(ctx, model.PaymentRule{Name: "asg-out ЕНП", Enabled: true, Direction: "outgoing", MatchMode: "all",
+		Conditions: model.RuleConditions{{Field: "recipient_inn", Op: "equals", Values: []string{"7727406020"}}},
+		Action:     model.RuleAction{Type: model.ActionSetCategory, CategoryID: &taxes.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, q := range []string{
+			`DELETE FROM assignment_run_items WHERE run_id IN (SELECT id FROM assignment_runs WHERE filters->>'bank_account_id' = $1)`,
+			`DELETE FROM outgoing_payments WHERE bank_account_id = $1`,
+			`DELETE FROM assignment_runs WHERE filters->>'bank_account_id' = $1`,
+		} {
+			if _, err := pool.Exec(ctx, q, fmt.Sprint(bank.ID)); err != nil {
+				t.Error(err)
+			}
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM payment_rules WHERE id = $1`, rule.ID); err != nil {
+			t.Error(err)
+		}
+	})
+	// правило исходящих не мешает входящим и наоборот
+	if list, err := rulesStore.List(ctx, model.PaymentRuleFilter{Direction: ptr("incoming")}, 100, 0); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, r := range list {
+			if r.ID == rule.ID {
+				t.Error("an outgoing rule must not be listed among incoming ones")
+			}
+		}
+	}
+
+	mkPay := func(name, inn, purpose string, cat *int64) model.OutgoingPayment {
+		out, err := pays.Create(ctx, model.OutgoingPayment{BankAccountID: bank.ID, PaymentDate: date(2026, 2, 5), Amount: 100,
+			RecipientName: name, RecipientINN: ptr(inn), Purpose: ptr(purpose), CategoryID: cat})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	pTax := mkPay("УФК по г. Москве", "7727406020", "ЕНП", nil)
+	pOther := mkPay("ООО Ромашка", "7700000001", "за услуги", nil)
+	pManual := mkPay("УФК по г. Москве", "7727406020", "руками", &taxes.ID)
+	if pManual.AssignedBy == nil || *pManual.AssignedBy != "manual" {
+		t.Fatalf("manual create must mark assigned_by = manual: %v", pManual.AssignedBy)
+	}
+
+	req := model.AssignRequest{Direction: "outgoing", Mode: model.AssignUnassigned, Scope: model.AssignmentScope{BankAccountID: &bank.ID}}
+	prev, err := asg.Preview(ctx, req)
+	if err != nil || prev.Candidates != 2 || prev.New != 1 || prev.Unresolved != 1 || prev.Unmatched[0].PaymentID != pOther.ID {
+		t.Fatalf("preview: %+v, err = %v", prev, err)
+	}
+	if prev.Samples[0].CategoryName != taxes.Name {
+		t.Errorf("sample must name the category: %+v", prev.Samples[0])
+	}
+	// правило входящих направлений к исходящим не применяется
+	if in, err := asg.Preview(ctx, model.AssignRequest{Mode: model.AssignUnassigned, Scope: model.AssignmentScope{BankAccountID: &bank.ID}}); err != nil || in.Candidates != 0 {
+		t.Errorf("incoming preview must not see outgoing payments: %+v, err = %v", in, err)
+	}
+
+	res, err := asg.Apply(ctx, req)
+	if err != nil || res.RunID == 0 || res.New != 1 {
+		t.Fatalf("apply: %+v, err = %v", res, err)
+	}
+	got, _ := pays.Get(ctx, pTax.ID)
+	if got.CategoryID == nil || *got.CategoryID != taxes.ID || got.AssignedBy == nil || *got.AssignedBy != "rule" || got.RuleName == nil || got.RunID == nil || *got.RunID != res.RunID {
+		t.Fatalf("rule result: %+v", got)
+	}
+	if got, _ := pays.Get(ctx, pOther.ID); got.CategoryID != nil {
+		t.Errorf("unmatched payment must stay unassigned: %+v", got)
+	}
+	if again, err := asg.Apply(ctx, req); err != nil || again.RunID != 0 {
+		t.Errorf("second apply: %+v, err = %v", again, err)
+	}
+	if runs, err := asg.Runs(ctx, "outgoing", 50, 0); err != nil || len(runs) == 0 || runs[0].ID != res.RunID || runs[0].Direction != "outgoing" {
+		t.Errorf("history: %+v, err = %v", runs, err)
+	}
+
+	// ручная смена категории снимает связь с запуском, и откат её не трогает
+	edit := got
+	edit.CategoryID = nil
+	if _, err := pays.Update(ctx, pTax.ID, edit); err != nil {
+		t.Fatal(err)
+	}
+	if rb, err := asg.Rollback(ctx, res.RunID); err != nil || rb.Restored != 0 || rb.Kept != 1 {
+		t.Fatalf("rollback after manual edit: %+v, err = %v", rb, err)
+	}
+
+	// откат нетронутого запуска возвращает платёж к «без категории»
+	res2, err := asg.Apply(ctx, req)
+	if err != nil || res2.New != 1 {
+		t.Fatalf("apply again: %+v, err = %v", res2, err)
+	}
+	if rb, err := asg.Rollback(ctx, res2.RunID); err != nil || rb.Restored != 1 {
+		t.Fatalf("rollback: %+v, err = %v", rb, err)
+	}
+	if got, _ := pays.Get(ctx, pTax.ID); got.CategoryID != nil || got.AssignedBy != nil {
+		t.Errorf("rollback must restore the previous state: %+v", got)
 	}
 }

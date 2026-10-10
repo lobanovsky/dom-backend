@@ -36,6 +36,7 @@ erDiagram
     payment_rules |o--o{ incoming_payments : "определил привязку"
     assignment_runs ||--o{ assignment_run_items : "прежнее состояние"
     assignment_runs |o--o{ incoming_payments : "запуск"
+    assignment_runs |o--o{ outgoing_payments : "запуск"
     personal_accounts |o--o{ incoming_payments : "привязка"
     payment_categories |o--o{ incoming_payments : ""
     payment_categories |o--o{ outgoing_payments : ""
@@ -56,8 +57,8 @@ erDiagram
 | `payment_categories` | Справочник категорий платежей (`direction`: incoming / outgoing): для платежей без лицевого счёта (аренда оборудования) и для расходов |
 | `payment_registries` | Загруженный файл реестра платежей (Сбер): имя, sha256, сам файл, номер и дата реестра, итоги. sha256 уникален |
 | `bank_statements` | Загруженная банковская выписка (файл обмена с 1С): файл и его sha256 (уникален), период, остатки на начало и конец (кредитовый положительный), число и обороты по дебету и кредиту |
-| `payment_rules` | Правило определения лицевого счёта входящего платежа: порядок (`position`), включено, «все/любое условие» (`match_mode`), условия (JSONB) и действие (JSONB) |
-| `assignment_runs`, `assignment_run_items` | Запуски определения лицевых счетов и прежнее состояние каждого изменённого платежа (для отката) |
+| `payment_rules` | Правило определения лицевого счёта входящего платежа или категории исходящего (`direction`): порядок (`position`), включено, «все/любое условие» (`match_mode`), условия (JSONB) и действие (JSONB) |
+| `assignment_runs`, `assignment_run_items` | Запуски определения лицевых счетов и категорий (`direction`) и прежнее состояние каждого изменённого платежа (для отката) |
 | `incoming_payments` | Поступление на наш счёт: дата и время, сумма, комиссия, от кого (`payer_*`), номер документа, ВО, назначение, комментарий; не более чем одна привязка: к лицевому счёту **или** к категории; для строк реестра ещё `registry_id`, `external_id` (номер операции Сбера) и `raw_line` |
 | `outgoing_payments` | Списание с нашего счёта: дата, сумма, кому (`recipient_*`), документ, ВО, назначение, категория |
 
@@ -176,7 +177,7 @@ docker compose up -d --build
 - `payment-categories`: `direction`
 - `payment-registries`: `bank_account_id`, `date_from`, `date_to` (по дате реестра), `q` (подстрока в имени файла или номере реестра)
 - `incoming-payments`: `bank_account_id`, `registry_id`, `personal_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q` (плательщик, назначение, комментарий, номер документа или операции, номер лицевого счёта), `unlinked=true` (без лицевого счёта и категории); сортировка: новые сверху
-- `outgoing-payments`: `bank_account_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q`
+- `outgoing-payments`: `bank_account_id`, `statement_id`, `category_id`, `date_from`, `date_to`, `amount_from`, `amount_to`, `q` (получатель, назначение, комментарий, номер документа), `unlinked=true` (без категории)
 
 Даты фильтров передаются как `YYYY-MM-DD`, неверный формат даёт 400. Суммы платежей: число не более чем с двумя знаками после запятой.
 
@@ -238,6 +239,17 @@ docker compose up -d --build
 - Ответ `200`: `{"files":[{file_name,status,statement_id,duplicate_of,result,skipped,error,rows}],"summary":{files_imported,files_failed,files_ignored,incoming_created,outgoing_created,operations_skipped}}`; статусы те же, что у реестров (`imported`, `duplicate_file`, `all_duplicates`, `unknown_account`, `invalid`, `error`).
 - `GET /bank-statements` (фильтры `bank_account_id`, `date_from`, `date_to`, `q` по имени файла), `GET /bank-statements/{id}`, `GET /bank-statements/{id}/file`. Платежи выписки: `incoming-payments?statement_id=N` и `outgoing-payments?statement_id=N`.
 - Платежи из выписки загружаются без привязки к лицевому счёту; привязка делается вручную или правилами.
+
+### Правила определения лицевых счетов и категорий
+Правила (`payment-rules`, обычный CRUD) работают в двух направлениях, поле `direction`:
+- `incoming` (по умолчанию): условия по плательщику (`payer_*`), действие любое (лицевой счёт, помещение, номер из текста, по ФИО, категория входящих);
+- `outgoing`: условия по получателю (`recipient_name`, `recipient_inn`, `recipient_account`, `recipient_bank`), общие поля (`purpose`, `doc_number`, `comment`, `operation_type`, `amount`, `bank_account_id`), действие только `set_category` с категорией направления «исходящие». Правило с полем или действием не своего направления отклоняется (422).
+
+Список правил: `GET /api/v1/payment-rules?direction=incoming|outgoing`. Правила применяются по `position`, первое подошедшее определяет платёж; порядок меняет `POST /payment-rules/reorder` (`{"ids":[...]}`).
+
+- `POST /api/v1/payment-assignments/preview` и `POST /api/v1/payment-assignments`: тело `{"direction":"incoming|outgoing","mode":"unassigned|recompute","scope":{...}}`, `scope` как фильтры списка платежей (у исходящих без `registry_id`); для проверки одного правила `rule_id` или черновик `rule`. Предпросмотр ничего не пишет; применение идёт одной транзакцией и записывает запуск с прежним состоянием платежей.
+- `GET /api/v1/payment-assignments?direction=...`: история запусков; `POST /payment-assignments/{id}/rollback`: откат (платежи, которые после запуска изменили вручную или другим запуском, не трогаются).
+- У платежа `assigned_by` (`registry|manual|rule`; у исходящих `manual|rule`), `rule_id`, `run_id`, `rule_name`: правила не перезаписывают `manual` и `registry`, ручная смена привязки/категории переводит платёж в `manual`.
 
 ### Выписки из Sber API
 Банк отдаёт выписку за одну дату по запросу, поэтому система опрашивает его: раз в `SBER_SYNC_INTERVAL` и по кнопке. Только чтение. Каждый запуск берёт последние `SBER_SYNC_DAYS` дней по всем действующим банковским счетам с БИК Сбербанка (`044525225`) или без БИК и для каждого счёта создаёт выписку `sberapi-<счёт>-<с>_<по>.json` (в файле ответы банка как есть), дальше работает обычный импорт выписок: операции опознаются по тому же ключу, что и в файлах 1С, поэтому один и тот же платёж из файла и из API не задваивается, платежи попадают без привязки к лицевому счёту (её ставят правила). Если новых операций нет, выписка не создаётся.

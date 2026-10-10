@@ -109,6 +109,7 @@ type OutgoingPaymentFilter struct {
 	AmountFrom    *float64
 	AmountTo      *float64
 	Q             *string // подстрока в получателе, назначении, комментарии, номере документа
+	Unlinked      bool    // только платежи без категории
 }
 
 // AssignmentScope — какие входящие платежи участвуют в определении лицевых счетов (те же фильтры, что у списка платежей).

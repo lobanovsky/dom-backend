@@ -22,11 +22,20 @@ const (
 
 var RuleActionTypes = []string{ActionLinkPremises, ActionLinkAccount, ActionSetCategory, ActionAccountFromText, ActionPremisesFromText, ActionLinkByOwner}
 
-// Поля платежа, по которым можно ставить условия.
+// Направление платежа, для которого действует правило.
+const (
+	DirectionIncoming = "incoming"
+	DirectionOutgoing = "outgoing"
+)
+
+var Directions = []string{DirectionIncoming, DirectionOutgoing}
+
+// Поля платежа, по которым можно ставить условия. У входящих контрагент — плательщик (payer_*), у исходящих — получатель (recipient_*).
 var (
-	RuleTextFields = []string{"payer_name", "payer_inn", "payer_account", "payer_bank", "purpose", "doc_number", "comment", "operation_type"}
-	ruleTextOps    = []string{"contains", "not_contains", "equals", "starts_with", "regex"}
-	ruleAmountOps  = []string{"equals", "gt", "lt", "between"}
+	RuleTextFields         = []string{"payer_name", "payer_inn", "payer_account", "payer_bank", "purpose", "doc_number", "comment", "operation_type"}
+	RuleTextFieldsOutgoing = []string{"recipient_name", "recipient_inn", "recipient_account", "recipient_bank", "purpose", "doc_number", "comment", "operation_type"}
+	ruleTextOps            = []string{"contains", "not_contains", "equals", "starts_with", "regex"}
+	ruleAmountOps          = []string{"equals", "gt", "lt", "between"}
 )
 
 const (
@@ -89,7 +98,15 @@ func marshalJSON(v any) (driver.Value, error) {
 	return string(b), nil
 }
 
-// PaymentRule — правило определения лицевого счёта входящего платежа. Правила применяются по порядку (position),
+// textFieldsFor — текстовые поля платежа, доступные в условиях правила данного направления.
+func textFieldsFor(direction string) []string {
+	if direction == DirectionOutgoing {
+		return RuleTextFieldsOutgoing
+	}
+	return RuleTextFields
+}
+
+// PaymentRule — правило определения лицевого счёта входящего платежа или категории исходящего. Правила применяются по порядку (position),
 // первое правило, которое определило платёж, останавливает обработку.
 type PaymentRule struct {
 	Meta
@@ -104,7 +121,7 @@ type PaymentRule struct {
 
 func (r *PaymentRule) SetDefaults() {
 	if r.Direction == "" {
-		r.Direction = "incoming"
+		r.Direction = DirectionIncoming
 	}
 	if r.MatchMode == "" {
 		r.MatchMode = "all"
@@ -117,7 +134,7 @@ func (r *PaymentRule) SetDefaults() {
 func (r PaymentRule) Validate() error {
 	if err := firstErr(
 		required("name", r.Name),
-		oneOf("direction", r.Direction, []string{"incoming"}),
+		oneOf("direction", r.Direction, Directions),
 		oneOf("match_mode", r.MatchMode, []string{"all", "any"}),
 	); err != nil {
 		return err
@@ -126,14 +143,14 @@ func (r PaymentRule) Validate() error {
 		return invalid("conditions", "must contain at most %d items", maxRuleConditions)
 	}
 	for i, c := range r.Conditions {
-		if err := c.validate(); err != nil {
+		if err := c.validate(r.Direction); err != nil {
 			return invalid("conditions", "condition %d: %s", i+1, err)
 		}
 	}
-	return r.Action.validate()
+	return r.Action.validate(r.Direction)
 }
 
-func (c RuleCondition) validate() error {
+func (c RuleCondition) validate(direction string) error {
 	if len(c.Values) == 0 || len(c.Values) > maxRuleValues {
 		return fmt.Errorf("values: from 1 to %d required", maxRuleValues)
 	}
@@ -143,7 +160,7 @@ func (c RuleCondition) validate() error {
 		}
 	}
 	switch {
-	case slices.Contains(RuleTextFields, c.Field):
+	case slices.Contains(textFieldsFor(direction), c.Field):
 		if !slices.Contains(ruleTextOps, c.Op) {
 			return fmt.Errorf("op must be one of: %s", strings.Join(ruleTextOps, ", "))
 		}
@@ -180,14 +197,18 @@ func (c RuleCondition) validate() error {
 			}
 		}
 	default:
-		return fmt.Errorf("field must be one of: %s, amount, bank_account_id", strings.Join(RuleTextFields, ", "))
+		return fmt.Errorf("field must be one of: %s, amount, bank_account_id", strings.Join(textFieldsFor(direction), ", "))
 	}
 	return nil
 }
 
-func (a RuleAction) validate() error {
+func (a RuleAction) validate(direction string) error {
 	if err := oneOf("action.type", a.Type, RuleActionTypes); err != nil {
 		return err
+	}
+	// Исходящим платежам правила ставят только категорию: лицевых счетов у них нет.
+	if direction == DirectionOutgoing && a.Type != ActionSetCategory {
+		return invalid("action.type", "must be set_category for outgoing payments")
 	}
 	switch a.Type {
 	case ActionLinkPremises:
@@ -203,8 +224,8 @@ func (a RuleAction) validate() error {
 			return invalid("action.category_id", "is required")
 		}
 	case ActionAccountFromText, ActionPremisesFromText:
-		if a.Field != "" && !slices.Contains(RuleTextFields, a.Field) {
-			return invalid("action.field", "must be one of: %s", strings.Join(RuleTextFields, ", "))
+		if a.Field != "" && !slices.Contains(textFieldsFor(direction), a.Field) {
+			return invalid("action.field", "must be one of: %s", strings.Join(textFieldsFor(direction), ", "))
 		}
 		if a.Type == ActionPremisesFromText {
 			if err := oneOf("action.premises_kind", a.PremisesKind, PremisesKinds); err != nil {
@@ -229,6 +250,7 @@ func (a RuleAction) validate() error {
 
 // Фильтр списка правил.
 type PaymentRuleFilter struct {
-	Deleted bool
-	Enabled *bool
+	Deleted   bool
+	Enabled   *bool
+	Direction *string // incoming | outgoing; пусто — все
 }

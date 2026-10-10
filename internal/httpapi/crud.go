@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"dom-backend/internal/model"
 )
@@ -191,11 +192,13 @@ func outgoingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Outgoi
 		Texts:  []string{"q"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
+		Bools:  []string{"unlinked"},
 	})
 	if !ok {
 		return model.OutgoingPaymentFilter{}, p, false
 	}
-	return model.OutgoingPaymentFilter{
+	unlinked := p.Bool("unlinked")
+	return model.OutgoingPaymentFilter{Unlinked: unlinked != nil && *unlinked,
 		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), CategoryID: p.Int("category_id"), StatementID: p.Int("statement_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"), Q: p.Text("q"),
@@ -203,9 +206,14 @@ func outgoingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Outgoi
 }
 
 func paymentRuleFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRuleFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Bools: []string{"enabled"}})
+	p, ok := parseListSpec(w, r, listSpec{Bools: []string{"enabled"}, Texts: []string{"direction"}})
 	if !ok {
 		return model.PaymentRuleFilter{}, p, false
 	}
-	return model.PaymentRuleFilter{Deleted: p.Deleted, Enabled: p.Bool("enabled")}, p, true
+	dir := p.Text("direction")
+	if dir != nil && !slices.Contains(model.Directions, *dir) {
+		writeError(w, http.StatusUnprocessableEntity, "direction: must be one of: incoming, outgoing")
+		return model.PaymentRuleFilter{}, p, false
+	}
+	return model.PaymentRuleFilter{Deleted: p.Deleted, Enabled: p.Bool("enabled"), Direction: dir}, p, true
 }

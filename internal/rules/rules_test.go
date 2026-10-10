@@ -219,3 +219,19 @@ func TestNamesMatch(t *testing.T) {
 		}
 	}
 }
+
+// У исходящих платежей контрагент — получатель: условия recipient_* смотрят в те же данные.
+func TestOutgoingConditions(t *testing.T) {
+	r := rule(1, "all", []model.RuleCondition{
+		{Field: "recipient_inn", Op: "equals", Values: []string{"7727406020"}},
+		{Field: "recipient_name", Op: "contains", Values: []string{"уфк"}},
+	}, model.RuleAction{Type: model.ActionSetCategory, CategoryID: ptr(int64(9))})
+	r.Direction = "outgoing"
+	hit := resolve(t, []model.PaymentRule{r}, Payment{PayerName: "УФК по г. Москве", PayerINN: "7727406020"})
+	if !hit.Resolved() || hit.CategoryID == nil || *hit.CategoryID != 9 {
+		t.Errorf("outgoing rule must match by recipient: %+v", hit)
+	}
+	if miss := resolve(t, []model.PaymentRule{r}, Payment{PayerName: "УФК по г. Москве", PayerINN: "1"}); miss.Resolved() {
+		t.Errorf("another INN must not match: %+v", miss)
+	}
+}

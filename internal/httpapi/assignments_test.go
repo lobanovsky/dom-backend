@@ -20,6 +20,8 @@ type fakeAssignments struct {
 	reqs    []model.AssignRequest
 	order   []int64
 	nothing bool
+
+	runsDirection string
 }
 
 func (f *fakeAssignments) Preview(_ context.Context, r model.AssignRequest) (model.AssignPreview, error) {
@@ -45,7 +47,8 @@ func (f *fakeAssignments) Rollback(_ context.Context, id int64) (model.RollbackR
 	return model.RollbackResult{Restored: 2, Kept: 1}, nil
 }
 
-func (f *fakeAssignments) Runs(context.Context, int, int) ([]model.AssignRun, error) {
+func (f *fakeAssignments) Runs(_ context.Context, direction string, _, _ int) ([]model.AssignRun, error) {
+	f.runsDirection = direction
 	return []model.AssignRun{{ID: 4, Mode: "unassigned"}}, nil
 }
 
@@ -100,8 +103,17 @@ func TestAssignmentEndpoints(t *testing.T) {
 			t.Errorf("rollback %s: status = %d, want %d", id, rec.Code, want)
 		}
 	}
-	if rec := call(h, c, "GET", "/api/v1/payment-assignments", ""); rec.Code != http.StatusOK {
-		t.Errorf("runs: status = %d", rec.Code)
+	if rec := call(h, c, "GET", "/api/v1/payment-assignments", ""); rec.Code != http.StatusOK || f.runsDirection != "" {
+		t.Errorf("runs: status = %d, direction = %q", rec.Code, f.runsDirection)
+	}
+	if rec := call(h, c, "GET", "/api/v1/payment-assignments?direction=outgoing", ""); rec.Code != http.StatusOK || f.runsDirection != "outgoing" {
+		t.Errorf("runs of outgoing: status = %d, direction = %q", rec.Code, f.runsDirection)
+	}
+	if rec := call(h, c, "GET", "/api/v1/payment-assignments?direction=sideways", ""); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("runs with bad direction: status = %d, want 422", rec.Code)
+	}
+	if rec := call(h, c, "POST", "/api/v1/payment-assignments/preview", `{"direction":"outgoing","mode":"unassigned","scope":{}}`); rec.Code != http.StatusOK || f.reqs[len(f.reqs)-1].Direction != "outgoing" {
+		t.Errorf("preview of outgoing: status = %d", rec.Code)
 	}
 
 	if rec := call(h, c, "POST", "/api/v1/payment-rules/reorder", `{"ids":[3,1,2]}`); rec.Code != http.StatusNoContent || len(f.order) != 3 || f.order[0] != 3 {
@@ -152,3 +164,36 @@ func TestRuleValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestOutgoingRuleValidation(t *testing.T) {
+	cat := model.RuleAction{Type: model.ActionSetCategory, CategoryID: ptr(int64(5))}
+	good := model.PaymentRule{Name: "r", Direction: "outgoing", MatchMode: "all", Action: cat,
+		Conditions: model.RuleConditions{{Field: "recipient_inn", Op: "equals", Values: []string{"7727406020"}}}}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid outgoing rule: %v", err)
+	}
+	for name, mutate := range map[string]func(*model.PaymentRule){
+		"payer field in outgoing": func(r *model.PaymentRule) {
+			r.Conditions = model.RuleConditions{{Field: "payer_name", Op: "contains", Values: []string{"a"}}}
+		},
+		"link by owner": func(r *model.PaymentRule) { r.Action = model.RuleAction{Type: model.ActionLinkByOwner} },
+		"link premises": func(r *model.PaymentRule) {
+			r.Action = model.RuleAction{Type: model.ActionLinkPremises, PremisesID: ptr(int64(1))}
+		},
+		"unknown direction": func(r *model.PaymentRule) { r.Direction = "sideways" },
+	} {
+		r := good
+		mutate(&r)
+		if r.Validate() == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
+	}
+	// у входящих recipient_* недоступны
+	in := good
+	in.Direction = "incoming"
+	if in.Validate() == nil {
+		t.Error("recipient_inn must not be accepted in an incoming rule")
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

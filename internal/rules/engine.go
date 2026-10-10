@@ -17,6 +17,7 @@ type Payment struct {
 	BankSpecial   bool // платёж пришёл на специальный счёт (капремонт)
 	Date          time.Time
 	Amount        float64
+	// Контрагент: плательщик у входящего платежа, получатель у исходящего (в условиях это payer_* и recipient_*).
 	PayerName     string
 	PayerINN      string
 	PayerAccount  string
@@ -228,13 +229,13 @@ func (c compiledCond) matchAmount(a float64) bool {
 
 func fieldText(p Payment, field string) string {
 	switch field {
-	case "payer_name":
+	case "payer_name", "recipient_name":
 		return p.PayerName
-	case "payer_inn":
+	case "payer_inn", "recipient_inn":
 		return p.PayerINN
-	case "payer_account":
+	case "payer_account", "recipient_account":
 		return p.PayerAccount
-	case "payer_bank":
+	case "payer_bank", "recipient_bank":
 		return p.PayerBank
 	case "purpose":
 		return p.Purpose

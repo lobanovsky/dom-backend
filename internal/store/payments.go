@@ -93,7 +93,9 @@ func (s *IncomingPayments) Delete(ctx context.Context, id int64) error {
 }
 
 const outgoingCols = `id, bank_account_id, payment_date, amount, recipient_name, recipient_inn, recipient_account, recipient_bik,
-	recipient_bank_name, doc_number, operation_type, purpose, comment, category_id, statement_id, dedup_key, created_at, updated_at, deleted_at`
+	recipient_bank_name, doc_number, operation_type, purpose, comment, category_id, statement_id, dedup_key, assigned_by, rule_id, run_id,
+	created_at, updated_at, deleted_at,
+	(SELECT r.name FROM payment_rules r WHERE r.id = rule_id) AS rule_name`
 
 type OutgoingPayments struct{ pool *pgxpool.Pool }
 
@@ -111,8 +113,9 @@ func (s *OutgoingPayments) List(ctx context.Context, f model.OutgoingPaymentFilt
 		   AND ($7::text IS NULL OR concat_ws(' ', recipient_name, purpose, comment, doc_number) ILIKE $7)
 		   AND (deleted_at IS NOT NULL) = $8
 		   AND ($11::bigint IS NULL OR statement_id = $11)
+		   AND (NOT $12 OR category_id IS NULL)
 		 ORDER BY payment_date DESC, id DESC LIMIT $9 OFFSET $10`,
-		f.BankAccountID, f.CategoryID, f.DateFrom, f.DateTo, f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Deleted, limit, offset, f.StatementID))
+		f.BankAccountID, f.CategoryID, f.DateFrom, f.DateTo, f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Deleted, limit, offset, f.StatementID, f.Unlinked))
 }
 
 func (s *OutgoingPayments) Get(ctx context.Context, id int64) (model.OutgoingPayment, error) {
@@ -122,8 +125,8 @@ func (s *OutgoingPayments) Get(ctx context.Context, id int64) (model.OutgoingPay
 func (s *OutgoingPayments) Create(ctx context.Context, in model.OutgoingPayment) (model.OutgoingPayment, error) {
 	return one[model.OutgoingPayment](s.pool.Query(ctx,
 		`INSERT INTO outgoing_payments (bank_account_id, payment_date, amount, recipient_name, recipient_inn, recipient_account,
-		        recipient_bik, recipient_bank_name, doc_number, operation_type, purpose, comment, category_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING `+outgoingCols,
+		        recipient_bik, recipient_bank_name, doc_number, operation_type, purpose, comment, category_id, assigned_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CASE WHEN $13::bigint IS NOT NULL THEN 'manual' END) RETURNING `+outgoingCols,
 		in.BankAccountID, in.PaymentDate, in.Amount, in.RecipientName, in.RecipientINN, in.RecipientAccount,
 		in.RecipientBIK, in.RecipientBankName, in.DocNumber, in.OperationType, in.Purpose, in.Comment, in.CategoryID))
 }
@@ -132,7 +135,13 @@ func (s *OutgoingPayments) Update(ctx context.Context, id int64, in model.Outgoi
 	return one[model.OutgoingPayment](s.pool.Query(ctx,
 		`UPDATE outgoing_payments SET bank_account_id = $2, payment_date = $3, amount = $4, recipient_name = $5, recipient_inn = $6,
 		        recipient_account = $7, recipient_bik = $8, recipient_bank_name = $9, doc_number = $10, operation_type = $11,
-		        purpose = $12, comment = $13, category_id = $14, updated_at = now()
+		        purpose = $12, comment = $13, category_id = $14,
+		        -- ручное изменение категории: происхождение «вручную», связь с правилом и запуском снимается
+		        assigned_by = CASE WHEN category_id IS NOT DISTINCT FROM $14::bigint THEN assigned_by
+		                           WHEN $14::bigint IS NULL THEN NULL ELSE 'manual' END,
+		        rule_id = CASE WHEN category_id IS NOT DISTINCT FROM $14::bigint THEN rule_id END,
+		        run_id = CASE WHEN category_id IS NOT DISTINCT FROM $14::bigint THEN run_id END,
+		        updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+outgoingCols,
 		id, in.BankAccountID, in.PaymentDate, in.Amount, in.RecipientName, in.RecipientINN, in.RecipientAccount,
 		in.RecipientBIK, in.RecipientBankName, in.DocNumber, in.OperationType, in.Purpose, in.Comment, in.CategoryID))

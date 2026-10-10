@@ -11,7 +11,7 @@ type AssignmentStore interface {
 	Preview(ctx context.Context, req model.AssignRequest) (model.AssignPreview, error)
 	Apply(ctx context.Context, req model.AssignRequest) (model.AssignResult, error)
 	Rollback(ctx context.Context, runID int64) (model.RollbackResult, error)
-	Runs(ctx context.Context, limit, offset int) ([]model.AssignRun, error)
+	Runs(ctx context.Context, direction string, limit, offset int) ([]model.AssignRun, error)
 }
 
 // RuleOrderStore меняет порядок правил.
@@ -63,11 +63,19 @@ func (h assignmentHandlers) apply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h assignmentHandlers) runs(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, nil, nil)
+	p, ok := parseListSpec(w, r, listSpec{Texts: []string{"direction"}})
 	if !ok {
 		return
 	}
-	items, err := h.s.Runs(r.Context(), p.Limit, p.Offset)
+	direction := ""
+	if d := p.Text("direction"); d != nil {
+		if *d != model.DirectionIncoming && *d != model.DirectionOutgoing {
+			writeError(w, http.StatusUnprocessableEntity, "direction: must be one of: incoming, outgoing")
+			return
+		}
+		direction = *d
+	}
+	items, err := h.s.Runs(r.Context(), direction, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)
 		return

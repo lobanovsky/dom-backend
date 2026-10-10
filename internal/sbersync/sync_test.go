@@ -21,7 +21,8 @@ const acc = "40703810999999999901"
 
 func (f *fakeSource) Transactions(_ context.Context, account string, d time.Time) ([]sberapi.Transaction, []byte, error) {
 	f.calls++
-	if !d.Equal(time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)) {
+	// в БД могут быть и другие счета Сбера (например, настоящие в локальной базе): им банк ничего не отдаёт
+	if account != acc || !d.Equal(time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)) {
 		return nil, []byte("{}\n"), nil
 	}
 	mk := func(direction, number, amount string) sberapi.Transaction {
@@ -35,7 +36,7 @@ func (f *fakeSource) Transactions(_ context.Context, account string, d time.Time
 		_ = json.Unmarshal(b, &t)
 		return t
 	}
-	return []sberapi.Transaction{mk("CREDIT", "1", "100.10"), mk("DEBIT", "2", "50")}, []byte(`{"day":"2026-10-09"}` + "\n"), nil
+	return []sberapi.Transaction{mk("CREDIT", "1", "100.10"), mk("DEBIT", "2", "50")}, []byte(`{"account":"` + account + `","day":"2026-10-09"}` + "\n"), nil
 }
 
 func TestSyncIsIdempotent(t *testing.T) {

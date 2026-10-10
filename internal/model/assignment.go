@@ -10,8 +10,9 @@ const (
 
 // AssignRequest — запрос на предпросмотр или применение правил.
 type AssignRequest struct {
-	Mode  string          `json:"mode"`
-	Scope AssignmentScope `json:"scope"`
+	Direction string          `json:"direction"` // incoming (по умолчанию) | outgoing
+	Mode      string          `json:"mode"`
+	Scope     AssignmentScope `json:"scope"`
 	// Проверка одного правила: сохранённого (rule_id) или черновика из формы (rule). Только для предпросмотра.
 	RuleID *int64       `json:"rule_id,omitempty"`
 	Rule   *PaymentRule `json:"rule,omitempty"`
@@ -70,6 +71,7 @@ type AssignPreview struct {
 // AssignRun — запуск определения (в истории).
 type AssignRun struct {
 	ID             int64           `json:"id"`
+	Direction      string          `json:"direction"`
 	Mode           string          `json:"mode"`
 	Scope          AssignmentScope `json:"scope"`
 	Candidates     int             `json:"candidates"`

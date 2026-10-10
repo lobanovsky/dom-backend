@@ -87,6 +87,11 @@ type OutgoingPayment struct {
 	CategoryID        *int64  `json:"category_id" db:"category_id"`
 	StatementID       *int64  `json:"statement_id" db:"statement_id"`
 	DedupKey          *string `json:"-" db:"dedup_key"`
+	// Происхождение категории: manual | rule (выставляет сервер); название правила — только для чтения.
+	AssignedBy *string `json:"assigned_by" db:"assigned_by"`
+	RuleID     *int64  `json:"rule_id" db:"rule_id"`
+	RunID      *int64  `json:"run_id" db:"run_id"`
+	RuleName   *string `json:"rule_name" db:"rule_name"`
 }
 
 func (p OutgoingPayment) Validate() error {

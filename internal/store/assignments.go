@@ -43,7 +43,10 @@ type queryer interface {
 }
 
 // loadCandidates выбирает платежи по фильтрам. unassigned: без привязки; recompute: ещё и привязанные правилами.
-func loadCandidates(ctx context.Context, q queryer, mode string, sc model.AssignmentScope) ([]candidate, error) {
+func loadCandidates(ctx context.Context, q queryer, direction, mode string, sc model.AssignmentScope) ([]candidate, error) {
+	if direction == model.DirectionOutgoing {
+		return loadOutgoingCandidates(ctx, q, mode, sc)
+	}
 	rows, err := q.Query(ctx,
 		`SELECT p.id, p.bank_account_id, b.is_special, p.payment_date, p.amount, p.payer_name, COALESCE(p.payer_inn, ''),
 		        COALESCE(p.payer_account, ''), btrim(concat_ws(' ', p.payer_bik, p.payer_bank_name)), COALESCE(p.purpose, ''),
@@ -67,6 +70,35 @@ func loadCandidates(ctx context.Context, q queryer, mode string, sc model.Assign
 	if err != nil {
 		return nil, mapErr(err)
 	}
+	return scanCandidates(rows)
+}
+
+// loadOutgoingCandidates — то же для исходящих платежей: контрагент — получатель, привязка только к категории.
+func loadOutgoingCandidates(ctx context.Context, q queryer, mode string, sc model.AssignmentScope) ([]candidate, error) {
+	rows, err := q.Query(ctx,
+		`SELECT p.id, p.bank_account_id, b.is_special, p.payment_date, p.amount, p.recipient_name, COALESCE(p.recipient_inn, ''),
+		        COALESCE(p.recipient_account, ''), btrim(concat_ws(' ', p.recipient_bik, p.recipient_bank_name)), COALESCE(p.purpose, ''),
+		        COALESCE(p.doc_number, ''), COALESCE(p.comment, ''), COALESCE(p.operation_type, ''),
+		        NULL::bigint, p.category_id, p.assigned_by, p.rule_id
+		 FROM outgoing_payments p JOIN bank_accounts b ON b.id = p.bank_account_id
+		 WHERE p.deleted_at IS NULL
+		   AND (($1 = 'recompute' AND (p.assigned_by = 'rule' OR p.category_id IS NULL)) OR p.category_id IS NULL)
+		   AND ($2::bigint IS NULL OR p.bank_account_id = $2)
+		   AND ($3::bigint IS NULL OR p.statement_id = $3)
+		   AND ($4::date IS NULL OR p.payment_date >= $4)
+		   AND ($5::date IS NULL OR p.payment_date <= $5)
+		   AND ($6::numeric IS NULL OR p.amount >= $6)
+		   AND ($7::numeric IS NULL OR p.amount <= $7)
+		   AND ($8::text IS NULL OR concat_ws(' ', p.recipient_name, p.purpose, p.comment, p.doc_number) ILIKE $8)
+		 ORDER BY p.payment_date, p.id`,
+		mode, sc.BankAccountID, sc.StatementID, sc.DateFrom, sc.DateTo, sc.AmountFrom, sc.AmountTo, likePattern(sc.Q))
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return scanCandidates(rows)
+}
+
+func scanCandidates(rows pgx.Rows) ([]candidate, error) {
 	defer rows.Close()
 	var out []candidate
 	for rows.Next() {
@@ -188,8 +220,8 @@ func loadIndex(ctx context.Context, q queryer) (*rules.Index, error) {
 	return idx, nil
 }
 
-func loadRules(ctx context.Context, q queryer) ([]model.PaymentRule, error) {
-	rows, err := q.Query(ctx, `SELECT `+ruleCols+` FROM payment_rules WHERE deleted_at IS NULL AND enabled ORDER BY position, id`)
+func loadRules(ctx context.Context, q queryer, direction string) ([]model.PaymentRule, error) {
+	rows, err := q.Query(ctx, `SELECT `+ruleCols+` FROM payment_rules WHERE deleted_at IS NULL AND enabled AND direction = $1 ORDER BY position, id`, direction)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -209,13 +241,15 @@ type computation struct {
 func compute(ctx context.Context, q queryer, req model.AssignRequest) (*computation, error) {
 	c := &computation{ruleName: map[int64]string{}}
 	var err error
-	if c.cands, err = loadCandidates(ctx, q, req.Mode, req.Scope); err != nil {
+	if c.cands, err = loadCandidates(ctx, q, req.Direction, req.Mode, req.Scope); err != nil {
 		return nil, err
 	}
-	if c.idx, err = loadIndex(ctx, q); err != nil {
+	if req.Direction == model.DirectionOutgoing {
+		c.idx = rules.NewIndex() // исходящим нужна только категория: справочник лицевых счетов не нужен
+	} else if c.idx, err = loadIndex(ctx, q); err != nil {
 		return nil, err
 	}
-	all, err := loadRules(ctx, q)
+	all, err := loadRules(ctx, q, req.Direction)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +260,7 @@ func compute(ctx context.Context, q queryer, req model.AssignRequest) (*computat
 		draft.Enabled, draft.Meta.ID = true, -1
 		use = []model.PaymentRule{draft}
 	case req.RuleID != nil:
-		rows, err := q.Query(ctx, `SELECT `+ruleCols+` FROM payment_rules WHERE id = $1 AND deleted_at IS NULL`, *req.RuleID)
+		rows, err := q.Query(ctx, `SELECT `+ruleCols+` FROM payment_rules WHERE id = $1 AND deleted_at IS NULL AND direction = $2`, *req.RuleID, req.Direction)
 		if err != nil {
 			return nil, mapErr(err)
 		}
@@ -274,8 +308,15 @@ func sameTarget(c candidate, o rules.Outcome) bool {
 	return eq(c.AccountID, o.AccountID) && eq(c.CategoryID, o.CategoryID) && c.RuleID != nil && *c.RuleID == o.RuleID
 }
 
-func validMode(mode string) error {
-	if mode != model.AssignUnassigned && mode != model.AssignRecompute {
+// prepare проверяет запрос и подставляет направление по умолчанию (входящие).
+func prepare(req *model.AssignRequest) error {
+	if req.Direction == "" {
+		req.Direction = model.DirectionIncoming
+	}
+	if req.Direction != model.DirectionIncoming && req.Direction != model.DirectionOutgoing {
+		return invalid("direction: must be one of: incoming, outgoing")
+	}
+	if req.Mode != model.AssignUnassigned && req.Mode != model.AssignRecompute {
 		return invalid("mode: must be one of: unassigned, recompute")
 	}
 	return nil
@@ -283,10 +324,16 @@ func validMode(mode string) error {
 
 // Preview показывает, что сделают правила, ничего не записывая.
 func (s *Assignments) Preview(ctx context.Context, req model.AssignRequest) (model.AssignPreview, error) {
-	if err := validMode(req.Mode); err != nil {
+	if err := prepare(&req); err != nil {
 		return model.AssignPreview{}, err
 	}
 	if req.Rule != nil {
+		if req.Rule.Direction == "" {
+			req.Rule.Direction = req.Direction
+		}
+		if req.Rule.Direction != req.Direction {
+			return model.AssignPreview{}, invalid("rule.direction: must match direction of the request")
+		}
 		req.Rule.SetDefaults()
 		if err := req.Rule.Validate(); err != nil {
 			return model.AssignPreview{}, err
@@ -403,7 +450,7 @@ func truncate(s string, n int) string {
 // Apply применяет правила одной транзакцией и записывает запуск с прежним состоянием платежей (для отката).
 // Платежи с привязкой «вручную» или «из реестра» не затрагиваются. Если менять нечего, запуск не создаётся.
 func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model.AssignResult, error) {
-	if err := validMode(req.Mode); err != nil {
+	if err := prepare(&req); err != nil {
 		return model.AssignResult{}, err
 	}
 	if req.Rule != nil || req.RuleID != nil {
@@ -438,9 +485,9 @@ func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model
 
 	filters, _ := json.Marshal(req.Scope)
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO assignment_runs (mode, filters, candidates, assigned_count, changed_count, cleared_count)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		req.Mode, string(filters), res.Candidates, res.New+res.Changed, res.Changed, res.Cleared).Scan(&res.RunID); err != nil {
+		`INSERT INTO assignment_runs (mode, filters, candidates, assigned_count, changed_count, cleared_count, direction)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		req.Mode, string(filters), res.Candidates, res.New+res.Changed, res.Changed, res.Cleared, req.Direction).Scan(&res.RunID); err != nil {
 		return model.AssignResult{}, mapErr(err)
 	}
 	for i, cand := range c.cands {
@@ -450,7 +497,7 @@ func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO assignment_run_items (run_id, payment_id, prev_personal_account, prev_category, prev_assigned_by, prev_rule_id, prev_run_id)
-			 SELECT $1, id, personal_account_id, category_id, assigned_by, rule_id, run_id FROM incoming_payments WHERE id = $2`,
+			 SELECT $1, id, `+prevAccountExpr(req.Direction)+`, category_id, assigned_by, rule_id, run_id FROM `+paymentsTable(req.Direction)+` WHERE id = $2`,
 			res.RunID, cand.ID); err != nil {
 			return model.AssignResult{}, mapErr(err)
 		}
@@ -461,9 +508,7 @@ func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model
 			by := "rule"
 			assignedBy, ruleID = &by, &out.RuleID
 		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE incoming_payments SET personal_account_id = $2, category_id = $3, assigned_by = $4, rule_id = $5, run_id = $6, updated_at = now()
-			 WHERE id = $1 AND deleted_at IS NULL`,
+		if _, err := tx.Exec(ctx, updateAssignmentSQL(req.Direction),
 			cand.ID, out.AccountID, out.CategoryID, assignedBy, ruleID, res.RunID); err != nil {
 			return model.AssignResult{}, mapErr(err)
 		}
@@ -472,6 +517,31 @@ func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model
 		return model.AssignResult{}, mapErr(err)
 	}
 	return res, nil
+}
+
+func paymentsTable(direction string) string {
+	if direction == model.DirectionOutgoing {
+		return "outgoing_payments"
+	}
+	return "incoming_payments"
+}
+
+// prevAccountExpr — что сохранять как прежний лицевой счёт: у исходящих платежей его нет.
+func prevAccountExpr(direction string) string {
+	if direction == model.DirectionOutgoing {
+		return "NULL::bigint"
+	}
+	return "personal_account_id"
+}
+
+// updateAssignmentSQL записывает результат правила; у исходящих платежей нет лицевого счёта ($2 не используется, но параметр передаётся).
+func updateAssignmentSQL(direction string) string {
+	if direction == model.DirectionOutgoing {
+		return `UPDATE outgoing_payments SET category_id = $3, assigned_by = $4, rule_id = $5, run_id = $6, updated_at = now()
+		        WHERE id = $1 AND deleted_at IS NULL AND $2::bigint IS NULL`
+	}
+	return `UPDATE incoming_payments SET personal_account_id = $2, category_id = $3, assigned_by = $4, rule_id = $5, run_id = $6, updated_at = now()
+	        WHERE id = $1 AND deleted_at IS NULL`
 }
 
 // Rollback возвращает прежнее состояние платежей запуска. Платежи, привязку которых после запуска изменили вручную
@@ -485,7 +555,8 @@ func (s *Assignments) Rollback(ctx context.Context, runID int64) (model.Rollback
 	defer rollback(ctx, tx)
 
 	var rolledBack *time.Time
-	err = tx.QueryRow(ctx, `SELECT rolled_back_at FROM assignment_runs WHERE id = $1 FOR UPDATE`, runID).Scan(&rolledBack)
+	var direction string
+	err = tx.QueryRow(ctx, `SELECT rolled_back_at, direction FROM assignment_runs WHERE id = $1 FOR UPDATE`, runID).Scan(&rolledBack, &direction)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return res, &Error{ErrNotFound, "assignment run not found"}
 	}
@@ -495,12 +566,19 @@ func (s *Assignments) Rollback(ctx context.Context, runID int64) (model.Rollback
 	if rolledBack != nil {
 		return res, &Error{ErrConflict, "assignment run is already rolled back"}
 	}
-	tag, err := tx.Exec(ctx,
-		`UPDATE incoming_payments p
+	restore := `UPDATE incoming_payments p
 		 SET personal_account_id = i.prev_personal_account, category_id = i.prev_category, assigned_by = i.prev_assigned_by,
 		     rule_id = i.prev_rule_id, run_id = i.prev_run_id, updated_at = now()
 		 FROM assignment_run_items i
-		 WHERE i.run_id = $1 AND p.id = i.payment_id AND p.run_id = $1`, runID)
+		 WHERE i.run_id = $1 AND p.id = i.payment_id AND p.run_id = $1`
+	if direction == model.DirectionOutgoing {
+		restore = `UPDATE outgoing_payments p
+		 SET category_id = i.prev_category, assigned_by = i.prev_assigned_by,
+		     rule_id = i.prev_rule_id, run_id = i.prev_run_id, updated_at = now()
+		 FROM assignment_run_items i
+		 WHERE i.run_id = $1 AND p.id = i.payment_id AND p.run_id = $1`
+	}
+	tag, err := tx.Exec(ctx, restore, runID)
 	if err != nil {
 		return res, mapErr(err)
 	}
@@ -520,10 +598,11 @@ func (s *Assignments) Rollback(ctx context.Context, runID int64) (model.Rollback
 }
 
 // Runs возвращает историю запусков, новые сверху.
-func (s *Assignments) Runs(ctx context.Context, limit, offset int) ([]model.AssignRun, error) {
+// direction: incoming | outgoing; пусто — все.
+func (s *Assignments) Runs(ctx context.Context, direction string, limit, offset int) ([]model.AssignRun, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, mode, filters, candidates, assigned_count, changed_count, cleared_count, created_at, rolled_back_at, rolled_back_kept
-		 FROM assignment_runs ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
+		`SELECT id, direction, mode, filters, candidates, assigned_count, changed_count, cleared_count, created_at, rolled_back_at, rolled_back_kept
+		 FROM assignment_runs WHERE ($3 = '' OR direction = $3) ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset, direction)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -532,7 +611,7 @@ func (s *Assignments) Runs(ctx context.Context, limit, offset int) ([]model.Assi
 	for rows.Next() {
 		var r model.AssignRun
 		var filters []byte
-		if err := rows.Scan(&r.ID, &r.Mode, &filters, &r.Candidates, &r.AssignedCount, &r.ChangedCount, &r.ClearedCount, &r.CreatedAt, &r.RolledBackAt, &r.RolledBackKept); err != nil {
+		if err := rows.Scan(&r.ID, &r.Direction, &r.Mode, &filters, &r.Candidates, &r.AssignedCount, &r.ChangedCount, &r.ClearedCount, &r.CreatedAt, &r.RolledBackAt, &r.RolledBackKept); err != nil {
 			return nil, mapErr(err)
 		}
 		if err := json.Unmarshal(filters, &r.Scope); err != nil {

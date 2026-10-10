@@ -19,8 +19,8 @@ func NewPaymentRules(pool *pgxpool.Pool) *PaymentRules { return &PaymentRules{po
 func (s *PaymentRules) List(ctx context.Context, f model.PaymentRuleFilter, limit, offset int) ([]model.PaymentRule, error) {
 	return collect[model.PaymentRule](s.pool.Query(ctx,
 		`SELECT `+ruleCols+` FROM payment_rules
-		 WHERE ($1::bool IS NULL OR enabled = $1) AND (deleted_at IS NOT NULL) = $2
-		 ORDER BY position, id LIMIT $3 OFFSET $4`, f.Enabled, f.Deleted, limit, offset))
+		 WHERE ($1::bool IS NULL OR enabled = $1) AND (deleted_at IS NOT NULL) = $2 AND ($5::text IS NULL OR direction = $5)
+		 ORDER BY position, id LIMIT $3 OFFSET $4`, f.Enabled, f.Deleted, limit, offset, f.Direction))
 }
 
 func (s *PaymentRules) Get(ctx context.Context, id int64) (model.PaymentRule, error) {
@@ -28,7 +28,7 @@ func (s *PaymentRules) Get(ctx context.Context, id int64) (model.PaymentRule, er
 }
 
 func (s *PaymentRules) Create(ctx context.Context, in model.PaymentRule) (model.PaymentRule, error) {
-	if err := s.checkRefs(ctx, in.Action); err != nil {
+	if err := s.checkRefs(ctx, in.Direction, in.Action); err != nil {
 		return model.PaymentRule{}, err
 	}
 	return one[model.PaymentRule](s.pool.Query(ctx,
@@ -39,7 +39,7 @@ func (s *PaymentRules) Create(ctx context.Context, in model.PaymentRule) (model.
 
 // Update заменяет правило; позиция 0 в теле означает «не менять порядок».
 func (s *PaymentRules) Update(ctx context.Context, id int64, in model.PaymentRule) (model.PaymentRule, error) {
-	if err := s.checkRefs(ctx, in.Action); err != nil {
+	if err := s.checkRefs(ctx, in.Direction, in.Action); err != nil {
 		return model.PaymentRule{}, err
 	}
 	return one[model.PaymentRule](s.pool.Query(ctx,
@@ -77,7 +77,7 @@ func (s *PaymentRules) Reorder(ctx context.Context, ids []int64) error {
 }
 
 // checkRefs проверяет, что помещение, лицевой счёт и категория из действия существуют и не удалены.
-func (s *PaymentRules) checkRefs(ctx context.Context, a model.RuleAction) error {
+func (s *PaymentRules) checkRefs(ctx context.Context, direction string, a model.RuleAction) error {
 	check := func(field, table string, id *int64, extra string) error {
 		if id == nil {
 			return nil
@@ -95,7 +95,8 @@ func (s *PaymentRules) checkRefs(ctx context.Context, a model.RuleAction) error 
 	if err := check("action.personal_account_id", "personal_accounts", a.PersonalAccountID, ""); err != nil {
 		return err
 	}
-	if err := check("action.category_id", "payment_categories", a.CategoryID, " AND direction = 'incoming'"); err != nil {
+	// категория должна быть того же направления, что и правило
+	if err := check("action.category_id", "payment_categories", a.CategoryID, " AND direction = '"+direction+"'"); err != nil {
 		return err
 	}
 	return check("action.building_id", "buildings", a.BuildingID, "")

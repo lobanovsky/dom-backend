@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -261,6 +262,23 @@ func TestRegistryImport(t *testing.T) {
 	if byNumber, err := regs.BankAccountsByNumber(ctx); err != nil || byNumber[bank.Number] != bank.ID {
 		t.Errorf("BankAccountsByNumber: %v, err = %v", byNumber[bank.Number], err)
 	}
+	// реестр ВТБ: источник из формата файла, счёт по коду реестра
+	code := "vtb_test_" + fmt.Sprint(bank.ID)
+	if _, err := pool.Exec(ctx, `UPDATE bank_accounts SET registry_code = upper($2) WHERE id = $1`, bank.ID, code); err != nil {
+		t.Fatal(err)
+	}
+	if byCode, err := regs.BankAccountsByRegistryCode(ctx); err != nil || byCode[code] != bank.ID {
+		t.Errorf("BankAccountsByRegistryCode: %v, err = %v", byCode[code], err)
+	}
+	vtb := &model.ParsedRegistry{Source: "vtb", Payments: []model.RegistryPayment{pay("reg-test-vtb", "reg-test-1", 307049)}}
+	resV, err := regs.Import(ctx, bank.ID, "040126_VTB_x_001.txt", []byte("file vtb"), vtb)
+	if err != nil || resV.Created != 1 {
+		t.Fatalf("vtb import: %+v, err = %v", resV, err)
+	}
+	var source string
+	if err := pool.QueryRow(ctx, `SELECT source FROM payment_registries WHERE id = $1`, resV.RegistryID).Scan(&source); err != nil || source != "vtb" {
+		t.Errorf("source = %q, err = %v", source, err)
+	}
 	// счёт из имени файла не совпадает с выбранным
 	wrong := &model.ParsedRegistry{FileAccount: "40703810000000000000", Payments: []model.RegistryPayment{pay("reg-test-d", "x", 100)}}
 	if _, err := regs.Import(ctx, bank.ID, "reg-4.txt", []byte("file four"), wrong); !errors.As(err, &se) || !errors.Is(se.Kind, ErrInvalid) {
@@ -269,7 +287,7 @@ func TestRegistryImport(t *testing.T) {
 	if _, err := regs.Import(ctx, 1<<40, "reg-5.txt", []byte("five"), reg); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing bank account: err = %v", err)
 	}
-	if list, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 4 {
+	if list, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID}, 50, 0); err != nil || len(list) != 5 {
 		t.Errorf("failed imports must not leave payments: %d, err = %v", len(list), err)
 	}
 }

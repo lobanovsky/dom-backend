@@ -1,6 +1,7 @@
 package model
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -15,6 +16,7 @@ type BankAccount struct {
 	BankName       *string `json:"bank_name" db:"bank_name"`
 	IsSpecial      bool    `json:"is_special" db:"is_special"`
 	Description    *string `json:"description" db:"description"`
+	RegistryCode   *string `json:"registry_code" db:"registry_code"` // код реестра в имени файла (VTB_231068_001), если банк не пишет туда номер счёта
 	ValidFrom      Date    `json:"valid_from" db:"valid_from"`
 	ValidTo        *Date   `json:"valid_to" db:"valid_to"`
 	Active         bool    `json:"active" db:"active"`
@@ -25,8 +27,21 @@ func (a BankAccount) Validate() error {
 		positiveInt("organization_id", intPtr(a.OrganizationID)),
 		digits("number", a.Number, 20),
 		optionalDigits("bik", a.BIK, 9),
+		registryCode(a.RegistryCode),
 		period(a.ValidFrom, a.ValidTo),
 	)
+}
+
+var registryCodeRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+func registryCode(v *string) error {
+	if v == nil || *v == "" {
+		return nil
+	}
+	if !registryCodeRe.MatchString(*v) {
+		return invalid("registry_code", "must be 1-64 latin letters, digits, _ or -")
+	}
+	return nil
 }
 
 // digits проверяет, что значение состоит ровно из n цифр.

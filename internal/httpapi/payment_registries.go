@@ -23,6 +23,7 @@ type PaymentRegistryStore interface {
 	File(ctx context.Context, id int64) (string, []byte, error)
 	Import(ctx context.Context, bankAccountID int64, fileName string, data []byte, reg *model.ParsedRegistry) (model.RegistryImportResult, error)
 	BankAccountsByNumber(ctx context.Context) (map[string]int64, error)
+	BankAccountsByRegistryCode(ctx context.Context) (map[string]int64, error)
 }
 
 type paymentRegistryHandlers struct{ s PaymentRegistryStore }
@@ -111,9 +112,10 @@ type registryImportSummary struct {
 
 // importFiles принимает multipart/form-data с полями file: реестры (.txt) и zip-архивы с реестрами.
 //
-// Реестр — файл .txt, в имени которого есть 20-значное число, совпадающее с номером банковского счёта
-// в системе; счёт определяется по нему. Остальные файлы игнорируются (считаются в summary), а файл с номером
-// счёта, которого нет в системе, попадает в отчёт со статусом unknown_account. Каждый файл загружается
+// Реестр — файл .txt. Счёт определяется по 20-значному числу в имени, совпавшему с номером банковского счёта
+// в системе, а если числа нет (ВТБ) — по коду реестра в имени (bank_accounts.registry_code). Остальные файлы
+// игнорируются (в ignored с причиной), а файл с номером счёта, которого нет в системе, попадает в отчёт
+// со статусом unknown_account. Каждый файл загружается
 // отдельной транзакцией: ошибка в одном не отменяет остальные. Ответ 200: {files, summary}.
 func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
@@ -164,6 +166,11 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		writeErr(w, err)
 		return
 	}
+	byCode, err := h.s.BankAccountsByRegistryCode(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	loadedAs := map[int64]string{} // id реестра, созданного в этом запросе → полный путь файла (в том числе внутри архива)
 	for _, f := range candidates {
 		base := baseName(f.Name)
@@ -178,6 +185,13 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 				bankID = id
 				break
 			}
+		}
+		if bankID == 0 {
+			bankID = byCode[sberregistry.FileCode(base)]
+		}
+		if bankID == 0 && len(accounts) == 0 {
+			ignored.add(f.Name, ignoreNoAccount)
+			continue
 		}
 		if bankID == 0 {
 			results = append(results, registryFileResult{FileName: f.Name, Status: fileUnknownAccount, Error: "bank account " + accounts[0] + " is not in the system"})

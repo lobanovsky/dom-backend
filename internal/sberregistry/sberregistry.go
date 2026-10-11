@@ -1,5 +1,7 @@
 // Package sberregistry разбирает реестры платежей Сбера (текстовый файл, cp1251, разделитель «;»).
 //
+// Реестры ВТБ устроены так же, но без поля 13 (12 полей) и с десятичной точкой; формат определяется числом полей.
+//
 // Строка платежа (13 полей): дата дд-мм-гггг; время чч-мм-сс; поля 3 и 4 (смысл неизвестен);
 // номер операции; номер лицевого счёта; ФИО; адрес; поле 9 (смысл неизвестен); сумма платежа;
 // сумма к перечислению; комиссия; поле 13 (смысл неизвестен). Исходная строка сохраняется целиком.
@@ -8,6 +10,7 @@ package sberregistry
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +22,26 @@ import (
 	"dom-backend/internal/model"
 )
 
-const fieldCount = 13
+// Число полей строки: у Сбера 13, у ВТБ 12 (нет последнего поля).
+const (
+	fieldsSber = 13
+	fieldsVTB  = 12
+)
+
+const (
+	SourceSber = "sber"
+	SourceVTB  = "vtb"
+)
+
+var datePrefixRe = regexp.MustCompile(`^\d{6}_`)
+
+// FileCode возвращает код реестра из имени файла: без расширения и без даты ддммгг в начале
+// (040126_VTB_231068_001.txt → vtb_231068_001, в нижнем регистре). По нему файл сопоставляется с банковским счётом,
+// когда в имени нет номера счёта.
+func FileCode(fileName string) string {
+	name := strings.TrimSuffix(fileName, path.Ext(fileName))
+	return strings.ToLower(datePrefixRe.ReplaceAllString(name, ""))
+}
 
 var fileNameRe = regexp.MustCompile(`(?:^|_)(\d{10,12})_(\d{20})_\d+\.[Tt][Xx][Tt]$`)
 
@@ -81,6 +103,15 @@ func Parse(fileName string, data []byte) (*model.ParsedRegistry, []model.ImportR
 			errs = append(errs, model.ImportRowError{Row: n, Error: err.Error()})
 			continue
 		}
+		src := SourceSber
+		if strings.Count(line, ";")+1 == fieldsVTB {
+			src = SourceVTB
+		}
+		if reg.Source != "" && reg.Source != src {
+			errs = append(errs, model.ImportRowError{Row: n, Error: "rows of different formats in one file"})
+			continue
+		}
+		reg.Source = src
 		reg.Payments = append(reg.Payments, p)
 		reg.TotalAmount += p.Amount
 		reg.TotalTransferred += p.Transferred
@@ -114,8 +145,8 @@ func decode(data []byte) (string, error) {
 
 func parseLine(n int, line string) (model.RegistryPayment, error) {
 	f := strings.Split(line, ";")
-	if len(f) != fieldCount {
-		return model.RegistryPayment{}, fmt.Errorf("expected %d fields, got %d", fieldCount, len(f))
+	if len(f) != fieldsSber && len(f) != fieldsVTB {
+		return model.RegistryPayment{}, fmt.Errorf("expected %d or %d fields, got %d", fieldsVTB, fieldsSber, len(f))
 	}
 	p := model.RegistryPayment{Line: n, Raw: line, ExternalID: strings.TrimSpace(f[4]), AccountNum: strings.TrimSpace(f[5]),
 		PayerName: strings.TrimSpace(f[6]), Address: strings.TrimSpace(f[7])}

@@ -18,6 +18,7 @@ type RegistryPayment struct {
 
 // ParsedRegistry — разобранный файл реестра.
 type ParsedRegistry struct {
+	Source           string // sber | vtb: формат файла
 	FileAccount      string // расчётный счёт из имени файла; пусто, если имя нестандартное
 	RegistryNumber   string
 	RegistryDate     *Date

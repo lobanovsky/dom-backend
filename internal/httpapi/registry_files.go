@@ -8,8 +8,6 @@ import (
 	"io"
 	"path"
 	"strings"
-
-	"dom-backend/internal/sberregistry"
 )
 
 // Пределы загрузки реестров. Файлы читаются в память, на диск ничего не пишется.
@@ -133,13 +131,11 @@ func plainFile(name string, data []byte) registryFile {
 	return registryFile{Name: validUTF8(name), open: func() ([]byte, error) { return data, nil }}
 }
 
-// registrySkipReason: реестр — .txt с 20-значным номером счёта в имени; иначе возвращается причина отказа.
+// registrySkipReason: реестр — .txt; к какому счёту он относится (номер или код реестра в имени), решается позже,
+// когда известны счета системы, поэтому любой .txt из архива считается кандидатом.
 func registrySkipReason(base string) string {
-	switch {
-	case !isTxt(base):
+	if !isTxt(base) {
 		return ignoreNotTxt
-	case len(sberregistry.AccountsInName(base)) == 0:
-		return ignoreNoAccount
 	}
 	return ""
 }

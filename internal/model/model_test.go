@@ -155,4 +155,18 @@ func TestBankAccountValidation(t *testing.T) {
 	if short.Validate() == nil || backwards.Validate() == nil {
 		t.Error("expected errors for a short number and valid_to before valid_from")
 	}
+	good, bad, empty := "VTB_231068_001", "bad code", ""
+	withCode := ok
+	withCode.RegistryCode = &good
+	if err := withCode.Validate(); err != nil {
+		t.Errorf("registry code: %v", err)
+	}
+	withCode.RegistryCode = &empty
+	if err := withCode.Validate(); err != nil {
+		t.Errorf("empty registry code is allowed: %v", err)
+	}
+	withCode.RegistryCode = &bad
+	if withCode.Validate() == nil {
+		t.Error("registry code with a space must be rejected")
+	}
 }

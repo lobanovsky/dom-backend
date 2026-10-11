@@ -121,3 +121,41 @@ func TestParseAllowsEmptyPayerName(t *testing.T) {
 		t.Fatalf("payment without payer name must load: err = %v, errs = %v", err, errs)
 	}
 }
+
+// Реестр ВТБ: 12 полей, десятичная точка, в имени файла нет номера счёта.
+const vtbSample = "04-01-2026;16-23-25;4;110106641116;f3614e934c2e436283aff2fc1;0000003098;Иванов Иван Иванович;г Москва, д. 1, машиноместо.9;1225;3070.49;3070.49;0.00\r\n" +
+	"=1;3070.49;3070.49;0.00;9;05-01-2026\r\n"
+
+func TestParseVTB(t *testing.T) {
+	reg, errs, err := Parse("040126_VTB_231068_001.txt", cp1251(t, vtbSample))
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("err = %v, errs = %v", err, errs)
+	}
+	p := reg.Payments[0]
+	if reg.Source != SourceVTB || reg.FileAccount != "" || reg.RegistryNumber != "9" || p.ExternalID != "f3614e934c2e436283aff2fc1" || p.AccountNum != "0000003098" || p.Amount != 307049 {
+		t.Errorf("reg = %+v, payment = %+v", reg, p)
+	}
+	if sber, _, _ := Parse("x.txt", cp1251(t, sample)); sber.Source != SourceSber {
+		t.Errorf("sber source = %q", sber.Source)
+	}
+}
+
+func TestParseRejectsMixedFormats(t *testing.T) {
+	mixed := strings.SplitN(sample, "\r\n", 2)[0] + "\r\n" + strings.SplitN(vtbSample, "\r\n", 2)[0] + "\r\n=2;1;1;0;1;01-01-2026\r\n"
+	if _, errs, _ := Parse("x.txt", cp1251(t, mixed)); len(errs) != 1 {
+		t.Errorf("errs = %v", errs)
+	}
+}
+
+func TestFileCode(t *testing.T) {
+	for in, want := range map[string]string{
+		"040126_VTB_231068_001.txt": "vtb_231068_001",
+		"050126_vtb_231068_002.TXT": "vtb_231068_002",
+		"VTB_231068_001.txt":        "vtb_231068_001",
+		"noext":                     "noext",
+	} {
+		if got := FileCode(in); got != want {
+			t.Errorf("FileCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -127,11 +127,15 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 		return res, err
 	}
 
+	source := reg.Source
+	if source == "" {
+		source = "sber"
+	}
 	err = tx.QueryRow(ctx,
 		`INSERT INTO payment_registries (bank_account_id, source, file_name, file_sha256, file_content, registry_number, registry_date,
 		        payments_count, total_amount, total_transferred, total_commission)
-		 VALUES ($1, 'sber', $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-		bankAccountID, fileName, hash, data, nilIfEmpty(reg.RegistryNumber), reg.RegistryDate, len(reg.Payments),
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+		bankAccountID, source, fileName, hash, data, nilIfEmpty(reg.RegistryNumber), reg.RegistryDate, len(reg.Payments),
 		float64(reg.TotalAmount)/100, float64(reg.TotalTransferred)/100, float64(reg.TotalCommission)/100).Scan(&res.RegistryID)
 	if err != nil {
 		return res, mapErr(err)
@@ -237,4 +241,23 @@ func accountsByNumber(ctx context.Context, tx pgx.Tx, payments []model.RegistryP
 // реестры за прошлые периоды тоже нужно загружать).
 func (s *PaymentRegistries) BankAccountsByNumber(ctx context.Context) (map[string]int64, error) {
 	return bankAccountsByNumber(ctx, s.pool)
+}
+
+// BankAccountsByRegistryCode: код реестра (в нижнем регистре) → id неудалённых банковских счетов, у которых код задан.
+func (s *PaymentRegistries) BankAccountsByRegistryCode(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT lower(registry_code), id FROM bank_accounts WHERE deleted_at IS NULL AND registry_code IS NOT NULL`)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var code string
+		var id int64
+		if err := rows.Scan(&code, &id); err != nil {
+			return nil, mapErr(err)
+		}
+		out[code] = id
+	}
+	return out, mapErr(rows.Err())
 }

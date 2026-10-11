@@ -38,6 +38,10 @@ func (f *fakeRegistries) BankAccountsByNumber(context.Context) (map[string]int64
 	return map[string]int64{acct: 1, otherAc: 2}, nil
 }
 
+func (f *fakeRegistries) BankAccountsByRegistryCode(context.Context) (map[string]int64, error) {
+	return map[string]int64{"vtb_1_002": 2}, nil
+}
+
 func (f *fakeRegistries) Import(_ context.Context, bankID int64, name string, _ []byte, _ *model.ParsedRegistry) (model.RegistryImportResult, error) {
 	switch name {
 	case "UPPER_" + acct + "_2.TXT":
@@ -270,5 +274,28 @@ func TestGzippedRegistryUpload(t *testing.T) {
 	code, out := postRegistries(t, fake, upload{"a_" + acct + "_1.txt.gz", buf.String()})
 	if code != http.StatusOK || statuses(out)["a_"+acct+"_1.txt"] != "imported" || len(fake.imported) != 1 || fake.imported[0] != "a_"+acct+"_1.txt" {
 		t.Errorf("gzipped registry: status = %d, out = %v, imported = %v", code, out, fake.imported)
+	}
+}
+
+const vtbText = "03-01-2026;09-32-33;4;900000000001;a77c0963dd3d4706b36203e62;0000001001;Иванов Иван;г Москва, кв.1;1225;100.00;100.00;0.00\r\n" +
+	"=1;100.00;100.00;0.00;4242;06-01-2026\r\n"
+
+// У ВТБ в имени файла нет номера счёта: счёт определяется по коду реестра, дата в начале имени не учитывается.
+func TestImportFindsAccountByRegistryCode(t *testing.T) {
+	fake := &fakeRegistries{}
+	code, out := postRegistries(t, fake,
+		upload{"040126_VTB_1_002.txt", vtbText},
+		upload{"050126_vtb_1_002.TXT", vtbText},
+		upload{"040126_VTB_1_003.txt", vtbText},
+	)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	got := statuses(out)
+	if got["040126_VTB_1_002.txt"] != "imported" || got["050126_vtb_1_002.TXT"] != "imported" || len(got) != 2 {
+		t.Errorf("statuses = %v", got)
+	}
+	if ig := ignoredOf(out); len(ig) != 1 || ig["040126_VTB_1_003.txt"] != "no_account" {
+		t.Errorf("ignored = %v", ig)
 	}
 }

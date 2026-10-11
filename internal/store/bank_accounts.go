@@ -11,7 +11,7 @@ import (
 // Активность вычисляется по периоду действия на сегодня.
 const bankAccountActive = `(valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE))`
 
-const bankAccountCols = `id, organization_id, number, bik, bank_name, is_special, description, valid_from, valid_to, ` +
+const bankAccountCols = `id, organization_id, number, bik, bank_name, is_special, description, registry_code, valid_from, valid_to, ` +
 	bankAccountActive + ` AS active, created_at, updated_at, deleted_at`
 
 type BankAccounts struct{ pool *pgxpool.Pool }
@@ -34,17 +34,17 @@ func (s *BankAccounts) Get(ctx context.Context, id int64) (model.BankAccount, er
 
 func (s *BankAccounts) Create(ctx context.Context, in model.BankAccount) (model.BankAccount, error) {
 	return one[model.BankAccount](s.pool.Query(ctx,
-		`INSERT INTO bank_accounts (organization_id, number, bik, bank_name, is_special, description, valid_from, valid_to)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING `+bankAccountCols,
-		in.OrganizationID, in.Number, in.BIK, in.BankName, in.IsSpecial, in.Description, in.ValidFrom, in.ValidTo))
+		`INSERT INTO bank_accounts (organization_id, number, bik, bank_name, is_special, description, registry_code, valid_from, valid_to)
+		 VALUES ($1, $2, $3, $4, $5, $6, nullif($7, ''), $8, $9) RETURNING `+bankAccountCols,
+		in.OrganizationID, in.Number, in.BIK, in.BankName, in.IsSpecial, in.Description, in.RegistryCode, in.ValidFrom, in.ValidTo))
 }
 
 func (s *BankAccounts) Update(ctx context.Context, id int64, in model.BankAccount) (model.BankAccount, error) {
 	return one[model.BankAccount](s.pool.Query(ctx,
-		`UPDATE bank_accounts SET organization_id = $2, number = $3, bik = $4, bank_name = $5, is_special = $6, description = $7,
-		        valid_from = $8, valid_to = $9, updated_at = now()
+		`UPDATE bank_accounts SET organization_id = $2, number = $3, bik = $4, bank_name = $5, is_special = $6, description = $7, registry_code = nullif($8, ''),
+		        valid_from = $9, valid_to = $10, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+bankAccountCols,
-		id, in.OrganizationID, in.Number, in.BIK, in.BankName, in.IsSpecial, in.Description, in.ValidFrom, in.ValidTo))
+		id, in.OrganizationID, in.Number, in.BIK, in.BankName, in.IsSpecial, in.Description, in.RegistryCode, in.ValidFrom, in.ValidTo))
 }
 
 func (s *BankAccounts) Restore(ctx context.Context, id int64) (model.BankAccount, error) {

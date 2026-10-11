@@ -134,6 +134,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		unpacked   int64
 		results    []registryFileResult
 		summary    registryImportSummary
+		ignored    ignoredFiles
 	)
 	for _, hd := range headers {
 		data, err := readUpload(hd.Open, uploadLimit(hd.Filename, maxRegistrySize))
@@ -141,8 +142,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		case err != nil:
 			results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 		case isZip(hd.Filename, data):
-			files, skipped, err := expandZip(hd.Filename, data, &unpacked, registryName, maxRegistrySize)
-			summary.FilesIgnored += skipped
+			files, err := expandZip(hd.Filename, data, &unpacked, registrySkipReason, maxRegistrySize, &ignored)
 			if err != nil {
 				results = append(results, registryFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 				continue
@@ -167,11 +167,11 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 	loadedAs := map[int64]string{} // id реестра, созданного в этом запросе → полный путь файла (в том числе внутри архива)
 	for _, f := range candidates {
 		base := baseName(f.Name)
-		accounts := sberregistry.AccountsInName(base)
-		if !isTxt(base) || len(accounts) == 0 {
-			summary.FilesIgnored++
+		if reason := registrySkipReason(base); reason != "" {
+			ignored.add(f.Name, reason)
 			continue
 		}
+		accounts := sberregistry.AccountsInName(base)
 		bankID := int64(0)
 		for _, a := range accounts {
 			if id, ok := known[a]; ok {
@@ -196,6 +196,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		results = append(results, fr)
 	}
 
+	summary.FilesIgnored = ignored.total
 	for _, fr := range results {
 		logRegistryFile(fr)
 		switch fr.Status {
@@ -214,8 +215,23 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		results = []registryFileResult{}
 	}
 	slog.Info("payment registries import", "files", len(results), "imported", summary.FilesImported, "failed", summary.FilesFailed,
-		"ignored", summary.FilesIgnored, "payments", summary.PaymentsCreated, "skipped", summary.PaymentsSkipped, "linked", summary.Linked, "unlinked", summary.Unlinked)
-	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary})
+		"ignored", summary.FilesIgnored, "ignored_files", ignoredNames(ignored.listed, 5), "payments", summary.PaymentsCreated, "skipped", summary.PaymentsSkipped, "linked", summary.Linked, "unlinked", summary.Unlinked)
+	if ignored.listed == nil {
+		ignored.listed = []ignoredFile{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": results, "summary": summary, "ignored": ignored.listed})
+}
+
+// ignoredNames — первые n имён пропущенных файлов для журнала.
+func ignoredNames(list []ignoredFile, n int) []string {
+	names := make([]string, 0, n)
+	for _, f := range list {
+		if len(names) == n {
+			break
+		}
+		names = append(names, f.FileName)
+	}
+	return names
 }
 
 func (h paymentRegistryHandlers) importOne(ctx context.Context, f registryFile, base string, bankID int64) registryFileResult {

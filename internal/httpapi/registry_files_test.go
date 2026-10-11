@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -109,6 +110,41 @@ func statuses(out map[string]any) map[string]string {
 	return got
 }
 
+// ignoredOf: имя пропущенного файла → причина из ответа.
+func ignoredOf(out map[string]any) map[string]string {
+	got := map[string]string{}
+	for _, f := range out["ignored"].([]any) {
+		m := f.(map[string]any)
+		got[m["file_name"].(string)] = m["reason"].(string)
+	}
+	return got
+}
+
+func TestImportReportsIgnoredPlainFilesAndCapsTheList(t *testing.T) {
+	uploads := []upload{{"040126_VTB_231068_001.txt", registryText}, {"photo.jpg", "x"}}
+	for i := 0; i < maxListedIgnored+5; i++ {
+		uploads = append(uploads, upload{fmt.Sprintf("note%03d.txt", i), "hello"})
+	}
+	code, out := postRegistries(t, &fakeRegistries{}, uploads...)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	if got := out["summary"].(map[string]any)["files_ignored"]; got != float64(maxListedIgnored+7) {
+		t.Errorf("files_ignored = %v", got)
+	}
+	list := out["ignored"].([]any)
+	if len(list) != maxListedIgnored {
+		t.Errorf("listed = %d, want %d", len(list), maxListedIgnored)
+	}
+	// после сортировки по имени первым идёт файл ВТБ: его причину пользователь и должен увидеть
+	if first := list[0].(map[string]any); first["file_name"] != "040126_VTB_231068_001.txt" || first["reason"] != "no_account" {
+		t.Errorf("first = %v", first)
+	}
+	if code, out := postRegistries(t, &fakeRegistries{}, upload{"a_" + acct + "_1.txt", registryText}); code != http.StatusOK || len(out["ignored"].([]any)) != 0 {
+		t.Errorf("nothing ignored: ignored = %v", out["ignored"])
+	}
+}
+
 func TestImportZipFindsRegistriesByAccountInName(t *testing.T) {
 	archive := zipOf(t, map[string]string{
 		"2026/январь/900005_9715357654_" + acct + "_640.txt":            registryText,
@@ -159,6 +195,11 @@ func TestImportZipFindsRegistriesByAccountInName(t *testing.T) {
 		dupOf["registries.zip/2026/ящик/dup2_"+acct+"_5.txt"] != "registries.zip/2026/январь/900005_9715357654_"+acct+"_640.txt" {
 		t.Errorf("duplicate_of = %v", dupOf)
 	}
+	// пропущенные называются поимённо, с причиной; служебные записи macOS не считаются
+	if got := ignoredOf(out); len(got) != 3 || got["registries.zip/2026/readme.txt"] != "no_account" ||
+		got["registries.zip/2026/"+otherAc+"_9.pdf"] != "not_txt" || got["registries.zip/2026/n/z.zip"] != "not_txt" {
+		t.Errorf("ignored = %v", got)
+	}
 	s := out["summary"].(map[string]any)
 	if s["files_imported"] != 1.0 || s["files_failed"] != 4.0 || s["files_ignored"] != 3.0 || s["payments_created"] != 1.0 || s["payments_skipped"] != 1.0 {
 		t.Errorf("summary = %v", s)
@@ -203,7 +244,7 @@ func TestBaseNameAndTxt(t *testing.T) {
 
 func TestExpandZipLimits(t *testing.T) {
 	var total int64
-	files, _, err := expandZip("big.zip", zipOf(t, map[string]string{"x_" + acct + "_1.txt": string(make([]byte, maxRegistrySize+1))}), &total, registryName, maxRegistrySize)
+	files, err := expandZip("big.zip", zipOf(t, map[string]string{"x_" + acct + "_1.txt": string(make([]byte, maxRegistrySize+1))}), &total, registrySkipReason, maxRegistrySize, &ignoredFiles{})
 	if err != nil || len(files) != 1 {
 		t.Fatalf("files = %v, err = %v", files, err)
 	}
@@ -215,7 +256,7 @@ func TestExpandZipLimits(t *testing.T) {
 	maxArchiveEntries = 3
 	defer func() { maxArchiveEntries = old }()
 	many := map[string]string{"a.txt": "", "b.txt": "", "c.txt": "", "d.txt": ""}
-	if _, _, err := expandZip("many.zip", zipOf(t, many), &total, registryName, maxRegistrySize); err == nil {
+	if _, err := expandZip("many.zip", zipOf(t, many), &total, registrySkipReason, maxRegistrySize, &ignoredFiles{}); err == nil {
 		t.Error("an archive with too many entries must be rejected")
 	}
 }

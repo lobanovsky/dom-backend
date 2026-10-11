@@ -96,9 +96,12 @@ type statementImportSummary struct {
 	OperationsSkipped int `json:"operations_skipped"`
 }
 
-// statementName: выписка — текстовый файл обмена с 1С (.txt); по содержимому это проверяется при разборе.
-func statementName(base string) bool {
-	return strings.EqualFold(baseExt(base), ".txt")
+// statementSkipReason: выписка — текстовый файл обмена с 1С (.txt); по содержимому это проверяется при разборе.
+func statementSkipReason(base string) string {
+	if !strings.EqualFold(baseExt(base), ".txt") {
+		return ignoreNotTxt
+	}
+	return ""
 }
 
 func baseExt(name string) string {
@@ -130,6 +133,7 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 		unpacked   int64
 		results    []statementFileResult
 		summary    statementImportSummary
+		ignored    ignoredFiles
 	)
 	for _, hd := range headers {
 		data, err := readUpload(hd.Open, uploadLimit(hd.Filename, maxStatementSize))
@@ -137,8 +141,7 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 		case err != nil:
 			results = append(results, statementFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 		case isZip(hd.Filename, data):
-			files, skipped, err := expandZip(hd.Filename, data, &unpacked, statementName, maxStatementSize)
-			summary.FilesIgnored += skipped
+			files, err := expandZip(hd.Filename, data, &unpacked, statementSkipReason, maxStatementSize, &ignored)
 			if err != nil {
 				results = append(results, statementFileResult{FileName: validUTF8(hd.Filename), Status: fileError, Error: err.Error()})
 				continue
@@ -158,12 +161,12 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 	loadedAs := map[int64]string{}
 	for _, f := range candidates {
 		base := baseName(f.Name)
-		if !statementName(base) {
-			summary.FilesIgnored++
+		if reason := statementSkipReason(base); reason != "" {
+			ignored.add(f.Name, reason)
 			continue
 		}
 		if data, err := f.open(); err == nil && !clientbank.LooksLike(data) {
-			summary.FilesIgnored++ // .txt, но не файл обмена с 1С
+			ignored.add(f.Name, ignoreNot1C)
 			continue
 		}
 		for _, fr := range h.importOne(r.Context(), f, base) {
@@ -179,6 +182,7 @@ func (h bankStatementHandlers) importFiles(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	summary.FilesIgnored = ignored.total
 	for _, fr := range results {
 		logStatementFile(fr)
 		switch fr.Status {

@@ -25,6 +25,34 @@ const (
 // (maxArchiveSize), а распаковываются только подходящие по имени файлы. Переменная, чтобы тест мог её уменьшить.
 var maxArchiveEntries = 1_000_000
 
+// Причины, по которым файл не принят за реестр или выписку (коды; русские подписи — во фронтенде).
+const (
+	ignoreNotTxt    = "not_txt"    // расширение не .txt
+	ignoreNoAccount = "no_account" // в имени нет номера счёта
+	ignoreNot1C     = "not_1c"     // .txt, но не файл обмена с 1С
+)
+
+// maxListedIgnored — сколько пропущенных файлов называется в ответе поимённо: архив на тысячи файлов не должен раздувать ответ.
+const maxListedIgnored = 50
+
+type ignoredFile struct {
+	FileName string `json:"file_name"`
+	Reason   string `json:"reason"`
+}
+
+// ignoredFiles считает пропущенные файлы и запоминает имена первых maxListedIgnored.
+type ignoredFiles struct {
+	total  int
+	listed []ignoredFile
+}
+
+func (l *ignoredFiles) add(name, reason string) {
+	l.total++
+	if len(l.listed) < maxListedIgnored {
+		l.listed = append(l.listed, ignoredFile{FileName: validUTF8(name), Reason: reason})
+	}
+}
+
 // registryFile — кандидат в реестр: имя для отчёта (путь внутри архива) и ленивое чтение содержимого,
 // чтобы не распаковывать файлы, которые заведомо не реестры.
 type registryFile struct {
@@ -46,25 +74,25 @@ func isZip(name string, _ []byte) bool {
 
 func validUTF8(s string) string { return strings.ToValidUTF8(s, "?") }
 
-// expandZip возвращает файлы архива, подходящие под accept(basename) (например, .txt с номером счёта в имени); остальные
-// считаются в ignored и сразу отбрасываются, чтобы не держать в памяти список всех записей большого архива.
+// expandZip возвращает файлы архива, для которых skip(basename) вернул пустую строку (например, .txt с номером счёта в имени);
+// остальные записываются в ign вместе с причиной и сразу отбрасываются, чтобы не держать в памяти список всех записей большого архива.
 // Служебные записи macOS (__MACOSX/, ._имя) и каталоги пропускаются без счёта. Вложенные архивы не раскрываются.
 // unpacked — общий счётчик распакованных байт на запрос.
-func expandZip(archiveName string, data []byte, unpacked *int64, accept func(base string) bool, maxEntry int64) (files []registryFile, ignored int, err error) {
+func expandZip(archiveName string, data []byte, unpacked *int64, skip func(base string) string, maxEntry int64, ign *ignoredFiles) (files []registryFile, err error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, 0, fmt.Errorf("not a valid zip archive")
+		return nil, fmt.Errorf("not a valid zip archive")
 	}
 	if len(zr.File) > maxArchiveEntries {
-		return nil, 0, fmt.Errorf("archive has too many entries (max %d)", maxArchiveEntries)
+		return nil, fmt.Errorf("archive has too many entries (max %d)", maxArchiveEntries)
 	}
 	for _, f := range zr.File {
 		name := strings.ReplaceAll(f.Name, "\\", "/")
 		if f.FileInfo().IsDir() || strings.HasPrefix(name, "__MACOSX/") || strings.Contains(name, "/__MACOSX/") || strings.HasPrefix(path.Base(name), "._") {
 			continue
 		}
-		if !accept(path.Base(name)) {
-			ignored++
+		if reason := skip(path.Base(name)); reason != "" {
+			ign.add(archiveName+"/"+name, reason)
 			continue
 		}
 		f := f
@@ -73,7 +101,7 @@ func expandZip(archiveName string, data []byte, unpacked *int64, accept func(bas
 			open: func() ([]byte, error) { return readZipEntry(f, unpacked, maxEntry) },
 		})
 	}
-	return files, ignored, nil
+	return files, nil
 }
 
 // readZipEntry читает запись с ограничением по фактическому объёму: заголовок архива может лгать о размере.
@@ -105,9 +133,15 @@ func plainFile(name string, data []byte) registryFile {
 	return registryFile{Name: validUTF8(name), open: func() ([]byte, error) { return data, nil }}
 }
 
-// registryName: реестр Сбера — .txt с 20-значным номером счёта в имени.
-func registryName(base string) bool {
-	return isTxt(base) && len(sberregistry.AccountsInName(base)) > 0
+// registrySkipReason: реестр — .txt с 20-значным номером счёта в имени; иначе возвращается причина отказа.
+func registrySkipReason(base string) string {
+	switch {
+	case !isTxt(base):
+		return ignoreNotTxt
+	case len(sberregistry.AccountsInName(base)) == 0:
+		return ignoreNoAccount
+	}
+	return ""
 }
 
 // inflate распаковывает файл, который браузер сжал gzip перед отправкой (большие текстовые выписки иначе не укладываются

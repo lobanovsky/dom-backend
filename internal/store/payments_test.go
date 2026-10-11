@@ -264,11 +264,21 @@ func TestRegistryImport(t *testing.T) {
 	}
 	// реестр ВТБ: источник из формата файла, счёт по коду реестра
 	code := "vtb_test_" + fmt.Sprint(bank.ID)
-	if _, err := pool.Exec(ctx, `UPDATE bank_accounts SET registry_code = upper($2) WHERE id = $1`, bank.ID, code); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE bank_accounts SET registry_codes = ARRAY[upper($2), 'vtb_test_second'] WHERE id = $1`, bank.ID, code); err != nil {
 		t.Fatal(err)
 	}
-	if byCode, err := regs.BankAccountsByRegistryCode(ctx); err != nil || byCode[code] != bank.ID {
-		t.Errorf("BankAccountsByRegistryCode: %v, err = %v", byCode[code], err)
+	if byCode, err := regs.BankAccountsByRegistryCode(ctx); err != nil || byCode[code] != bank.ID || byCode["vtb_test_second"] != bank.ID {
+		t.Errorf("BankAccountsByRegistryCode: %v, err = %v", byCode, err)
+	}
+	// код уже занят другим неудалённым счётом: БД не даёт сохранить (без учёта регистра)
+	other, err := NewBankAccounts(pool).Create(ctx, model.BankAccount{OrganizationID: bank.OrganizationID, Number: "40703810000000009999", ValidFrom: bank.ValidFrom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup(t, pool, "bank_accounts", other.ID)
+	other.RegistryCodes = []string{"VTB_TEST_SECOND"}
+	if _, err := NewBankAccounts(pool).Update(ctx, other.ID, other); !errors.Is(err, ErrConflict) {
+		t.Errorf("duplicate registry code: err = %v, want conflict", err)
 	}
 	vtb := &model.ParsedRegistry{Source: "vtb", Payments: []model.RegistryPayment{pay("reg-test-vtb", "reg-test-1", 307049)}}
 	resV, err := regs.Import(ctx, bank.ID, "040126_VTB_x_001.txt", []byte("file vtb"), vtb)

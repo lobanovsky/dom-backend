@@ -62,7 +62,7 @@ func NewRouter(d Deps) http.Handler {
 	sberHandlers{d.Sber, d.SberSyncer, d.SberInfo}.register(api)
 	crudHandlers[model.PaymentRule, model.PaymentRuleFilter]{path: "/api/v1/payment-rules", store: d.PaymentRules, filter: paymentRuleFilter, prepare: func(r *model.PaymentRule) { r.SetDefaults() }}.register(api)
 	assignmentHandlers{d.Assignments, d.RuleOrder}.register(api)
-	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter}.register(api)
+	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter, prepare: func(a *model.BankAccount) { a.SetDefaults() }}.register(api)
 	crudHandlers[model.PaymentCategory, model.PaymentCategoryFilter]{path: "/api/v1/payment-categories", store: d.PaymentCategories, filter: paymentCategoryFilter}.register(api)
 	crudHandlers[model.IncomingPayment, model.IncomingPaymentFilter]{path: "/api/v1/incoming-payments", store: d.IncomingPayments, filter: incomingPaymentFilter}.register(api)
 	crudHandlers[model.OutgoingPayment, model.OutgoingPaymentFilter]{path: "/api/v1/outgoing-payments", store: d.OutgoingPayments, filter: outgoingPaymentFilter}.register(api)

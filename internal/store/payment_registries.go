@@ -243,9 +243,9 @@ func (s *PaymentRegistries) BankAccountsByNumber(ctx context.Context) (map[strin
 	return bankAccountsByNumber(ctx, s.pool)
 }
 
-// BankAccountsByRegistryCode: код реестра (в нижнем регистре) → id неудалённых банковских счетов, у которых код задан.
+// BankAccountsByRegistryCode: код реестра (в нижнем регистре) → id неудалённых банковских счетов.
 func (s *PaymentRegistries) BankAccountsByRegistryCode(ctx context.Context) (map[string]int64, error) {
-	rows, err := s.pool.Query(ctx, `SELECT lower(registry_code), id FROM bank_accounts WHERE deleted_at IS NULL AND registry_code IS NOT NULL`)
+	rows, err := s.pool.Query(ctx, `SELECT lower(c), b.id FROM bank_accounts b, unnest(b.registry_codes) c WHERE b.deleted_at IS NULL`)
 	if err != nil {
 		return nil, mapErr(err)
 	}

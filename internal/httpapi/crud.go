@@ -158,11 +158,11 @@ func paymentCategoryFilter(w http.ResponseWriter, r *http.Request) (model.Paymen
 }
 
 func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRegistryFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"bank_account_id"}, Texts: []string{"q"}, Dates: []string{"date_from", "date_to"}})
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"bank_account_id"}, Texts: []string{"q"}, Dates: []string{"date_from", "date_to"}, Bools: []string{"no_payment"}})
 	if !ok {
 		return model.PaymentRegistryFilter{}, p, false
 	}
-	return model.PaymentRegistryFilter{Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"), Q: p.Text("q")}, p, true
+	return model.PaymentRegistryFilter{Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"), Q: p.Text("q"), NoPayment: isTrue(p.Bool("no_payment"))}, p, true
 }
 
 func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.IncomingPaymentFilter, listParams, bool) {
@@ -171,7 +171,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 		Texts:  []string{"q"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
-		Bools:  []string{"unlinked"},
+		Bools:  []string{"unlinked", "hide_registry_details"},
 	})
 	if !ok {
 		return model.IncomingPaymentFilter{}, p, false
@@ -182,7 +182,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 		StatementID: p.Int("statement_id"), PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"),
-		Q: p.Text("q"), Unlinked: unlinked != nil && *unlinked,
+		Q: p.Text("q"), Unlinked: unlinked != nil && *unlinked, HideRegistryDetails: isTrue(p.Bool("hide_registry_details")),
 	}, p, true
 }
 
@@ -217,3 +217,5 @@ func paymentRuleFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRul
 	}
 	return model.PaymentRuleFilter{Deleted: p.Deleted, Enabled: p.Bool("enabled"), Direction: dir}, p, true
 }
+
+func isTrue(b *bool) bool { return b != nil && *b }

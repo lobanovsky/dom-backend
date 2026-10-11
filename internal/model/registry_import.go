@@ -45,4 +45,14 @@ type RegistryImportResult struct {
 	Unlinked          int              `json:"unlinked"`
 	Skipped           []SkippedPayment `json:"skipped"`
 	Warnings          []string         `json:"warnings"`
+	// Платёж из выписки, который этот реестр детализирует; пусто, если он ещё не загружен (связь появится сама).
+	Payment *LinkedPayment `json:"payment"`
+}
+
+// LinkedPayment — платёж из выписки, связанный с реестром.
+type LinkedPayment struct {
+	ID          int64   `json:"id" db:"id"`
+	PaymentDate Date    `json:"payment_date" db:"payment_date"`
+	Amount      float64 `json:"amount" db:"amount"`
+	StatementID *int64  `json:"statement_id" db:"statement_id"`
 }

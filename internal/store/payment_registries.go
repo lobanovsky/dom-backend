@@ -37,7 +37,11 @@ func (e *AllDuplicatesError) Error() string {
 func (e *AllDuplicatesError) Unwrap() error { return ErrConflict }
 
 const registryCols = `id, bank_account_id, source, file_name, file_sha256, registry_number, registry_date, payments_count,
-	total_amount, total_transferred, total_commission, created_at, updated_at, deleted_at`
+	total_amount, total_transferred, total_commission, payment_id,
+	(SELECT p.payment_date FROM incoming_payments p WHERE p.id = payment_id) AS payment_date,
+	(SELECT p.amount FROM incoming_payments p WHERE p.id = payment_id) AS payment_amount,
+	(SELECT p.statement_id FROM incoming_payments p WHERE p.id = payment_id) AS payment_statement_id,
+	created_at, updated_at, deleted_at`
 
 type PaymentRegistries struct{ pool *pgxpool.Pool }
 
@@ -51,8 +55,9 @@ func (s *PaymentRegistries) List(ctx context.Context, f model.PaymentRegistryFil
 		   AND ($3::date IS NULL OR registry_date <= $3)
 		   AND ($4::text IS NULL OR concat_ws(' ', file_name, registry_number) ILIKE $4)
 		   AND (deleted_at IS NOT NULL) = $5
+		   AND (NOT $8 OR payment_id IS NULL)
 		 ORDER BY registry_date DESC NULLS LAST, id DESC LIMIT $6 OFFSET $7`,
-		f.BankAccountID, f.DateFrom, f.DateTo, likePattern(f.Q), f.Deleted, limit, offset))
+		f.BankAccountID, f.DateFrom, f.DateTo, likePattern(f.Q), f.Deleted, limit, offset, f.NoPayment))
 }
 
 func (s *PaymentRegistries) Get(ctx context.Context, id int64) (model.PaymentRegistry, error) {
@@ -171,6 +176,12 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d: %s (платежи загружены как есть, пометка добавлена в комментарий)", n, note))
 	}
 	sort.Strings(res.Warnings)
+	if _, err := linkRegistries(ctx, tx, &bankAccountID); err != nil {
+		return model.RegistryImportResult{}, err
+	}
+	if res.Payment, err = linkedPayment(ctx, tx, res.RegistryID); err != nil {
+		return model.RegistryImportResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.RegistryImportResult{}, mapErr(err)
 	}
@@ -260,4 +271,17 @@ func (s *PaymentRegistries) BankAccountsByRegistryCode(ctx context.Context) (map
 		out[code] = id
 	}
 	return out, mapErr(rows.Err())
+}
+
+// linkedPayment возвращает платёж, с которым связан реестр, или nil.
+func linkedPayment(ctx context.Context, tx pgx.Tx, registryID int64) (*model.LinkedPayment, error) {
+	lp, err := one[model.LinkedPayment](tx.Query(ctx,
+		`SELECT p.id, p.payment_date, p.amount, p.statement_id FROM payment_registries r JOIN incoming_payments p ON p.id = r.payment_id WHERE r.id = $1`, registryID))
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &lp, nil
 }

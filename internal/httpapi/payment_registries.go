@@ -24,6 +24,7 @@ type PaymentRegistryStore interface {
 	Import(ctx context.Context, bankAccountID int64, fileName string, data []byte, reg *model.ParsedRegistry) (model.RegistryImportResult, error)
 	BankAccountsByNumber(ctx context.Context) (map[string]int64, error)
 	BankAccountsByRegistryCode(ctx context.Context) (map[string]int64, error)
+	Relink(ctx context.Context) (int, []store.UnmatchedRegistry, error)
 }
 
 type paymentRegistryHandlers struct{ s PaymentRegistryStore }
@@ -31,6 +32,7 @@ type paymentRegistryHandlers struct{ s PaymentRegistryStore }
 func (h paymentRegistryHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/payment-registries", h.list)
 	mux.HandleFunc("POST /api/v1/payment-registries/import", h.importFiles)
+	mux.HandleFunc("POST /api/v1/payment-registries/relink", h.relink)
 	mux.HandleFunc("GET /api/v1/payment-registries/{id}", h.get)
 	mux.HandleFunc("GET /api/v1/payment-registries/{id}/file", h.file)
 }
@@ -59,6 +61,16 @@ func (h paymentRegistryHandlers) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+// relink повторяет сопоставление реестров с платежами выписок: {linked, unmatched:[{registry_id, file_name, reason}]}.
+func (h paymentRegistryHandlers) relink(w http.ResponseWriter, r *http.Request) {
+	linked, unmatched, err := h.s.Relink(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"linked": linked, "unmatched": unmatched})
 }
 
 // file отдаёт исходный загруженный файл реестра.
@@ -101,13 +113,15 @@ type registryFileResult struct {
 }
 
 type registryImportSummary struct {
-	FilesImported   int `json:"files_imported"`
-	FilesFailed     int `json:"files_failed"`
-	FilesIgnored    int `json:"files_ignored"`
-	PaymentsCreated int `json:"payments_created"`
-	PaymentsSkipped int `json:"payments_skipped"`
-	Linked          int `json:"linked"`
-	Unlinked        int `json:"unlinked"`
+	FilesImported int `json:"files_imported"`
+	FilesFailed   int `json:"files_failed"`
+	FilesIgnored  int `json:"files_ignored"`
+	// Загруженные реестры, для которых платёж в выписке пока не найден (свяжутся, когда выписка придёт).
+	FilesWithoutPayment int `json:"files_without_payment"`
+	PaymentsCreated     int `json:"payments_created"`
+	PaymentsSkipped     int `json:"payments_skipped"`
+	Linked              int `json:"linked"`
+	Unlinked            int `json:"unlinked"`
 }
 
 // importFiles принимает multipart/form-data с полями file: реестры (.txt) и zip-архивы с реестрами.
@@ -220,6 +234,9 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 			summary.PaymentsSkipped += fr.Result.SkippedDuplicates
 			summary.Linked += fr.Result.Linked
 			summary.Unlinked += fr.Result.Unlinked
+			if fr.Result.Payment == nil {
+				summary.FilesWithoutPayment++
+			}
 		default:
 			summary.FilesFailed++
 			summary.PaymentsSkipped += len(fr.Skipped)
@@ -229,7 +246,7 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 		results = []registryFileResult{}
 	}
 	slog.Info("payment registries import", "files", len(results), "imported", summary.FilesImported, "failed", summary.FilesFailed,
-		"ignored", summary.FilesIgnored, "ignored_files", ignoredNames(ignored.listed, 5), "payments", summary.PaymentsCreated, "skipped", summary.PaymentsSkipped, "linked", summary.Linked, "unlinked", summary.Unlinked)
+		"ignored", summary.FilesIgnored, "ignored_files", ignoredNames(ignored.listed, 5), "payments", summary.PaymentsCreated, "skipped", summary.PaymentsSkipped, "without_payment", summary.FilesWithoutPayment, "linked", summary.Linked, "unlinked", summary.Unlinked)
 	if ignored.listed == nil {
 		ignored.listed = []ignoredFile{}
 	}

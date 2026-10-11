@@ -176,6 +176,12 @@ func (s *BankStatements) Import(ctx context.Context, fileName string, data []byt
 			res.Incoming++
 		}
 	}
+	if res.Incoming > 0 {
+		// Реестры, загруженные раньше самой выписки, находят в ней свой платёж.
+		if res.RegistriesLinked, err = linkRegistries(ctx, tx, &bankID); err != nil {
+			return model.StatementImportResult{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.StatementImportResult{}, mapErr(err)
 	}

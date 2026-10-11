@@ -22,7 +22,10 @@ const incomingCols = `id, bank_account_id, registry_id, external_id, payment_dat
 	(SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id) AS personal_account_number,
 	(SELECT a.premises_id FROM personal_accounts a WHERE a.id = personal_account_id) AS premises_id,
 	(SELECT r.registry_number FROM payment_registries r WHERE r.id = registry_id) AS registry_number,
-	(SELECT r.file_name FROM payment_registries r WHERE r.id = registry_id) AS registry_file_name`
+	(SELECT r.file_name FROM payment_registries r WHERE r.id = registry_id) AS registry_file_name,
+	(SELECT d.id FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_registry_id,
+	(SELECT d.file_name FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_registry_file_name,
+	(SELECT d.payments_count FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_count`
 
 type IncomingPayments struct{ pool *pgxpool.Pool }
 
@@ -45,9 +48,12 @@ func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilt
 		   AND (NOT $10 OR (personal_account_id IS NULL AND category_id IS NULL))
 		   AND (deleted_at IS NOT NULL) = $11
 		   AND ($14::bigint IS NULL OR statement_id = $14)
+		   AND (NOT $15 OR registry_id IS NULL OR NOT EXISTS (
+		        SELECT 1 FROM payment_registries r JOIN incoming_payments a ON a.id = r.payment_id AND a.deleted_at IS NULL
+		         WHERE r.id = incoming_payments.registry_id))
 		 ORDER BY payment_date DESC, payment_time DESC NULLS LAST, id DESC LIMIT $12 OFFSET $13`,
 		f.BankAccountID, f.RegistryID, f.PersonalAccountID, f.CategoryID, f.DateFrom, f.DateTo,
-		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID))
+		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID, f.HideRegistryDetails))
 }
 
 func (s *IncomingPayments) Get(ctx context.Context, id int64) (model.IncomingPayment, error) {

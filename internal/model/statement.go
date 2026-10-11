@@ -79,4 +79,5 @@ type StatementImportResult struct {
 	SkippedDuplicates int                `json:"skipped_duplicates"`
 	Skipped           []SkippedOperation `json:"skipped"`
 	Warnings          []string           `json:"warnings"`
+	RegistriesLinked  int                `json:"registries_linked"` // сколько ранее загруженных реестров нашли свой платёж в этой выписке
 }

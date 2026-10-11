@@ -53,6 +53,10 @@ type IncomingPayment struct {
 	PremisesID            *int64  `json:"premises_id" db:"premises_id"` // помещение лицевого счёта: по нему в списке строится ссылка
 	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
 	RegistryFileName      *string `json:"registry_file_name" db:"registry_file_name"` // имя файла реестра: в списках говорит больше, чем номер
+	// Только чтение: если этот платёж из банка детализирован реестром (в назначении имя файла реестра) — сам реестр.
+	DetailRegistryID       *int64  `json:"detail_registry_id" db:"detail_registry_id"`
+	DetailRegistryFileName *string `json:"detail_registry_file_name" db:"detail_registry_file_name"`
+	DetailCount            *int    `json:"detail_count" db:"detail_count"`
 }
 
 func (p IncomingPayment) Validate() error {
@@ -138,4 +142,9 @@ type PaymentRegistry struct {
 	TotalAmount      float64 `json:"total_amount" db:"total_amount"`
 	TotalTransferred float64 `json:"total_transferred" db:"total_transferred"`
 	TotalCommission  float64 `json:"total_commission" db:"total_commission"`
+	// Платёж из выписки, который этот реестр детализирует (сопоставляется сервером), и его данные для отображения.
+	PaymentID          *int64   `json:"payment_id" db:"payment_id"`
+	PaymentDate        *Date    `json:"payment_date" db:"payment_date"`
+	PaymentAmount      *float64 `json:"payment_amount" db:"payment_amount"`
+	PaymentStatementID *int64   `json:"payment_statement_id" db:"payment_statement_id"`
 }

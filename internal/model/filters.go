@@ -82,6 +82,7 @@ type PaymentRegistryFilter struct {
 	DateFrom      *Date // по дате реестра
 	DateTo        *Date
 	Q             *string // подстрока в имени файла или номере реестра
+	NoPayment     bool    // только реестры без платежа в выписке
 }
 
 type IncomingPaymentFilter struct {
@@ -97,6 +98,8 @@ type IncomingPaymentFilter struct {
 	AmountTo          *float64
 	Q                 *string // подстрока в плательщике, назначении, комментарии, номере документа
 	Unlinked          bool    // только без лицевого счёта и категории
+	// Скрыть строки реестров, у которых найден платёж из выписки: он уже показывает их суммой.
+	HideRegistryDetails bool
 }
 
 type OutgoingPaymentFilter struct {

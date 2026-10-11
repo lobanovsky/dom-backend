@@ -42,6 +42,10 @@ func (f *fakeRegistries) BankAccountsByRegistryCode(context.Context) (map[string
 	return map[string]int64{"vtb_1_002": 2}, nil
 }
 
+func (f *fakeRegistries) Relink(context.Context) (int, []store.UnmatchedRegistry, error) {
+	return 2, []store.UnmatchedRegistry{{RegistryID: 5, FileName: "x.txt", Reason: store.UnmatchedNoPayment}}, nil
+}
+
 func (f *fakeRegistries) Import(_ context.Context, bankID int64, name string, _ []byte, _ *model.ParsedRegistry) (model.RegistryImportResult, error) {
 	switch name {
 	case "UPPER_" + acct + "_2.TXT":
@@ -297,5 +301,24 @@ func TestImportFindsAccountByRegistryCode(t *testing.T) {
 	}
 	if ig := ignoredOf(out); len(ig) != 1 || ig["040126_VTB_1_003.txt"] != "no_account" {
 		t.Errorf("ignored = %v", ig)
+	}
+}
+
+func TestRelinkEndpoint(t *testing.T) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), PaymentRegistries: &fakeRegistries{}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/payment-registries/relink", nil)
+	req.AddCookie(login(t, h))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var out struct {
+		Linked    int `json:"linked"`
+		Unmatched []struct {
+			RegistryID int64  `json:"registry_id"`
+			Reason     string `json:"reason"`
+		} `json:"unmatched"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || out.Linked != 2 || len(out.Unmatched) != 1 || out.Unmatched[0].Reason != "no_payment" {
+		t.Errorf("status = %d, body = %s", rec.Code, rec.Body)
 	}
 }

@@ -94,6 +94,7 @@ func run(log *slog.Logger) error {
 			Importer:           store.NewImporter(pool),
 			Properties:         store.NewProperties(pool),
 			PaymentRegistries:  store.NewPaymentRegistries(pool),
+			Counterparties:     store.NewCounterparties(pool),
 			BankStatements:     bankStatements,
 			Sber:               sberStore,
 			SberSyncer:         syncer,

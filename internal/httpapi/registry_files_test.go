@@ -322,3 +322,30 @@ func TestRelinkEndpoint(t *testing.T) {
 		t.Errorf("status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
+
+type fakeCounterparties struct{ filter model.CounterpartyFilter }
+
+func (f *fakeCounterparties) List(_ context.Context, flt model.CounterpartyFilter, _, _ int) ([]model.Counterparty, error) {
+	f.filter = flt
+	return []model.Counterparty{{Name: "ООО Тест", OutgoingCount: 1}}, nil
+}
+
+func TestCounterpartiesEndpoint(t *testing.T) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	fake := &fakeCounterparties{}
+	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), Counterparties: fake})
+	cookie := login(t, h)
+	get := func(url string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("/api/v1/counterparties?direction=outgoing&q=%D0%BB%D0%B8%D1%84%D1%82"); rec.Code != http.StatusOK || fake.filter.Direction != "outgoing" || fake.filter.Q == nil || *fake.filter.Q != "лифт" {
+		t.Errorf("status = %d, filter = %+v", rec.Code, fake.filter)
+	}
+	if rec := get("/api/v1/counterparties?direction=sideways"); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad direction: status = %d", rec.Code)
+	}
+}

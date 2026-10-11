@@ -21,7 +21,8 @@ const incomingCols = `id, bank_account_id, registry_id, external_id, payment_dat
 	(SELECT r.name FROM payment_rules r WHERE r.id = rule_id) AS rule_name,
 	(SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id) AS personal_account_number,
 	(SELECT a.premises_id FROM personal_accounts a WHERE a.id = personal_account_id) AS premises_id,
-	(SELECT r.registry_number FROM payment_registries r WHERE r.id = registry_id) AS registry_number`
+	(SELECT r.registry_number FROM payment_registries r WHERE r.id = registry_id) AS registry_number,
+	(SELECT r.file_name FROM payment_registries r WHERE r.id = registry_id) AS registry_file_name`
 
 type IncomingPayments struct{ pool *pgxpool.Pool }
 

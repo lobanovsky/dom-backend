@@ -47,11 +47,12 @@ type IncomingPayment struct {
 	AssignedBy *string `json:"assigned_by" db:"assigned_by"`
 	RuleID     *int64  `json:"rule_id" db:"rule_id"`
 	RunID      *int64  `json:"run_id" db:"run_id"`
-	// Только чтение: название правила, номер лицевого счёта и номер реестра для отображения в списках.
+	// Только чтение: название правила, номер лицевого счёта и номер и имя файла реестра для отображения в списках.
 	RuleName              *string `json:"rule_name" db:"rule_name"`
 	PersonalAccountNumber *string `json:"personal_account_number" db:"personal_account_number"`
 	PremisesID            *int64  `json:"premises_id" db:"premises_id"` // помещение лицевого счёта: по нему в списке строится ссылка
 	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
+	RegistryFileName      *string `json:"registry_file_name" db:"registry_file_name"` // имя файла реестра: в списках говорит больше, чем номер
 }
 
 func (p IncomingPayment) Validate() error {

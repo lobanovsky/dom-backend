@@ -22,6 +22,8 @@ SELECT 'до очистки' AS этап,
        (SELECT count(*) FROM outgoing_payments)  AS исходящих_платежей;
 
 -- Сначала платежи (ссылаются на реестры), потом реестры.
+-- Реестр ссылается на платёж выписки (payment_id, миграция 0011) без ON DELETE: сначала снимаем связь, иначе DELETE платежей упадёт.
+UPDATE payment_registries SET payment_id = NULL;
 DELETE FROM incoming_payments;
 DELETE FROM payment_registries;
 

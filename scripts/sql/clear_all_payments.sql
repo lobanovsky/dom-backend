@@ -29,6 +29,8 @@ SELECT 'до очистки' AS этап,
        (SELECT count(*) FROM assignment_runs)    AS запусков_определения;
 
 -- Порядок важен из-за внешних ключей: сначала то, что ссылается на платежи, затем платежи, затем файлы и запуски.
+-- Реестр ссылается на платёж выписки (payment_id, миграция 0011) без ON DELETE: сначала снимаем связь, иначе DELETE платежей упадёт.
+UPDATE payment_registries SET payment_id = NULL;
 DELETE FROM assignment_run_items;
 DELETE FROM incoming_payments;
 DELETE FROM outgoing_payments;

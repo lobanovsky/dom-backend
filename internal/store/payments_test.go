@@ -145,9 +145,12 @@ func TestBankAccountsAndPayments(t *testing.T) {
 	if items, err := out.List(ctx, model.OutgoingPaymentFilter{BankAccountID: &bank.ID, Q: ptr("лифт")}, 50, 0); err != nil || len(items) != 1 || items[0].Amount != 15000.5 {
 		t.Errorf("outgoing list: %+v, err = %v", items, err)
 	}
-	// категорию с действующими платежами удалить нельзя
-	if err := cats.Delete(ctx, cat.ID); !errors.As(err, &se) || !errors.Is(se.Kind, ErrInvalid) {
-		t.Errorf("delete category with payments: err = %v, want invalid", err)
+	// удаление категории снимает её с платежей
+	if err := cats.Delete(ctx, cat.ID); err != nil {
+		t.Fatalf("delete category with payments: %v", err)
+	}
+	if got, err := in.Get(ctx, p2.ID); err != nil || got.CategoryID != nil || got.AssignedBy != nil {
+		t.Errorf("incoming after category delete: %+v, err = %v", got, err)
 	}
 }
 

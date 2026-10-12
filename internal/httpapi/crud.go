@@ -168,7 +168,7 @@ func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.Paymen
 func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.IncomingPaymentFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{
 		Ints:   []string{"bank_account_id", "registry_id", "statement_id", "personal_account_id", "category_id"},
-		Texts:  []string{"q"},
+		Texts:  []string{"q", "binding"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
 		Bools:  []string{"unlinked", "hide_registry_details"},
@@ -177,12 +177,24 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 		return model.IncomingPaymentFilter{}, p, false
 	}
 	unlinked := p.Bool("unlinked")
+	accountLinked, bindingUnlinked := false, false
+	if b := p.Text("binding"); b != nil {
+		switch *b {
+		case "account":
+			accountLinked = true
+		case "unlinked":
+			bindingUnlinked = true
+		default:
+			writeError(w, http.StatusBadRequest, "invalid binding: want account or unlinked")
+			return model.IncomingPaymentFilter{}, p, false
+		}
+	}
 	return model.IncomingPaymentFilter{
 		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), RegistryID: p.Int("registry_id"),
 		StatementID: p.Int("statement_id"), PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"),
-		Q: p.Text("q"), Unlinked: unlinked != nil && *unlinked, HideRegistryDetails: isTrue(p.Bool("hide_registry_details")),
+		Q: p.Text("q"), Unlinked: (unlinked != nil && *unlinked) || bindingUnlinked, AccountLinked: accountLinked, HideRegistryDetails: isTrue(p.Bool("hide_registry_details")),
 	}, p, true
 }
 

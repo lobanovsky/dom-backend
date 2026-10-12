@@ -98,6 +98,7 @@ type IncomingPaymentFilter struct {
 	AmountTo          *float64
 	Q                 *string // подстрока в плательщике, назначении, комментарии, номере документа
 	Unlinked          bool    // только без лицевого счёта и категории
+	AccountLinked     bool    // только привязанные к лицевому счёту
 	// Скрыть строки реестров, у которых найден платёж из выписки: он уже показывает их суммой.
 	HideRegistryDetails bool
 }

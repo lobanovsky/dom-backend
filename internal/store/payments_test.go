@@ -97,6 +97,7 @@ func TestBankAccountsAndPayments(t *testing.T) {
 		"q by payer":        {model.IncomingPaymentFilter{Q: ptr("ромашка")}, []int64{p2.ID}},
 		"q by purpose":      {model.IncomingPaymentFilter{Q: ptr("жку за")}, []int64{p1.ID}},
 		"unlinked":          {model.IncomingPaymentFilter{Unlinked: true}, []int64{p1.ID}},
+		"account linked":    {model.IncomingPaymentFilter{AccountLinked: true}, nil},
 		"category":          {model.IncomingPaymentFilter{CategoryID: &cat.ID}, []int64{p2.ID}},
 	} {
 		got := ids(c.f)

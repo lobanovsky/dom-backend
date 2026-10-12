@@ -158,6 +158,7 @@ func TestListFilterParsing(t *testing.T) {
 		"/api/v1/incoming-payments?date_from=03.01.2026",
 		"/api/v1/incoming-payments?amount_from=abc",
 		"/api/v1/incoming-payments?unlinked=maybe",
+		"/api/v1/incoming-payments?binding=other",
 		"/api/v1/outgoing-payments?unknown=1",
 	} {
 		if rec := do(h, "GET", path, "", c); rec.Code != http.StatusBadRequest {

@@ -56,6 +56,7 @@ type IncomingPayment struct {
 	OperationType     *string  `json:"operation_type" db:"operation_type"`
 	Purpose           *string  `json:"purpose" db:"purpose"`
 	Comment           *string  `json:"comment" db:"comment"`
+	Attention         bool     `json:"attention" db:"attention"` // «обратить внимание»: при включённом флаге комментарий обязателен
 	PersonalAccountID *int64   `json:"personal_account_id" db:"personal_account_id"`
 	CategoryID        *int64   `json:"category_id" db:"category_id"`
 	RawLine           *string  `json:"raw_line" db:"raw_line"`
@@ -83,6 +84,10 @@ func (p IncomingPayment) Validate() error {
 	if p.PersonalAccountID != nil && p.CategoryID != nil {
 		link = invalid("category_id", "must not be set together with personal_account_id")
 	}
+	var attention error
+	if p.Attention && (p.Comment == nil || strings.TrimSpace(*p.Comment) == "") {
+		attention = invalid("comment", "is required when attention is set")
+	}
 	return firstErr(
 		positiveInt("bank_account_id", intPtr(p.BankAccountID)),
 		requiredDate("payment_date", p.PaymentDate),
@@ -90,6 +95,7 @@ func (p IncomingPayment) Validate() error {
 		optionalINN("payer_inn", p.PayerINN),
 		optionalDigits("payer_bik", p.PayerBIK, 9),
 		link,
+		attention,
 	)
 }
 

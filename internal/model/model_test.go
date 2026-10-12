@@ -193,3 +193,24 @@ func TestPaymentCategoryStyleValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestIncomingPaymentAttentionNeedsComment(t *testing.T) {
+	base := IncomingPayment{BankAccountID: 1, PaymentDate: Date{Time: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, Amount: 10}
+	c := func(v string) *string { return &v }
+	ok := base
+	if err := ok.Validate(); err != nil {
+		t.Errorf("without flag: %v", err)
+	}
+	for name, comment := range map[string]*string{"nil": nil, "empty": c(""), "spaces": c("  ")} {
+		p := base
+		p.Attention, p.Comment = true, comment
+		if err := p.Validate(); err == nil {
+			t.Errorf("attention with %s comment: want error", name)
+		}
+	}
+	p := base
+	p.Attention, p.Comment = true, c("капремонт на обычный счёт")
+	if err := p.Validate(); err != nil {
+		t.Errorf("attention with comment: %v", err)
+	}
+}

@@ -152,11 +152,12 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 	for _, p := range fresh {
 		var accountID *int64
 		var comment *string
+		attention := false
 		if a, ok := accounts[p.AccountNum]; ok {
 			accountID = &a.id
 			res.Linked++
 			if note := accountTypeMismatch(a.purpose, special); note != "" {
-				comment = &note
+				comment, attention = &note, true
 				mismatches[note]++
 			}
 		} else {
@@ -164,16 +165,16 @@ func (s *PaymentRegistries) Import(ctx context.Context, bankAccountID int64, fil
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO incoming_payments (bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
-			        payer_name, personal_account_id, comment, raw_line, assigned_by)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $9::bigint IS NOT NULL THEN 'registry' END)`,
+			        payer_name, personal_account_id, comment, raw_line, attention, assigned_by)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CASE WHEN $9::bigint IS NOT NULL THEN 'registry' END)`,
 			bankAccountID, res.RegistryID, p.ExternalID, p.Date, p.Time, float64(p.Amount)/100, float64(p.Commission)/100,
-			p.PayerName, accountID, comment, p.Raw); err != nil {
+			p.PayerName, accountID, comment, p.Raw, attention); err != nil {
 			return model.RegistryImportResult{}, rowErr(p.Line, err)
 		}
 		res.Created++
 	}
 	for note, n := range mismatches {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%d: %s (платежи загружены как есть, пометка добавлена в комментарий)", n, note))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("%d: %s (платежи загружены как есть, пометка добавлена в комментарий и выставлен флаг «обратить внимание»)", n, note))
 	}
 	sort.Strings(res.Warnings)
 	if _, err := linkRegistries(ctx, tx, &bankAccountID); err != nil {

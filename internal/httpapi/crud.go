@@ -171,7 +171,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 		Texts:  []string{"q", "binding"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
-		Bools:  []string{"unlinked", "hide_registry_details"},
+		Bools:  []string{"unlinked", "hide_registry_details", "attention"},
 	})
 	if !ok {
 		return model.IncomingPaymentFilter{}, p, false
@@ -194,7 +194,7 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 		StatementID: p.Int("statement_id"), PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),
 		AmountFrom: p.Float("amount_from"), AmountTo: p.Float("amount_to"),
-		Q: p.Text("q"), Unlinked: (unlinked != nil && *unlinked) || bindingUnlinked, AccountLinked: accountLinked, HideRegistryDetails: isTrue(p.Bool("hide_registry_details")),
+		Q: p.Text("q"), Unlinked: (unlinked != nil && *unlinked) || bindingUnlinked, AccountLinked: accountLinked, Attention: isTrue(p.Bool("attention")), HideRegistryDetails: isTrue(p.Bool("hide_registry_details")),
 	}, p, true
 }
 

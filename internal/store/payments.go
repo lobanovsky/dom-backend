@@ -17,7 +17,7 @@ func softDelete(ctx context.Context, pool *pgxpool.Pool, table string, id int64)
 
 const incomingCols = `id, bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
 	payer_name, payer_inn, payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, comment,
-	personal_account_id, category_id, raw_line, statement_id, dedup_key, assigned_by, rule_id, run_id, created_at, updated_at, deleted_at,
+	personal_account_id, category_id, attention, raw_line, statement_id, dedup_key, assigned_by, rule_id, run_id, created_at, updated_at, deleted_at,
 	(SELECT r.name FROM payment_rules r WHERE r.id = rule_id) AS rule_name,
 	(SELECT a.number FROM personal_accounts a WHERE a.id = personal_account_id) AS personal_account_number,
 	(SELECT a.premises_id FROM personal_accounts a WHERE a.id = personal_account_id) AS premises_id,
@@ -49,12 +49,13 @@ func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilt
 		   AND (deleted_at IS NOT NULL) = $11
 		   AND ($14::bigint IS NULL OR statement_id = $14)
 		   AND (NOT $16 OR personal_account_id IS NOT NULL)
+		   AND (NOT $17 OR attention)
 		   AND (NOT $15 OR registry_id IS NULL OR NOT EXISTS (
 		        SELECT 1 FROM payment_registries r JOIN incoming_payments a ON a.id = r.payment_id AND a.deleted_at IS NULL
 		         WHERE r.id = incoming_payments.registry_id))
 		 ORDER BY payment_date DESC, payment_time DESC NULLS LAST, id DESC LIMIT $12 OFFSET $13`,
 		f.BankAccountID, f.RegistryID, f.PersonalAccountID, f.CategoryID, f.DateFrom, f.DateTo,
-		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID, f.HideRegistryDetails, f.AccountLinked))
+		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID, f.HideRegistryDetails, f.AccountLinked, f.Attention))
 }
 
 func (s *IncomingPayments) Get(ctx context.Context, id int64) (model.IncomingPayment, error) {
@@ -65,12 +66,12 @@ func (s *IncomingPayments) Create(ctx context.Context, in model.IncomingPayment)
 	return one[model.IncomingPayment](s.pool.Query(ctx,
 		`INSERT INTO incoming_payments (bank_account_id, registry_id, external_id, payment_date, payment_time, amount, commission,
 		        payer_name, payer_inn, payer_account, payer_bik, payer_bank_name, doc_number, operation_type, purpose, comment,
-		        personal_account_id, category_id, raw_line, assigned_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+		        personal_account_id, category_id, raw_line, attention, assigned_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 		         CASE WHEN $17::bigint IS NOT NULL OR $18::bigint IS NOT NULL THEN 'manual' END) RETURNING `+incomingCols,
 		in.BankAccountID, in.RegistryID, in.ExternalID, in.PaymentDate, in.PaymentTime, in.Amount, in.Commission,
 		in.PayerName, in.PayerINN, in.PayerAccount, in.PayerBIK, in.PayerBankName, in.DocNumber, in.OperationType, in.Purpose, in.Comment,
-		in.PersonalAccountID, in.CategoryID, in.RawLine))
+		in.PersonalAccountID, in.CategoryID, in.RawLine, in.Attention))
 }
 
 // Update заменяет редактируемые поля. Происхождение платежа (registry_id, external_id, raw_line) не меняется.
@@ -78,7 +79,7 @@ func (s *IncomingPayments) Update(ctx context.Context, id int64, in model.Incomi
 	return one[model.IncomingPayment](s.pool.Query(ctx,
 		`UPDATE incoming_payments SET bank_account_id = $2, payment_date = $3, payment_time = $4, amount = $5, commission = $6,
 		        payer_name = $7, payer_inn = $8, payer_account = $9, payer_bik = $10, payer_bank_name = $11, doc_number = $12,
-		        operation_type = $13, purpose = $14, comment = $15, personal_account_id = $16, category_id = $17,
+		        operation_type = $13, purpose = $14, comment = $15, personal_account_id = $16, category_id = $17, attention = $18,
 		        -- ручное изменение привязки: происхождение «вручную», связь с правилом и запуском снимается
 		        assigned_by = CASE WHEN personal_account_id IS NOT DISTINCT FROM $16::bigint AND category_id IS NOT DISTINCT FROM $17::bigint THEN assigned_by
 		                           WHEN $16::bigint IS NULL AND $17::bigint IS NULL THEN NULL ELSE 'manual' END,
@@ -88,7 +89,7 @@ func (s *IncomingPayments) Update(ctx context.Context, id int64, in model.Incomi
 		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+incomingCols,
 		id, in.BankAccountID, in.PaymentDate, in.PaymentTime, in.Amount, in.Commission,
 		in.PayerName, in.PayerINN, in.PayerAccount, in.PayerBIK, in.PayerBankName, in.DocNumber,
-		in.OperationType, in.Purpose, in.Comment, in.PersonalAccountID, in.CategoryID))
+		in.OperationType, in.Purpose, in.Comment, in.PersonalAccountID, in.CategoryID, in.Attention))
 }
 
 func (s *IncomingPayments) Restore(ctx context.Context, id int64) (model.IncomingPayment, error) {

@@ -254,8 +254,22 @@ func TestRegistryImport(t *testing.T) {
 		t.Fatalf("type mismatch import: %+v, err = %v", res3, err)
 	}
 	if got, err := NewIncomingPayments(pool).List(ctx, model.IncomingPaymentFilter{RegistryID: &res3.RegistryID}, 50, 0); err != nil || len(got) != 1 ||
-		got[0].PersonalAccountID == nil || *got[0].PersonalAccountID != accKR.ID || got[0].Comment == nil || got[0].PayerName != "" {
+		got[0].PersonalAccountID == nil || *got[0].PersonalAccountID != accKR.ID || got[0].Comment == nil || got[0].PayerName != "" || !got[0].Attention {
 		t.Errorf("mismatch payment: %+v, err = %v", got, err)
+	}
+	// флаг «обратить внимание» находится фильтром, ручное изменение может его снять
+	inPay := NewIncomingPayments(pool)
+	flagged, err := inPay.List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID, Attention: true}, 50, 0)
+	if err != nil || len(flagged) != 1 || flagged[0].ID == 0 {
+		t.Fatalf("attention filter: %+v, err = %v", flagged, err)
+	}
+	edit := flagged[0]
+	edit.Attention = false
+	if got, err := inPay.Update(ctx, edit.ID, edit); err != nil || got.Attention {
+		t.Errorf("clear attention: %+v, err = %v", got, err)
+	}
+	if left, err := inPay.List(ctx, model.IncomingPaymentFilter{BankAccountID: &bank.ID, Attention: true}, 50, 0); err != nil || len(left) != 0 {
+		t.Errorf("after clearing: %+v, err = %v", left, err)
 	}
 	// все платежи уже известны: реестр не создаётся
 	all := &model.ParsedRegistry{FileAccount: bank.Number, Payments: []model.RegistryPayment{pay("reg-test-a", "reg-test-1", 857532)}}

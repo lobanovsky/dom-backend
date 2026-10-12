@@ -8,7 +8,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-const paymentCategoryCols = `id, name, direction, created_at, updated_at, deleted_at`
+const paymentCategoryCols = `id, name, direction, color, icon, created_at, updated_at, deleted_at`
 
 type PaymentCategories struct{ pool *pgxpool.Pool }
 
@@ -27,13 +27,13 @@ func (s *PaymentCategories) Get(ctx context.Context, id int64) (model.PaymentCat
 
 func (s *PaymentCategories) Create(ctx context.Context, in model.PaymentCategory) (model.PaymentCategory, error) {
 	return one[model.PaymentCategory](s.pool.Query(ctx,
-		`INSERT INTO payment_categories (name, direction) VALUES ($1, $2) RETURNING `+paymentCategoryCols, in.Name, in.Direction))
+		`INSERT INTO payment_categories (name, direction, color, icon) VALUES ($1, $2, $3, $4) RETURNING `+paymentCategoryCols, in.Name, in.Direction, in.Color, in.Icon))
 }
 
 func (s *PaymentCategories) Update(ctx context.Context, id int64, in model.PaymentCategory) (model.PaymentCategory, error) {
 	return one[model.PaymentCategory](s.pool.Query(ctx,
-		`UPDATE payment_categories SET name = $2, direction = $3, updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+paymentCategoryCols, id, in.Name, in.Direction))
+		`UPDATE payment_categories SET name = $2, direction = $3, color = $4, icon = $5, updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+paymentCategoryCols, id, in.Name, in.Direction, in.Color, in.Icon))
 }
 
 func (s *PaymentCategories) Restore(ctx context.Context, id int64) (model.PaymentCategory, error) {

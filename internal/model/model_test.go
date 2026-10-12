@@ -173,3 +173,23 @@ func TestBankAccountValidation(t *testing.T) {
 		t.Error("too many registry codes must be rejected")
 	}
 }
+
+func TestPaymentCategoryStyleValidation(t *testing.T) {
+	s := func(v string) *string { return &v }
+	ok := PaymentCategory{Name: "Аренда", Direction: "incoming", Color: s("#1a2B3c"), Icon: s("🏠")}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("valid category: %v", err)
+	}
+	if err := (PaymentCategory{Name: "Аренда", Direction: "incoming"}).Validate(); err != nil {
+		t.Errorf("without style: %v", err)
+	}
+	for name, c := range map[string]PaymentCategory{
+		"bad color":  {Name: "x", Direction: "incoming", Color: s("red")},
+		"empty icon": {Name: "x", Direction: "incoming", Icon: s(" ")},
+		"long icon":  {Name: "x", Direction: "incoming", Icon: s("12345678901234567")},
+	} {
+		if c.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}

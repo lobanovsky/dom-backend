@@ -1,6 +1,11 @@
 package model
 
-import "math"
+import (
+	"math"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
 
 var PaymentDirections = []string{"incoming", "outgoing"}
 
@@ -8,12 +13,26 @@ var PaymentDirections = []string{"incoming", "outgoing"}
 // (аренда оборудования и т.п.) и для классификации расходов.
 type PaymentCategory struct {
 	Meta
-	Name      string `json:"name" db:"name"`
-	Direction string `json:"direction" db:"direction"`
+	Name      string  `json:"name" db:"name"`
+	Direction string  `json:"direction" db:"direction"`
+	Color     *string `json:"color" db:"color"` // #rrggbb, для оформления в таблицах
+	Icon      *string `json:"icon" db:"icon"`   // значок (эмодзи), для оформления в таблицах
 }
 
+var categoryColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
 func (c PaymentCategory) Validate() error {
-	return firstErr(required("name", c.Name), oneOf("direction", c.Direction, PaymentDirections))
+	err := firstErr(required("name", c.Name), oneOf("direction", c.Direction, PaymentDirections))
+	if err != nil {
+		return err
+	}
+	if c.Color != nil && !categoryColorRe.MatchString(*c.Color) {
+		return invalid("color", "must be #rrggbb")
+	}
+	if c.Icon != nil && (strings.TrimSpace(*c.Icon) == "" || utf8.RuneCountInString(*c.Icon) > 16) {
+		return invalid("icon", "must be 1 to 16 characters")
+	}
+	return nil
 }
 
 // IncomingPayment — поступление на наш банковский счёт. Платёж привязывается не более чем к одному

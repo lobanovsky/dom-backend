@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/text/encoding/charmap"
 )
@@ -78,7 +79,7 @@ func TestParse(t *testing.T) {
 		t.Errorf("totals: %+v opening=%d closing=%d", st, *st.OpeningBalance, *st.ClosingBalance)
 	}
 	in, out := st.Operations[0], st.Operations[1]
-	if in.Outgoing || in.Amount != 10050 || in.CounterAccount != "40817810100044521912" || in.CounterName != "ИВАНОВ ИВАН ИВАНОВИЧ" || in.CounterINN != "" ||
+	if in.Outgoing || in.Amount != 10050 || in.CounterAccount != "40817810100044521912" || in.CounterName != "ИВАНОВ ИВАН ИВАНОВИЧ//127422 МОСКВА//" || in.CounterINN != "" ||
 		in.DocNumber != "1" || in.OperationType != "01" || in.BIK != "044525974" || in.BankName != "Банк плательщика" || in.Purpose != "ЛС 0000001101" ||
 		in.At.Format("2006-01-02") != "2026-01-05" {
 		t.Errorf("incoming: %+v", in)
@@ -122,7 +123,7 @@ func TestEncodings(t *testing.T) {
 			t.Fatal(err)
 		}
 		sts, errs, err := Parse([]byte(raw))
-		if err != nil || len(errs) != 0 || len(sts) != 1 || sts[0].Operations[0].CounterName != "ИВАНОВ ИВАН ИВАНОВИЧ" {
+		if err != nil || len(errs) != 0 || len(sts) != 1 || sts[0].Operations[0].CounterName != "ИВАНОВ ИВАН ИВАНОВИЧ//127422 МОСКВА//" {
 			t.Errorf("%s: err = %v, errs = %v", name, err, errs)
 		}
 	}
@@ -205,5 +206,16 @@ func TestLooksLikeAndMoney(t *testing.T) {
 	}
 	if _, err := kopecks("abc"); err == nil {
 		t.Error("expected an error")
+	}
+}
+
+func TestOperationKeepsFullCounterpartName(t *testing.T) {
+	const full = "ПАО СБЕРБАНК//КОРОВИНА ЛЮБОВЬ НИКОЛАЕВНА//2278891122130//127521, РОССИЯ, МОСКВА Г, ПРОЕЗД 17-Й МАРЬИНОЙ РОЩИ, Д 1 КВ 9//"
+	d := document{fields: map[string]string{"Плательщик": "  " + full + "  ", "Получатель": `ТСН "МР17ДОМ1"`}}
+	if got := d.operation(100, time.Now(), false).CounterName; got != full {
+		t.Errorf("incoming counterpart = %q, want %q", got, full)
+	}
+	if got := d.operation(100, time.Now(), true).CounterName; got != `ТСН "МР17ДОМ1"` {
+		t.Errorf("outgoing counterpart = %q", got)
 	}
 }

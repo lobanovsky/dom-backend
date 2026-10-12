@@ -378,10 +378,9 @@ func (d document) operation(amount int64, at time.Time, outgoing bool) model.Sta
 	if inn == "0" {
 		inn = "" // у плательщика-физлица ИНН нет
 	}
+	// Имя берём целиком: у платежей физлиц через банк после «//» идут ФИО, документ и адрес
+	// («ПАО СБЕРБАНК//ИВАНОВ ИВАН//…//адрес//»), иначе плательщика не определить.
 	name := f[side]
-	if i := strings.Index(name, "//"); i >= 0 {
-		name = name[:i]
-	}
 	return model.StatementOperation{
 		Row: d.line, At: at, Outgoing: outgoing, Amount: amount,
 		CounterAccount: counterAccount, CounterINN: inn, CounterName: Collapse(name),

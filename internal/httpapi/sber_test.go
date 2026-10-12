@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,7 +32,10 @@ func (f *fakeSberStore) Runs(context.Context, int) ([]model.SberRun, error)  { r
 type fakeSyncer struct {
 	from, to time.Time
 	err      error
+	balances []sbersync.Balance
 }
+
+func (f *fakeSyncer) Balances(context.Context) ([]sbersync.Balance, error) { return f.balances, f.err }
 
 func (f *fakeSyncer) Start(_ context.Context, _ string, from, to time.Time) (int64, error) {
 	f.from, f.to = from, to
@@ -111,5 +115,28 @@ func TestSberTokensAndStatus(t *testing.T) {
 	}
 	if strings.Contains(body, "abc") {
 		t.Error("status must not expose tokens")
+	}
+}
+
+func TestSberBalances(t *testing.T) {
+	closing := 1234.5
+	syncer := &fakeSyncer{balances: []sbersync.Balance{{Number: "40703810000000000001", Closing: &closing}, {Number: "40703810000000000002", Error: "sber api: status 403"}}}
+	h := sberHandlers{&fakeSberStore{}, syncer, SberInfo{Configured: true}}
+	rec := sberDo(h, "GET", "/api/v1/sber/balances", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"closing":1234.5`) || !strings.Contains(rec.Body.String(), `"error":"sber api: status 403"`) {
+		t.Errorf("balances: %d %s", rec.Code, rec.Body)
+	}
+
+	if rec := sberDo(sberHandlers{&fakeSberStore{}, nil, SberInfo{}}, "GET", "/api/v1/sber/balances", ""); rec.Code != http.StatusConflict {
+		t.Errorf("not configured: status = %d, want 409", rec.Code)
+	}
+
+	syncer.err = sbersync.ErrNotConfigured
+	if rec := sberDo(h, "GET", "/api/v1/sber/balances", ""); rec.Code != http.StatusConflict {
+		t.Errorf("no tokens: status = %d, want 409", rec.Code)
+	}
+	syncer.err = errors.New("boom")
+	if rec := sberDo(h, "GET", "/api/v1/sber/balances", ""); rec.Code != http.StatusBadGateway {
+		t.Errorf("bank failure: status = %d, want 502", rec.Code)
 	}
 }

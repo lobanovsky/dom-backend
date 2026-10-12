@@ -23,6 +23,7 @@ var ErrNotConfigured = errors.New("sber api is not configured")
 
 type Source interface {
 	Transactions(ctx context.Context, account string, date time.Time) ([]sberapi.Transaction, []byte, error)
+	Summary(ctx context.Context, account string, date time.Time) (sberapi.Summary, error)
 }
 
 type Statements interface {

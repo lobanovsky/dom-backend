@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -235,5 +236,36 @@ func TestRejectedRefreshTokenIsAuthError(t *testing.T) {
 func TestOneLine(t *testing.T) {
 	if got, want := oneLine("ЕНП за 2026 года\r\nБез  НДС. "), "ЕНП за 2026 годаБез НДС."; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSummary(t *testing.T) {
+	tokens := &memTokens{t: &model.SberTokens{AccessToken: "A", RefreshToken: "R", AccessExpiresAt: time.Now().Add(time.Hour)}}
+	var gotQuery url.Values
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fintech/api/v2/statement/summary" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		gotQuery = r.URL.Query()
+		if gotQuery.Get("statementDate") == "2026-10-13" {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"cause":"WORKFLOW_FAULT","message":"Дата выписки позже текущей."}`)
+			return
+		}
+		io.WriteString(w, `{"openingBalanceRub":{"amount":1000.1,"currencyName":"RUB"},"closingBalanceRub":{"amount":2500.55,"currencyName":"RUB"},
+			"debitTurnoverRub":{"amount":10,"currencyName":"RUB"},"creditTurnoverRub":{"amount":1510.45,"currencyName":"RUB"},"composedDateTime":"2026-10-12T09:15:00"}`)
+	}), tokens)
+
+	s, err := c.Summary(context.Background(), acc, time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC))
+	if err != nil || s.Opening != 100010 || s.Closing != 250055 || s.Debit != 1000 || s.Credit != 151045 || s.ComposedAt != "2026-10-12T09:15:00" {
+		t.Errorf("Summary = %+v, err = %v", s, err)
+	}
+	if gotQuery.Get("accountNumber") != acc || gotQuery.Get("statementDate") != "2026-10-12" {
+		t.Errorf("query = %v", gotQuery)
+	}
+
+	var api *APIError
+	if _, err := c.Summary(context.Background(), acc, time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)); !errors.As(err, &api) || api.Status != 400 {
+		t.Errorf("future date: err = %v, want APIError 400", err)
 	}
 }

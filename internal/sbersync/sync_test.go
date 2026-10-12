@@ -17,6 +17,10 @@ import (
 
 type fakeSource struct{ calls int }
 
+func (f *fakeSource) Summary(context.Context, string, time.Time) (sberapi.Summary, error) {
+	return sberapi.Summary{}, nil
+}
+
 const acc = "40703810999999999901"
 
 func (f *fakeSource) Transactions(_ context.Context, account string, d time.Time) ([]sberapi.Transaction, []byte, error) {

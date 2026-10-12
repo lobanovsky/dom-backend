@@ -22,6 +22,7 @@ type SberStore interface {
 // SberSyncer запускает получение выписок в фоне.
 type SberSyncer interface {
 	Start(ctx context.Context, trigger string, from, to time.Time) (int64, error)
+	Balances(ctx context.Context) ([]sbersync.Balance, error)
 }
 
 // SberInfo — настройки, известные только при старте (из окружения).
@@ -43,6 +44,7 @@ type sberHandlers struct {
 func (h sberHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sber/status", h.status)
 	mux.HandleFunc("POST /api/v1/sber/sync", h.sync)
+	mux.HandleFunc("GET /api/v1/sber/balances", h.balances)
 	mux.HandleFunc("PUT /api/v1/sber/tokens", h.setTokens)
 }
 
@@ -134,6 +136,26 @@ func (h sberHandlers) sync(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]any{"run_id": id})
+	}
+}
+
+// balances — остатки и обороты по счетам из банка (чтение, в базе не хранятся).
+func (h sberHandlers) balances(w http.ResponseWriter, r *http.Request) {
+	if !h.info.Configured {
+		writeError(w, http.StatusConflict, "sber api is not configured")
+		return
+	}
+	items, err := h.syncer.Balances(r.Context())
+	switch {
+	case errors.Is(err, sbersync.ErrNotConfigured):
+		writeError(w, http.StatusConflict, "sber tokens are not set")
+	case err != nil:
+		writeError(w, http.StatusBadGateway, "sber api: "+err.Error())
+	default:
+		if items == nil {
+			items = []sbersync.Balance{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"accounts": items})
 	}
 }
 

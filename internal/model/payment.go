@@ -77,6 +77,9 @@ type IncomingPayment struct {
 	DetailRegistryID       *int64  `json:"detail_registry_id" db:"detail_registry_id"`
 	DetailRegistryFileName *string `json:"detail_registry_file_name" db:"detail_registry_file_name"`
 	DetailCount            *int    `json:"detail_count" db:"detail_count"`
+	// Только чтение: выгрузка в реестр (payment_exports), в которую вошёл платёж; nil — ещё не выгружен.
+	ExportID       *int64  `json:"export_id" db:"export_id"`
+	ExportFileName *string `json:"export_file_name" db:"export_file_name"`
 }
 
 func (p IncomingPayment) Validate() error {
@@ -172,4 +175,15 @@ type PaymentRegistry struct {
 	PaymentDate        *Date    `json:"payment_date" db:"payment_date"`
 	PaymentAmount      *float64 `json:"payment_amount" db:"payment_amount"`
 	PaymentStatementID *int64   `json:"payment_statement_id" db:"payment_statement_id"`
+}
+
+// PaymentExport — выгрузка входящих платежей в реестр Сбер-формата. Сам файл хранится в БД и отдаётся отдельным запросом,
+// в ответы API его содержимое не входит.
+type PaymentExport struct {
+	Meta
+	BankAccountID int64   `json:"bank_account_id" db:"bank_account_id"`
+	Number        int     `json:"number" db:"number"`
+	FileName      string  `json:"file_name" db:"file_name"`
+	PaymentsCount int     `json:"payments_count" db:"payments_count"`
+	TotalAmount   float64 `json:"total_amount" db:"total_amount"`
 }

@@ -100,8 +100,14 @@ type IncomingPaymentFilter struct {
 	Unlinked          bool    // только без лицевого счёта и категории
 	AccountLinked     bool    // только привязанные к лицевому счёту
 	Attention         bool    // только платежи с флагом «обратить внимание»
+	Export            *string // pending — ещё не выгружены в реестр, done — выгружены
 	// Скрыть строки реестров, у которых найден платёж из выписки: он уже показывает их суммой.
 	HideRegistryDetails bool
+}
+
+type PaymentExportFilter struct {
+	Deleted       bool
+	BankAccountID *int64
 }
 
 type OutgoingPaymentFilter struct {

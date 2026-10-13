@@ -22,6 +22,7 @@ type Deps struct {
 
 	Importer          ImportStore
 	PaymentRegistries PaymentRegistryStore
+	PaymentExports    PaymentExportStore
 	Counterparties    CounterpartyStore
 	BankStatements    BankStatementStore
 	PaymentRules      crudStore[model.PaymentRule, model.PaymentRuleFilter]
@@ -59,6 +60,7 @@ func NewRouter(d Deps) http.Handler {
 	importHandlers{d.Importer}.register(api)
 	propertiesHandlers{d.Properties}.register(api)
 	paymentRegistryHandlers{d.PaymentRegistries}.register(api)
+	paymentExportHandlers{d.PaymentExports}.register(api)
 	counterpartyHandlers{d.Counterparties}.register(api)
 	bankStatementHandlers{d.BankStatements}.register(api)
 	sberHandlers{d.Sber, d.SberSyncer, d.SberInfo}.register(api)

@@ -168,7 +168,7 @@ func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.Paymen
 func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.IncomingPaymentFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{
 		Ints:   []string{"bank_account_id", "registry_id", "statement_id", "personal_account_id", "category_id"},
-		Texts:  []string{"q", "binding"},
+		Texts:  []string{"q", "binding", "export"},
 		Dates:  []string{"date_from", "date_to"},
 		Floats: []string{"amount_from", "amount_to"},
 		Bools:  []string{"unlinked", "hide_registry_details", "attention"},
@@ -189,7 +189,12 @@ func incomingPaymentFilter(w http.ResponseWriter, r *http.Request) (model.Incomi
 			return model.IncomingPaymentFilter{}, p, false
 		}
 	}
+	if e := p.Text("export"); e != nil && *e != "pending" && *e != "done" {
+		writeError(w, http.StatusBadRequest, "invalid export: want pending or done")
+		return model.IncomingPaymentFilter{}, p, false
+	}
 	return model.IncomingPaymentFilter{
+		Export:  p.Text("export"),
 		Deleted: p.Deleted, BankAccountID: p.Int("bank_account_id"), RegistryID: p.Int("registry_id"),
 		StatementID: p.Int("statement_id"), PersonalAccountID: p.Int("personal_account_id"), CategoryID: p.Int("category_id"),
 		DateFrom: p.Date("date_from"), DateTo: p.Date("date_to"),

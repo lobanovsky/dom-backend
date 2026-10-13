@@ -10,6 +10,7 @@
 --   * payment_registries                    - все загруженные реестры Сбера, включая сохранённые файлы
 --                                             (платежи реестров удаляются вместе с остальными, а реестр без платежей
 --                                             бессмыслен и мешал бы загрузить тот же файл повторно);
+--   * payment_exports                       - выгрузки платежей в реестр Сбер-формата (для внешней системы), включая файлы;
 --   * assignment_runs, assignment_run_items - история запусков определения лицевых счетов (ссылается на платежи).
 -- Физическое удаление освобождает и ключи защиты от дублей (номера операций Сбера, ключи операций выписок):
 -- платежи, ранее помеченные удалёнными, при мягком удалении остаются «занятыми» и блокировали бы повторную загрузку.
@@ -33,6 +34,7 @@ SELECT 'до очистки' AS этап,
 UPDATE payment_registries SET payment_id = NULL;
 DELETE FROM assignment_run_items;
 DELETE FROM incoming_payments;
+DELETE FROM payment_exports;
 DELETE FROM outgoing_payments;
 DELETE FROM assignment_runs;
 DELETE FROM bank_statements;

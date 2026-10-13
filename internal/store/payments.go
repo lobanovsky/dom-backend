@@ -25,16 +25,12 @@ const incomingCols = `id, bank_account_id, registry_id, external_id, payment_dat
 	(SELECT r.file_name FROM payment_registries r WHERE r.id = registry_id) AS registry_file_name,
 	(SELECT d.id FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_registry_id,
 	(SELECT d.file_name FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_registry_file_name,
-	(SELECT d.payments_count FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_count`
+	(SELECT d.payments_count FROM payment_registries d WHERE d.payment_id = incoming_payments.id AND d.deleted_at IS NULL) AS detail_count,
+	export_id,
+	(SELECT e.file_name FROM payment_exports e WHERE e.id = export_id) AS export_file_name`
 
-type IncomingPayments struct{ pool *pgxpool.Pool }
-
-func NewIncomingPayments(pool *pgxpool.Pool) *IncomingPayments { return &IncomingPayments{pool} }
-
-func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilter, limit, offset int) ([]model.IncomingPayment, error) {
-	return collect[model.IncomingPayment](s.pool.Query(ctx,
-		`SELECT `+incomingCols+` FROM incoming_payments
-		 WHERE ($1::bigint IS NULL OR bank_account_id = $1)
+// incomingWhere — условия списка входящих платежей (параметры $1-$11, $14-$18); общие для списка и отбора в выгрузку.
+const incomingWhere = `($1::bigint IS NULL OR bank_account_id = $1)
 		   AND ($2::bigint IS NULL OR registry_id = $2)
 		   AND ($3::bigint IS NULL OR personal_account_id = $3)
 		   AND ($4::bigint IS NULL OR category_id = $4)
@@ -50,12 +46,27 @@ func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilt
 		   AND ($14::bigint IS NULL OR statement_id = $14)
 		   AND (NOT $16 OR personal_account_id IS NOT NULL)
 		   AND (NOT $17 OR attention)
+		   AND ($18::text IS NULL OR (export_id IS NULL) = ($18 = 'pending'))
 		   AND (NOT $15 OR registry_id IS NULL OR NOT EXISTS (
 		        SELECT 1 FROM payment_registries r JOIN incoming_payments a ON a.id = r.payment_id AND a.deleted_at IS NULL
-		         WHERE r.id = incoming_payments.registry_id))
+		         WHERE r.id = incoming_payments.registry_id))`
+
+// incomingArgs — значения параметров incomingWhere в порядке $1-$11, затем $14-$18 (на $12-$13 в списке limit и offset).
+func incomingArgs(f model.IncomingPaymentFilter, limit, offset int) []any {
+	return []any{f.BankAccountID, f.RegistryID, f.PersonalAccountID, f.CategoryID, f.DateFrom, f.DateTo,
+		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID, f.HideRegistryDetails, f.AccountLinked, f.Attention, f.Export}
+}
+
+type IncomingPayments struct{ pool *pgxpool.Pool }
+
+func NewIncomingPayments(pool *pgxpool.Pool) *IncomingPayments { return &IncomingPayments{pool} }
+
+func (s *IncomingPayments) List(ctx context.Context, f model.IncomingPaymentFilter, limit, offset int) ([]model.IncomingPayment, error) {
+	return collect[model.IncomingPayment](s.pool.Query(ctx,
+		`SELECT `+incomingCols+` FROM incoming_payments
+		 WHERE `+incomingWhere+`
 		 ORDER BY payment_date DESC, payment_time DESC NULLS LAST, id DESC LIMIT $12 OFFSET $13`,
-		f.BankAccountID, f.RegistryID, f.PersonalAccountID, f.CategoryID, f.DateFrom, f.DateTo,
-		f.AmountFrom, f.AmountTo, likePattern(f.Q), f.Unlinked, f.Deleted, limit, offset, f.StatementID, f.HideRegistryDetails, f.AccountLinked, f.Attention))
+		incomingArgs(f, limit, offset)...))
 }
 
 func (s *IncomingPayments) Get(ctx context.Context, id int64) (model.IncomingPayment, error) {

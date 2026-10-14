@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"syscall"
 	"time"
 	_ "time/tzdata" // часовой пояс расписания не зависит от tzdata в образе
+
+	"golang.org/x/crypto/bcrypt"
 
 	"dom-backend/internal/auth"
 	"dom-backend/internal/config"
@@ -52,7 +55,11 @@ func run(log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	a := auth.New(cfg.AdminUsername, cfg.AdminPasswordHash, cfg.AdminSessionSecret, cfg.SessionTTL)
+	users := store.NewUsers(pool)
+	if err := seedAdmin(ctx, users, cfg, log); err != nil {
+		return err
+	}
+	a := auth.New(users, cfg.AdminSessionSecret, cfg.SessionTTL)
 
 	premises := store.NewPremisesStore(pool)
 	ownerships := store.NewOwnerships(pool)
@@ -82,6 +89,7 @@ func run(log *slog.Logger) error {
 		Addr: cfg.ListenAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Auth:               a,
+			Users:              users,
 			Organizations:      store.NewOrganizations(pool),
 			Buildings:          store.NewBuildings(pool),
 			Premises:           premises,
@@ -148,4 +156,29 @@ func newSberSyncer(c config.Sber, sber *store.Sber, statements *store.BankStatem
 	}
 	client := sberapi.New(sberapi.Config{BaseURL: c.BaseURL, ClientID: c.ClientID, ClientSecret: strings.TrimSpace(string(secret))}, httpClient, sber, log)
 	return &sbersync.Syncer{Source: client, Statements: statements, Journal: sber, Tokens: sber, Log: log}, certExpires, nil
+}
+
+// seedAdmin создаёт первого администратора из ADMIN_USERNAME/ADMIN_PASSWORD_HASH, пока в БД нет ни одного пользователя.
+// Позже эти переменные ни на что не влияют: пользователи и пароли ведутся в БД (страница «Пользователи»).
+func seedAdmin(ctx context.Context, users *store.Users, cfg config.Config, log *slog.Logger) error {
+	if cfg.AdminUsername != "" && cfg.AdminPasswordHash != "" {
+		if _, err := bcrypt.Cost([]byte(cfg.AdminPasswordHash)); err != nil {
+			return fmt.Errorf("ADMIN_PASSWORD_HASH is not a bcrypt hash: %w", err)
+		}
+		created, err := users.EnsureAdmin(ctx, cfg.AdminUsername, cfg.AdminPasswordHash)
+		if err != nil {
+			return err
+		}
+		if created {
+			log.Info("first admin created from ADMIN_USERNAME", "username", cfg.AdminUsername)
+		}
+	}
+	list, err := users.List(ctx)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		return errors.New("no users: set ADMIN_USERNAME and ADMIN_PASSWORD_HASH to create the first admin")
+	}
+	return nil
 }

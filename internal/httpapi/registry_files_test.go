@@ -11,11 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
 	"dom-backend/internal/store"
 )
@@ -86,7 +84,7 @@ func postRegistries(t *testing.T, fake *fakeRegistries, files ...upload) (int, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), PaymentRegistries: fake})
+	h := NewRouter(Deps{Auth: testAuth(string(hash)), PaymentRegistries: fake})
 	cookie := login(t, h)
 
 	var body bytes.Buffer
@@ -306,7 +304,7 @@ func TestImportFindsAccountByRegistryCode(t *testing.T) {
 
 func TestRelinkEndpoint(t *testing.T) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
-	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), PaymentRegistries: &fakeRegistries{}})
+	h := NewRouter(Deps{Auth: testAuth(string(hash)), PaymentRegistries: &fakeRegistries{}})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/payment-registries/relink", nil)
 	req.AddCookie(login(t, h))
 	rec := httptest.NewRecorder()
@@ -333,7 +331,7 @@ func (f *fakeCounterparties) List(_ context.Context, flt model.CounterpartyFilte
 func TestCounterpartiesEndpoint(t *testing.T) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
 	fake := &fakeCounterparties{}
-	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), Counterparties: fake})
+	h := NewRouter(Deps{Auth: testAuth(string(hash)), Counterparties: fake})
 	cookie := login(t, h)
 	get := func(url string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, url, nil)

@@ -11,7 +11,7 @@ import (
 type Config struct {
 	DatabaseURL        string
 	ListenAddr         string
-	AdminUsername      string
+	AdminUsername      string // необязательны: нужны только чтобы создать первого администратора, пока в БД нет пользователей
 	AdminPasswordHash  string
 	AdminSessionSecret string
 	SessionTTL         time.Duration
@@ -78,8 +78,6 @@ func (c Config) validate() error {
 	var missing []string
 	for name, v := range map[string]string{
 		"DATABASE_URL":         c.DatabaseURL,
-		"ADMIN_USERNAME":       c.AdminUsername,
-		"ADMIN_PASSWORD_HASH":  c.AdminPasswordHash,
 		"ADMIN_SESSION_SECRET": c.AdminSessionSecret,
 	} {
 		if v == "" {

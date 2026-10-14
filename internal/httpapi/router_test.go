@@ -6,11 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
 	"dom-backend/internal/store"
 )
@@ -58,7 +56,7 @@ func newTestRouter(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 	return NewRouter(Deps{
-		Auth:          auth.New("admin", string(h), "secret", time.Hour),
+		Auth:          testAuth(string(h)),
 		Organizations: fakeOrganizations{},
 	})
 }

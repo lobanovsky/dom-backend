@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
 	"dom-backend/internal/store"
 )
@@ -63,7 +61,7 @@ func assignRouter(t *testing.T, f *fakeAssignments) (http.Handler, *http.Cookie)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), Assignments: f, RuleOrder: f})
+	h := NewRouter(Deps{Auth: testAuth(string(hash)), Assignments: f, RuleOrder: f})
 	return h, login(t, h)
 }
 

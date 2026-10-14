@@ -11,11 +11,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
 	"dom-backend/internal/store"
 )
@@ -67,7 +65,7 @@ func postStatements(t *testing.T, fake *fakeStatements, files ...upload) (int, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(Deps{Auth: auth.New("admin", string(hash), "secret", time.Hour), BankStatements: fake})
+	h := NewRouter(Deps{Auth: testAuth(string(hash)), BankStatements: fake})
 	cookie := login(t, h)
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)

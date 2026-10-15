@@ -124,6 +124,8 @@ func run(log *slog.Logger) error {
 			Accounts:           accounts,
 			Holders:            store.NewAccountHolders(pool),
 			Importer:           store.NewImporter(pool),
+			Meters:             store.NewMeters(pool),
+			MeterReadings:      store.NewMeterReadings(pool),
 			Properties:         store.NewProperties(pool),
 			PaymentRegistries:  store.NewPaymentRegistries(pool),
 			PaymentExports:     store.NewPaymentExports(pool),

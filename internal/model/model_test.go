@@ -214,3 +214,67 @@ func TestIncomingPaymentAttentionNeedsComment(t *testing.T) {
 		t.Errorf("attention with comment: %v", err)
 	}
 }
+
+func TestMeterValidate(t *testing.T) {
+	i64 := func(v int64) *int64 { return &v }
+	day := func(d int) Date { return NewDate(2026, 1, d) }
+	dp := func(d Date) *Date { return &d }
+	base := Meter{PremisesID: i64(1), Resource: "electricity", Tariffs: 3, SerialNumber: "A1", Coefficient: 1, InstalledAt: day(10)}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid meter: %v", err)
+	}
+	common := base
+	common.PremisesID, common.BuildingID = nil, i64(1)
+	if err := common.Validate(); err != nil {
+		t.Errorf("common meter: %v", err)
+	}
+	mut := func(f func(m *Meter)) Meter { m := base; f(&m); return m }
+	for name, m := range map[string]Meter{
+		"no scope":         mut(func(m *Meter) { m.PremisesID = nil }),
+		"both scopes":      mut(func(m *Meter) { m.BuildingID = i64(1) }),
+		"bad resource":     mut(func(m *Meter) { m.Resource = "gas" }),
+		"water tariffs":    mut(func(m *Meter) { m.Resource, m.Tariffs = "cold_water", 2 }),
+		"four tariffs":     mut(func(m *Meter) { m.Tariffs = 4 }),
+		"no serial":        mut(func(m *Meter) { m.SerialNumber = " " }),
+		"no install date":  mut(func(m *Meter) { m.InstalledAt = Date{} }),
+		"removed before":   mut(func(m *Meter) { m.RemovedAt = dp(day(9)) }),
+		"next before last": mut(func(m *Meter) { m.VerifiedAt, m.NextVerificationAt = dp(day(5)), dp(day(4)) }),
+		"negative initial": mut(func(m *Meter) { m.InitialT1 = -1 }),
+		"4 decimals":       mut(func(m *Meter) { m.InitialT1 = 1.2345 }),
+		"zero coefficient": mut(func(m *Meter) { m.Coefficient = 0 }),
+	} {
+		if m.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	d := Meter{PremisesID: i64(1), Resource: "cold_water", SerialNumber: "W", InstalledAt: day(1), InitialT2: 5}
+	d.SetDefaults()
+	if d.Tariffs != 1 || d.Coefficient != 1 || d.InitialT2 != 0 {
+		t.Errorf("defaults: %+v", d)
+	}
+}
+
+func TestMeterReadingValidate(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	r := MeterReading{MeterID: 1, ReadingDate: NewDate(2026, 2, 1), T1: 10.5, T2: f(3), Source: "manual"}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("valid reading: %v", err)
+	}
+	for name, mut := range map[string]func(r *MeterReading){
+		"no meter":     func(r *MeterReading) { r.MeterID = 0 },
+		"no date":      func(r *MeterReading) { r.ReadingDate = Date{} },
+		"negative":     func(r *MeterReading) { r.T1 = -0.001 },
+		"4 decimals":   func(r *MeterReading) { r.T2 = f(1.0001) },
+		"negative t3":  func(r *MeterReading) { r.T3 = f(-1) },
+		"unknown kind": func(r *MeterReading) { r.Source = "photo" },
+	} {
+		c := r
+		mut(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if Milli(10.123) != 10123 {
+		t.Errorf("Milli(10.123) = %d", Milli(10.123))
+	}
+}

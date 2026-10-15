@@ -135,3 +135,20 @@ type AssignmentScope struct {
 	AmountTo      *float64 `json:"amount_to,omitempty"`
 	Q             *string  `json:"q,omitempty"`
 }
+
+type MeterFilter struct {
+	Deleted    bool    // true — только удалённые (корзина), false — только действующие
+	Scope      *string // common — общедомовые, individual — в помещениях
+	BuildingID *int64  // счётчики дома и счётчики его помещений
+	PremisesID *int64
+	Resource   *string
+	Active     *bool
+	Q          *string // подстрока в номере счётчика или начало номера помещения
+}
+
+type MeterReadingFilter struct {
+	Deleted  bool // true — только удалённые (корзина), false — только действующие
+	MeterID  *int64
+	DateFrom *Date
+	DateTo   *Date
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 
 	"dom-backend/internal/model"
 )
@@ -233,6 +234,31 @@ func paymentRuleFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRul
 		return model.PaymentRuleFilter{}, p, false
 	}
 	return model.PaymentRuleFilter{Deleted: p.Deleted, Enabled: p.Bool("enabled"), Direction: dir}, p, true
+}
+
+func meterFilter(w http.ResponseWriter, r *http.Request) (model.MeterFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"building_id", "premises_id"}, Texts: []string{"scope", "resource", "q"}, Bools: []string{"active"}})
+	if !ok {
+		return model.MeterFilter{}, p, false
+	}
+	if s := p.Text("scope"); s != nil && *s != "common" && *s != "individual" {
+		writeError(w, http.StatusBadRequest, "invalid scope: want common or individual")
+		return model.MeterFilter{}, p, false
+	}
+	if res := p.Text("resource"); res != nil && !slices.Contains(model.MeterResources, *res) {
+		writeError(w, http.StatusUnprocessableEntity, "resource: must be one of: "+strings.Join(model.MeterResources, ", "))
+		return model.MeterFilter{}, p, false
+	}
+	return model.MeterFilter{Deleted: p.Deleted, Scope: p.Text("scope"), BuildingID: p.Int("building_id"), PremisesID: p.Int("premises_id"),
+		Resource: p.Text("resource"), Active: p.Bool("active"), Q: p.Text("q")}, p, true
+}
+
+func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterReadingFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"meter_id"}, Dates: []string{"date_from", "date_to"}})
+	if !ok {
+		return model.MeterReadingFilter{}, p, false
+	}
+	return model.MeterReadingFilter{Deleted: p.Deleted, MeterID: p.Int("meter_id"), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to")}, p, true
 }
 
 func isTrue(b *bool) bool { return b != nil && *b }

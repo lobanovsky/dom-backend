@@ -20,6 +20,9 @@ import (
 	"dom-backend/internal/db"
 	"dom-backend/internal/httpapi"
 	"dom-backend/internal/logx"
+	"dom-backend/internal/mailfetch"
+	"dom-backend/internal/mailsync"
+	"dom-backend/internal/registryimport"
 	"dom-backend/internal/sberapi"
 	"dom-backend/internal/sbersync"
 	"dom-backend/internal/store"
@@ -85,6 +88,27 @@ func run(log *slog.Logger) error {
 		log.Info("sber api is not configured (SBER_CLIENT_ID is empty)")
 	}
 
+	mailStore := store.NewMail(pool)
+	if err := mailStore.AbortUnfinished(ctx); err != nil {
+		return err
+	}
+	var mailSyncer httpapi.MailSyncer
+	mailInfo := httpapi.MailInfo{Ctx: ctx}
+	if cfg.Mail.Enabled() {
+		ms, err := newMailSyncer(cfg.Mail, mailStore, store.NewPaymentRegistries(pool), log)
+		if err != nil {
+			return err
+		}
+		mailSyncer = ms
+		mailInfo.Configured, mailInfo.User, mailInfo.Folder, mailInfo.SinceDays = true, cfg.Mail.User, cfg.Mail.Folder, cfg.Mail.SinceDays
+		if cfg.Mail.SyncEvery > 0 {
+			mailInfo.Every = cfg.Mail.SyncEvery.String()
+		}
+		go ms.Run(ctx, cfg.Mail.SyncEvery)
+	} else {
+		log.Info("mail import is not configured (MAIL_USER is empty)")
+	}
+
 	srv := &http.Server{
 		Addr: cfg.ListenAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -108,6 +132,9 @@ func run(log *slog.Logger) error {
 			Sber:               sberStore,
 			SberSyncer:         syncer,
 			SberInfo:           sberInfo,
+			Mail:               mailStore,
+			MailSyncer:         mailSyncer,
+			MailInfo:           mailInfo,
 			PaymentRules:       paymentRules,
 			RuleOrder:          paymentRules,
 			Assignments:        store.NewAssignments(pool),
@@ -156,6 +183,22 @@ func newSberSyncer(c config.Sber, sber *store.Sber, statements *store.BankStatem
 	}
 	client := sberapi.New(sberapi.Config{BaseURL: c.BaseURL, ClientID: c.ClientID, ClientSecret: strings.TrimSpace(string(secret))}, httpClient, sber, log)
 	return &sbersync.Syncer{Source: client, Statements: statements, Journal: sber, Tokens: sber, Log: log}, certExpires, nil
+}
+
+// newMailSyncer собирает забор реестров из почты: пароль читается из файла и больше нигде не хранится.
+func newMailSyncer(c config.Mail, journal *store.Mail, registries *store.PaymentRegistries, log *slog.Logger) (*mailsync.Syncer, error) {
+	pass, err := os.ReadFile(c.PasswordFile)
+	if err != nil {
+		return nil, err
+	}
+	return &mailsync.Syncer{
+		Mailbox:   mailsync.IMAP{Config: mailfetch.Config{Addr: c.Addr, User: c.User, Password: strings.TrimSpace(string(pass)), Folder: c.Folder, From: c.From}},
+		Importer:  registryimport.Importer{Store: registries},
+		Journal:   journal,
+		Folder:    c.Folder,
+		SinceDays: c.SinceDays,
+		Log:       log,
+	}, nil
 }
 
 // seedAdmin создаёт первого администратора из ADMIN_USERNAME/ADMIN_PASSWORD_HASH, пока в БД нет ни одного пользователя.

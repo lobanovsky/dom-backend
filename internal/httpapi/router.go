@@ -37,6 +37,9 @@ type Deps struct {
 	Sber              SberStore
 	SberSyncer        SberSyncer
 	SberInfo          SberInfo
+	Mail              MailStore
+	MailSyncer        MailSyncer
+	MailInfo          MailInfo
 
 	PremisesOwnerships PremisesOwnershipsStore
 	PremisesAccounts   PremisesAccountsStore
@@ -67,6 +70,7 @@ func NewRouter(d Deps) http.Handler {
 	counterpartyHandlers{d.Counterparties}.register(api)
 	bankStatementHandlers{d.BankStatements}.register(api)
 	sberHandlers{d.Sber, d.SberSyncer, d.SberInfo}.register(api)
+	mailHandlers{d.Mail, d.MailSyncer, d.MailInfo}.register(api)
 	crudHandlers[model.PaymentRule, model.PaymentRuleFilter]{path: "/api/v1/payment-rules", store: d.PaymentRules, filter: paymentRuleFilter, prepare: func(r *model.PaymentRule) { r.SetDefaults() }}.register(api)
 	assignmentHandlers{d.Assignments, d.RuleOrder}.register(api)
 	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter, prepare: func(a *model.BankAccount) { a.SetDefaults() }}.register(api)

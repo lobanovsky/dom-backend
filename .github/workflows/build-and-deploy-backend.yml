@@ -101,6 +101,10 @@ jobs:
           SBER_CLIENT_SECRET: ${{ secrets.SBER_CLIENT_SECRET }}
           SBER_TLS_P12_BASE64: ${{ secrets.SBER_TLS_P12_BASE64 }}
           SBER_TLS_P12_PASSWORD: ${{ secrets.SBER_TLS_P12_PASSWORD }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_FOLDER: ${{ secrets.MAIL_FOLDER }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
         run: |
           # ADMIN_PASSWORD_HASH — bcrypt-хеш, всегда содержит "$" (например $2a$10$...).
           # docker compose интерпретирует "$" в .env как начало переменной, поэтому
@@ -131,6 +135,18 @@ jobs:
               echo "SBER_TLS_P12=/secrets/tls.p12"
               echo "SBER_TLS_P12_PASSWORD_FILE=/secrets/tls.pass"
               echo "SBER_CA_DIR=/etc/sber-ca"
+            } >> .env.deploy
+          fi
+
+          # Реестры из почты (необязательно): пока секрет MAIL_USER не задан, интеграция выключена.
+          # Пароль для внешнего приложения кладём рядом с секретами Sber, контейнер читает его из /secrets.
+          if [ -n "$MAIL_USER" ]; then
+            printf '%s' "$MAIL_PASSWORD" > sber-secrets/mail.pass
+            {
+              echo "MAIL_USER=$MAIL_USER"
+              echo "MAIL_PASSWORD_FILE=/secrets/mail.pass"
+              [ -n "$MAIL_FOLDER" ] && echo "MAIL_FOLDER=$MAIL_FOLDER"
+              [ -n "$MAIL_FROM" ] && echo "MAIL_FROM=$MAIL_FROM"
             } >> .env.deploy
           fi
 

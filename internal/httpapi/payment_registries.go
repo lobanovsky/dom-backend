@@ -13,7 +13,7 @@ import (
 	"strconv"
 
 	"dom-backend/internal/model"
-	"dom-backend/internal/sberregistry"
+	"dom-backend/internal/registryimport"
 	"dom-backend/internal/store"
 )
 
@@ -90,27 +90,17 @@ func (h paymentRegistryHandlers) file(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// Статусы файла в отчёте о загрузке.
+// Статусы файла в отчёте о загрузке и результат по файлу — в registryimport (общие с загрузкой из почты).
 const (
-	fileImported       = "imported"
-	fileDuplicate      = "duplicate_file"  // тот же файл уже загружен
-	fileAllDuplicates  = "all_duplicates"  // все платежи файла уже есть в базе
-	fileUnknownAccount = "unknown_account" // в имени есть номер счёта, которого нет в системе
-	fileInvalid        = "invalid"         // файл не разобран: нарушен формат или итоги
-	fileError          = "error"           // другая ошибка (например, файл слишком большой)
+	fileImported       = registryimport.Imported
+	fileDuplicate      = registryimport.Duplicate
+	fileAllDuplicates  = registryimport.AllDuplicates
+	fileUnknownAccount = registryimport.UnknownAccount
+	fileInvalid        = registryimport.Invalid
+	fileError          = registryimport.Error
 )
 
-type registryFileResult struct {
-	FileName      string                      `json:"file_name"`
-	Status        string                      `json:"status"`
-	BankAccountID int64                       `json:"bank_account_id,omitempty"`
-	RegistryID    int64                       `json:"registry_id,omitempty"`
-	DuplicateOf   string                      `json:"duplicate_of,omitempty"` // для duplicate_file: имя файла, с которым совпало содержимое
-	Result        *model.RegistryImportResult `json:"result,omitempty"`
-	Skipped       []model.SkippedPayment      `json:"skipped,omitempty"`
-	Error         string                      `json:"error,omitempty"`
-	Rows          []model.ImportRowError      `json:"rows,omitempty"`
-}
+type registryFileResult = registryimport.FileResult
 
 type registryImportSummary struct {
 	FilesImported int `json:"files_imported"`
@@ -175,43 +165,19 @@ func (h paymentRegistryHandlers) importFiles(w http.ResponseWriter, r *http.Requ
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
 
-	known, err := h.s.BankAccountsByNumber(r.Context())
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	byCode, err := h.s.BankAccountsByRegistryCode(r.Context())
+	imp := registryimport.Importer{Store: h.s}
+	accounts, err := imp.Accounts(r.Context())
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	loadedAs := map[int64]string{} // id реестра, созданного в этом запросе → полный путь файла (в том числе внутри архива)
 	for _, f := range candidates {
-		base := baseName(f.Name)
-		if reason := registrySkipReason(base); reason != "" {
-			ignored.add(f.Name, reason)
+		fr, ignore := imp.Import(r.Context(), accounts, registryimport.File{Name: f.Name, Open: f.open})
+		if ignore != "" {
+			ignored.add(f.Name, ignore)
 			continue
 		}
-		accounts := sberregistry.AccountsInName(base)
-		bankID := int64(0)
-		for _, a := range accounts {
-			if id, ok := known[a]; ok {
-				bankID = id
-				break
-			}
-		}
-		if bankID == 0 {
-			bankID = byCode[sberregistry.FileCode(base)]
-		}
-		if bankID == 0 && len(accounts) == 0 {
-			ignored.add(f.Name, ignoreNoAccount)
-			continue
-		}
-		if bankID == 0 {
-			results = append(results, registryFileResult{FileName: f.Name, Status: fileUnknownAccount, Error: "bank account " + accounts[0] + " is not in the system"})
-			continue
-		}
-		fr := h.importOne(r.Context(), f, base, bankID)
 		switch fr.Status {
 		case fileImported:
 			loadedAs[fr.Result.RegistryID] = f.Name
@@ -263,42 +229,6 @@ func ignoredNames(list []ignoredFile, n int) []string {
 		names = append(names, f.FileName)
 	}
 	return names
-}
-
-func (h paymentRegistryHandlers) importOne(ctx context.Context, f registryFile, base string, bankID int64) registryFileResult {
-	fr := registryFileResult{FileName: f.Name, BankAccountID: bankID}
-	data, err := f.open()
-	if err != nil {
-		fr.Status, fr.Error = fileError, err.Error()
-		return fr
-	}
-	reg, rowErrs, err := sberregistry.Parse(base, data)
-	switch {
-	case err != nil:
-		fr.Status, fr.Error = fileInvalid, err.Error()
-		return fr
-	case len(rowErrs) > 0:
-		fr.Status, fr.Error, fr.Rows = fileInvalid, "file contains invalid rows, nothing was imported", rowErrs
-		return fr
-	}
-	res, err := h.s.Import(ctx, bankID, base, data, reg)
-	var exists *store.RegistryExistsError
-	var allDup *store.AllDuplicatesError
-	var se *store.Error
-	switch {
-	case err == nil:
-		fr.Status, fr.Result = fileImported, &res
-	case errors.As(err, &exists):
-		fr.Status, fr.RegistryID, fr.DuplicateOf = fileDuplicate, exists.RegistryID, exists.FileName
-	case errors.As(err, &allDup):
-		fr.Status, fr.Skipped = fileAllDuplicates, allDup.Skipped
-	case errors.As(err, &se):
-		fr.Status, fr.Error = fileError, se.Msg
-	default:
-		slog.Error("registry import", "file", f.Name, "err", err)
-		fr.Status, fr.Error = fileError, "internal error"
-	}
-	return fr
 }
 
 // readUpload читает загруженный файл с ограничением размера limit (архив — maxArchiveSize).

@@ -3,6 +3,7 @@ module dom-backend
 go 1.27.1
 
 require (
+	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/xuri/excelize/v2 v2.11.0
@@ -13,6 +14,8 @@ require (
 )
 
 require (
+	github.com/emersion/go-message v0.18.2 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20220416144525-469b46aa5efa // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

@@ -16,7 +16,21 @@ type Config struct {
 	AdminSessionSecret string
 	SessionTTL         time.Duration
 	Sber               Sber
+	Mail               Mail
 }
+
+// Mail — настройки забора реестров из почты по IMAP. Пустой User = интеграция выключена.
+type Mail struct {
+	User         string
+	PasswordFile string        // пароль для внешнего приложения (не обычный пароль почты)
+	Addr         string        // host:port, IMAP поверх TLS
+	Folder       string        // папка с письмами-реестрами
+	From         string        // необязательный фильтр по отправителю
+	SyncEvery    time.Duration // 0 = только по кнопке
+	SinceDays    int           // глубина поиска писем
+}
+
+func (m Mail) Enabled() bool { return m.User != "" }
 
 // Sber — настройки получения выписок из Sber API. Пустой ClientID = интеграция выключена.
 type Sber struct {
@@ -57,6 +71,20 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("SBER_SYNC_DAYS: want a number from 1 to 30")
 		}
 	}
+	mail := Mail{
+		User: os.Getenv("MAIL_USER"), PasswordFile: os.Getenv("MAIL_PASSWORD_FILE"), Addr: get("MAIL_IMAP_ADDR", "imap.mail.ru:993"),
+		Folder: get("MAIL_FOLDER", "INBOX"), From: os.Getenv("MAIL_FROM"), SinceDays: 30,
+	}
+	if v := get("MAIL_SYNC_EVERY", "1h"); v != "off" {
+		if mail.SyncEvery, err = time.ParseDuration(v); err != nil || mail.SyncEvery < time.Minute {
+			return Config{}, fmt.Errorf("MAIL_SYNC_EVERY: want a duration of at least 1m (for example 1h) or off")
+		}
+	}
+	if v := os.Getenv("MAIL_SINCE_DAYS"); v != "" {
+		if mail.SinceDays, err = strconv.Atoi(v); err != nil || mail.SinceDays < 1 || mail.SinceDays > 365 {
+			return Config{}, fmt.Errorf("MAIL_SINCE_DAYS: want a number from 1 to 365")
+		}
+	}
 	c := Config{
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		ListenAddr:         get("LISTEN_ADDR", ":8080"),
@@ -64,6 +92,7 @@ func Load() (Config, error) {
 		AdminPasswordHash:  os.Getenv("ADMIN_PASSWORD_HASH"),
 		AdminSessionSecret: os.Getenv("ADMIN_SESSION_SECRET"),
 		SessionTTL:         ttl,
+		Mail:               mail,
 		Sber: Sber{
 			BaseURL: os.Getenv("SBER_BASE_URL"), ClientID: os.Getenv("SBER_CLIENT_ID"),
 			ClientSecretFile: os.Getenv("SBER_CLIENT_SECRET_FILE"), TLSP12: os.Getenv("SBER_TLS_P12"),
@@ -94,6 +123,9 @@ func (c Config) validate() error {
 				missing = append(missing, name+" (required with SBER_CLIENT_ID)")
 			}
 		}
+	}
+	if c.Mail.Enabled() && c.Mail.PasswordFile == "" {
+		missing = append(missing, "MAIL_PASSWORD_FILE (required with MAIL_USER)")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))

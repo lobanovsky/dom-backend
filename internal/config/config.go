@@ -75,9 +75,9 @@ func Load() (Config, error) {
 		User: os.Getenv("MAIL_USER"), PasswordFile: os.Getenv("MAIL_PASSWORD_FILE"), Addr: get("MAIL_IMAP_ADDR", "imap.mail.ru:993"),
 		Folder: get("MAIL_FOLDER", "INBOX"), From: os.Getenv("MAIL_FROM"), SinceDays: 30,
 	}
-	if v := get("MAIL_SYNC_EVERY", "1h"); v != "off" {
+	if v := get("MAIL_SYNC_EVERY", "24h"); v != "off" {
 		if mail.SyncEvery, err = time.ParseDuration(v); err != nil || mail.SyncEvery < time.Minute {
-			return Config{}, fmt.Errorf("MAIL_SYNC_EVERY: want a duration of at least 1m (for example 1h) or off")
+			return Config{}, fmt.Errorf("MAIL_SYNC_EVERY: want a duration of at least 1m (for example 24h) or off")
 		}
 	}
 	if v := os.Getenv("MAIL_SINCE_DAYS"); v != "" {

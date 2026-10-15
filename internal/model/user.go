@@ -20,14 +20,27 @@ const (
 
 // User — пользователь системы. Хеш пароля и версия токена наружу не отдаются.
 type User struct {
-	ID           int64     `json:"id" db:"id"`
-	Username     string    `json:"username" db:"username"`
-	Role         string    `json:"role" db:"role"`
-	Active       bool      `json:"active" db:"active"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	TokenVersion int       `json:"-" db:"token_version"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	ID           int64      `json:"id" db:"id"`
+	Username     string     `json:"username" db:"username"`
+	Role         string     `json:"role" db:"role"`
+	Active       bool       `json:"active" db:"active"`
+	PasswordHash string     `json:"-" db:"password_hash"`
+	TokenVersion int        `json:"-" db:"token_version"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+	LastLoginAt  *time.Time `json:"last_login_at" db:"last_login_at"` // последний успешный вход
+	LastSeenAt   *time.Time `json:"last_seen_at" db:"last_seen_at"`   // последний запрос к API (с точностью до нескольких минут)
+}
+
+// LoginEvent — попытка входа. UserID пуст, если такого логина нет.
+type LoginEvent struct {
+	ID        int64     `json:"id" db:"id"`
+	UserID    *int64    `json:"user_id" db:"user_id"`
+	Username  string    `json:"username" db:"username"`
+	Success   bool      `json:"success" db:"success"`
+	IP        string    `json:"ip" db:"ip"`
+	UserAgent string    `json:"user_agent" db:"user_agent"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
 func (u User) IsAdmin() bool { return u.Role == RoleAdmin }

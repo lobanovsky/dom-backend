@@ -123,3 +123,48 @@ func TestEnsureAdmin(t *testing.T) {
 		t.Errorf("second call: created=%v err=%v", created, err)
 	}
 }
+
+func TestLoginEvents(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	users := NewUsers(pool)
+
+	cleanup := func() {
+		pool.Exec(ctx, `DELETE FROM login_events WHERE username LIKE 'ut\_%'`) //nolint:errcheck // best-effort test cleanup
+		pool.Exec(ctx, `DELETE FROM users WHERE username LIKE 'ut\_%'`)        //nolint:errcheck // best-effort test cleanup
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	u, err := users.Create(ctx, "ut_logins", "h", model.RoleViewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.LastLoginAt != nil || u.LastSeenAt != nil {
+		t.Errorf("новый пользователь без входов: %+v", u)
+	}
+
+	if err := users.RecordLogin(ctx, model.LoginEvent{Username: "ut_ghost", IP: "203.0.113.1", UserAgent: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.RecordLogin(ctx, model.LoginEvent{UserID: &u.ID, Username: u.Username, Success: true, IP: "203.0.113.2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := users.ByID(ctx, u.ID)
+	if err != nil || got.LastLoginAt == nil || got.LastSeenAt == nil {
+		t.Fatalf("после входа: %v %+v", err, got)
+	}
+	if err := users.Touch(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := users.Logins(ctx, 0, 100, 0)
+	if err != nil || len(all) < 2 {
+		t.Fatalf("Logins: %v %d", err, len(all))
+	}
+	mine, err := users.Logins(ctx, u.ID, 100, 0)
+	if err != nil || len(mine) != 1 || !mine[0].Success || mine[0].IP != "203.0.113.2" {
+		t.Errorf("Logins по пользователю: %v %+v", err, mine)
+	}
+}

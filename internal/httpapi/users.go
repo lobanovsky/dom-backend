@@ -14,6 +14,9 @@ type UserStore interface {
 	Create(ctx context.Context, username, passwordHash, role string) (model.User, error)
 	Update(ctx context.Context, id int64, role string, active bool) (model.User, error)
 	SetPassword(ctx context.Context, id int64, passwordHash string) (model.User, error)
+	RecordLogin(ctx context.Context, e model.LoginEvent) error
+	Touch(ctx context.Context, id int64) error
+	Logins(ctx context.Context, userID int64, limit, offset int) ([]model.LoginEvent, error)
 }
 
 type userHandlers struct {
@@ -23,6 +26,7 @@ type userHandlers struct {
 
 func (h userHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/users", h.list)
+	mux.HandleFunc("GET /api/v1/users/logins", h.logins)
 	mux.HandleFunc("POST /api/v1/users", h.create)
 	mux.HandleFunc("PUT /api/v1/users/{id}", h.update)
 }
@@ -33,6 +37,20 @@ func (h userHandlers) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.s.List(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeList(w, items, p)
+}
+
+// logins — история входов (user_id — только одного пользователя).
+func (h userHandlers) logins(w http.ResponseWriter, r *http.Request) {
+	p, ok := parseList(w, r, []string{"user_id"}, nil)
+	if !ok {
+		return
+	}
+	items, err := h.s.Logins(r.Context(), p.ints["user_id"], p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)
 		return

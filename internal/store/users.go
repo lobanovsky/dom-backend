@@ -9,7 +9,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-const userCols = `id, username, role, active, password_hash, token_version, created_at, updated_at`
+const userCols = `id, username, role, active, password_hash, token_version, created_at, updated_at, last_login_at, last_seen_at`
 
 type Users struct{ pool *pgxpool.Pool }
 
@@ -82,4 +82,37 @@ func (s *Users) SetPassword(ctx context.Context, id int64, passwordHash string) 
 	return one[model.User](s.pool.Query(ctx,
 		`UPDATE users SET password_hash = $2, token_version = token_version + 1, updated_at = now()
 		 WHERE id = $1 RETURNING `+userCols, id, passwordHash))
+}
+
+// RecordLogin пишет попытку входа; при успехе обновляет users.last_login_at.
+func (s *Users) RecordLogin(ctx context.Context, e model.LoginEvent) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO login_events (user_id, username, success, ip, user_agent) VALUES ($1, $2, $3, $4, $5)`,
+		e.UserID, e.Username, e.Success, e.IP, e.UserAgent); err != nil {
+		return mapErr(err)
+	}
+	if e.Success && e.UserID != nil {
+		if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at = now(), last_seen_at = now() WHERE id = $1`, *e.UserID); err != nil {
+			return mapErr(err)
+		}
+	}
+	return mapErr(tx.Commit(ctx))
+}
+
+// Touch отмечает активность пользователя (не меняет updated_at).
+func (s *Users) Touch(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE users SET last_seen_at = now() WHERE id = $1`, id)
+	return mapErr(err)
+}
+
+// Logins — история входов, новые сверху; userID > 0 ограничивает одним пользователем.
+func (s *Users) Logins(ctx context.Context, userID int64, limit, offset int) ([]model.LoginEvent, error) {
+	return collect[model.LoginEvent](s.pool.Query(ctx,
+		`SELECT id, user_id, username, success, ip, user_agent, created_at FROM login_events
+		 WHERE $1 = 0 OR user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, userID, limit, offset))
 }

@@ -21,6 +21,9 @@ type fakeUsers struct {
 	mu    sync.Mutex
 	users map[int64]*model.User
 	next  int64
+
+	events  []model.LoginEvent
+	touched map[int64]int
 }
 
 func newFakeUsers() *fakeUsers { return &fakeUsers{users: map[int64]*model.User{}} }
@@ -116,6 +119,36 @@ func (f *fakeUsers) SetPassword(_ context.Context, id int64, hash string) (model
 	u.PasswordHash = hash
 	u.TokenVersion++
 	return *u, nil
+}
+
+func (f *fakeUsers) RecordLogin(_ context.Context, e model.LoginEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e.ID = int64(len(f.events) + 1)
+	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeUsers) Touch(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.touched == nil {
+		f.touched = map[int64]int{}
+	}
+	f.touched[id]++
+	return nil
+}
+
+func (f *fakeUsers) Logins(_ context.Context, userID int64, limit, offset int) ([]model.LoginEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []model.LoginEvent{}
+	for i := len(f.events) - 1; i >= 0; i-- {
+		if e := f.events[i]; userID == 0 || (e.UserID != nil && *e.UserID == userID) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // testAuth — Auth с единственным администратором admin / пароль, чей bcrypt-хеш передан.
@@ -297,3 +330,36 @@ func TestChangeOwnPassword(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestLoginHistory(t *testing.T) {
+	h, f := usersRouter(t)
+	do(h, "POST", "/api/v1/auth/login", `{"username":"ghost","password":"x"}`)
+	do(h, "POST", "/api/v1/auth/login", `{"username":"viewer","password":"wrong"}`)
+	viewer := loginAs(t, h, "viewer", "viewerpw1")
+	admin := loginAs(t, h, "admin", "adminpw1")
+
+	if len(f.events) != 4 {
+		t.Fatalf("events = %d, want 4", len(f.events))
+	}
+	if e := f.events[0]; e.Success || e.UserID != nil || e.Username != "ghost" {
+		t.Errorf("unknown login event = %+v", e)
+	}
+	if e := f.events[2]; !e.Success || e.UserID == nil || e.Username != "viewer" {
+		t.Errorf("viewer login event = %+v", e)
+	}
+	do(h, "GET", "/api/v1/auth/me", "", viewer)
+	if f.touched[*f.events[2].UserID] == 0 {
+		t.Error("активность пользователя не отмечена")
+	}
+
+	if rec := do(h, "GET", "/api/v1/users/logins", "", viewer); rec.Code != http.StatusForbidden {
+		t.Errorf("viewer GET logins = %d, want 403", rec.Code)
+	}
+	rec := do(h, "GET", "/api/v1/users/logins", "", admin)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"username":"ghost"`) {
+		t.Errorf("admin GET logins = %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "password") {
+		t.Error("в истории входов не должно быть паролей")
+	}
+}

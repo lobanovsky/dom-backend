@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
@@ -50,6 +51,7 @@ func (h *authHandlers) login(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.auth.Login(r.Context(), req.Username, req.Password)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
+		h.recordLogin(r, model.User{Username: req.Username}, false)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -57,8 +59,30 @@ func (h *authHandlers) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	h.recordLogin(r, u, true)
 	h.setSession(w, r, u)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// recordLogin пишет попытку входа в историю; сбой записи не мешает входу.
+func (h *authHandlers) recordLogin(r *http.Request, u model.User, success bool) {
+	if h.users == nil {
+		return
+	}
+	e := model.LoginEvent{Username: truncate(u.Username, 100), Success: success, IP: clientIP(r), UserAgent: truncate(r.UserAgent(), 300)}
+	if success {
+		e.UserID = &u.ID
+	}
+	if err := h.users.RecordLogin(r.Context(), e); err != nil {
+		slog.Error("record login", "err", err)
+	}
+}
+
+func truncate(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 func (h *authHandlers) logout(w http.ResponseWriter, _ *http.Request) {
@@ -126,8 +150,21 @@ func (h *authHandlers) require(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		h.touch(r, u)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, u)))
 	})
+}
+
+// seenEvery — как часто обновляется «последняя активность» пользователя, чтобы не писать в БД на каждый запрос.
+const seenEvery = 5 * time.Minute
+
+func (h *authHandlers) touch(r *http.Request, u model.User) {
+	if h.users == nil || (u.LastSeenAt != nil && time.Since(*u.LastSeenAt) < seenEvery) {
+		return
+	}
+	if err := h.users.Touch(r.Context(), u.ID); err != nil {
+		slog.Error("touch user", "err", err)
+	}
 }
 
 // allowed — единое правило доступа, по умолчанию «запрещено»:

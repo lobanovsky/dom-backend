@@ -262,7 +262,7 @@ func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterRead
 }
 
 func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id"}, Texts: []string{"kind", "calc_method", "q"}, Bools: []string{"active"}})
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id"}, Texts: []string{"kind", "calc_method", "account_purpose", "q"}, Bools: []string{"active"}})
 	if !ok {
 		return model.ServiceFilter{}, p, false
 	}
@@ -274,7 +274,11 @@ func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter,
 		writeError(w, http.StatusUnprocessableEntity, "calc_method: must be one of: "+strings.Join(model.ServiceCalcMethods, ", "))
 		return model.ServiceFilter{}, p, false
 	}
-	return model.ServiceFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Kind: p.Text("kind"), CalcMethod: p.Text("calc_method"),
+	if a := p.Text("account_purpose"); a != nil && !slices.Contains(model.AccountPurposes, *a) {
+		writeError(w, http.StatusUnprocessableEntity, "account_purpose: must be one of: "+strings.Join(model.AccountPurposes, ", "))
+		return model.ServiceFilter{}, p, false
+	}
+	return model.ServiceFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Kind: p.Text("kind"), CalcMethod: p.Text("calc_method"), AccountPurpose: p.Text("account_purpose"),
 		Active: p.Bool("active"), Q: p.Text("q")}, p, true
 }
 
@@ -284,6 +288,15 @@ func serviceTariffFilter(w http.ResponseWriter, r *http.Request) (model.ServiceT
 		return model.ServiceTariffFilter{}, p, false
 	}
 	return model.ServiceTariffFilter{Deleted: p.Deleted, ServiceID: p.Int("service_id")}, p, true
+}
+
+func accountServiceFilter(w http.ResponseWriter, r *http.Request) (model.AccountServiceFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"account_id", "service_id", "premises_id", "building_id"}, Dates: []string{"active_on"}})
+	if !ok {
+		return model.AccountServiceFilter{}, p, false
+	}
+	return model.AccountServiceFilter{Deleted: p.Deleted, AccountID: p.Int("account_id"), ServiceID: p.Int("service_id"),
+		PremisesID: p.Int("premises_id"), BuildingID: p.Int("building_id"), ActiveOn: p.Date("active_on")}, p, true
 }
 
 func isTrue(b *bool) bool { return b != nil && *b }

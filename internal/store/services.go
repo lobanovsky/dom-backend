@@ -9,7 +9,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff,
+const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff, s.account_purpose, s.premises_kinds, s.receipt_name,
 	ARRAY(SELECT c.component_id FROM service_components c WHERE c.service_id = s.id ORDER BY c.component_id) AS component_ids,
 	s.position, s.active, s.comment, o.name AS organization_name, service_price_on(s.id, CURRENT_DATE) AS current_price,
 	s.created_at, s.updated_at, s.deleted_at
@@ -27,9 +27,10 @@ func (s *Services) List(ctx context.Context, f model.ServiceFilter, limit, offse
 		   AND ($3::text IS NULL OR s.calc_method = $3)
 		   AND ($4::bool IS NULL OR s.active = $4)
 		   AND ($5::text IS NULL OR s.name ILIKE $5)
-		   AND (s.deleted_at IS NOT NULL) = $6
-		 ORDER BY s.kind, s.position, s.name, s.id LIMIT $7 OFFSET $8`,
-		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.Deleted, limit, offset))
+		   AND ($6::text IS NULL OR s.account_purpose = $6)
+		   AND (s.deleted_at IS NOT NULL) = $7
+		 ORDER BY s.kind, s.position, s.name, s.id LIMIT $8 OFFSET $9`,
+		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.AccountPurpose, f.Deleted, limit, offset))
 }
 
 func (s *Services) Get(ctx context.Context, id int64) (model.Service, error) {
@@ -37,6 +38,7 @@ func (s *Services) Get(ctx context.Context, id int64) (model.Service, error) {
 }
 
 func (s *Services) Create(ctx context.Context, in model.Service) (model.Service, error) {
+	in.SetDefaults()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.Service{}, mapErr(err)
@@ -44,9 +46,10 @@ func (s *Services) Create(ctx context.Context, in model.Service) (model.Service,
 	defer rollback(ctx, tx)
 	var id int64
 	err = tx.QueryRow(ctx,
-		`INSERT INTO services (organization_id, kind, name, unit, calc_method, meter_resource, meter_tariff, position, active, comment)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-		in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.Position, in.Active, in.Comment).Scan(&id)
+		`INSERT INTO services (organization_id, kind, name, unit, calc_method, meter_resource, meter_tariff, account_purpose, premises_kinds, receipt_name, position, active, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+		in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName,
+		in.Position, in.Active, in.Comment).Scan(&id)
 	if err != nil {
 		return model.Service{}, mapErr(err)
 	}
@@ -60,6 +63,7 @@ func (s *Services) Create(ctx context.Context, in model.Service) (model.Service,
 }
 
 func (s *Services) Update(ctx context.Context, id int64, in model.Service) (model.Service, error) {
+	in.SetDefaults()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.Service{}, mapErr(err)
@@ -67,10 +71,14 @@ func (s *Services) Update(ctx context.Context, id int64, in model.Service) (mode
 	defer rollback(ctx, tx)
 	tag, err := tx.Exec(ctx,
 		`UPDATE services SET organization_id = $2, kind = $3, name = $4, unit = $5, calc_method = $6, meter_resource = $7, meter_tariff = $8,
-		        position = $9, active = $10, comment = $11, updated_at = now()
+		        account_purpose = $9, premises_kinds = $10, receipt_name = $11, position = $12, active = $13, comment = $14, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL`,
-		id, in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.Position, in.Active, in.Comment)
+		id, in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName,
+		in.Position, in.Active, in.Comment)
 	if err := checkDeleted(tag, err); err != nil {
+		return model.Service{}, err
+	}
+	if err := checkAssignments(ctx, tx, id); err != nil {
 		return model.Service{}, err
 	}
 	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
@@ -95,6 +103,29 @@ func (s *Services) Delete(ctx context.Context, id int64) error {
 	return softDelete(ctx, s.pool, "services", id)
 }
 
+// checkAssignments не даёт изменить услугу так, чтобы её действующие назначения перестали подходить: другой тип счёта,
+// другие виды помещений или переход между ручным и расчётным количеством.
+func checkAssignments(ctx context.Context, tx pgx.Tx, id int64) error {
+	var bad bool
+	err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM account_services x
+		   JOIN services s ON s.id = x.service_id
+		   JOIN personal_accounts a ON a.id = x.account_id
+		   JOIN premises p ON p.id = a.premises_id
+		   WHERE x.service_id = $1 AND x.deleted_at IS NULL
+		     AND (a.purpose <> s.account_purpose
+		          OR (cardinality(s.premises_kinds) > 0 AND NOT (p.kind = ANY (s.premises_kinds)))
+		          OR (s.calc_method = 'manual') <> (x.quantity IS NOT NULL)))`, id).Scan(&bad)
+	if err != nil {
+		return mapErr(err)
+	}
+	if bad {
+		return invalid("account_purpose: cannot be changed while accounts have this service assigned incompatibly")
+	}
+	return nil
+}
+
 // saveComponents заменяет состав услуги и проверяет составные связи услуги в обе стороны (она — сумма и она — слагаемое):
 // сумма складывает простые услуги (не составные) той же организации и с той же единицей; у суммы нет собственных тарифов.
 func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64) error {
@@ -114,12 +145,12 @@ func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64
 		   JOIN services k ON k.id = c.component_id
 		   WHERE (c.service_id = $1 OR c.component_id = $1)
 		     AND (p.calc_method <> 'sum' OR k.calc_method = 'sum' OR k.deleted_at IS NOT NULL
-		          OR p.organization_id <> k.organization_id OR p.unit <> k.unit))`, id).Scan(&bad)
+		          OR p.organization_id <> k.organization_id OR p.unit <> k.unit OR p.account_purpose <> k.account_purpose))`, id).Scan(&bad)
 	if err != nil {
 		return mapErr(err)
 	}
 	if bad {
-		return invalid("component_ids: components must be plain services of the same organization and unit")
+		return invalid("component_ids: components must be plain services of the same organization, unit and account purpose")
 	}
 	err = tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM services s JOIN service_tariffs t ON t.service_id = s.id AND t.deleted_at IS NULL

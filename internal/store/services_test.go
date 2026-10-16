@@ -102,7 +102,7 @@ func TestServicesAndTariffs(t *testing.T) {
 	}
 	bad("composite component", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма сумм", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{sum.ID}})
 	bad("other unit", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма единиц", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{e2.ID}})
-	otherSvc, err := services.Create(ctx, model.Service{OrganizationID: other.ID, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: res("cold_water"), MeterTariff: tar(1), ComponentIDs: []int64{}, Active: true})
+	otherSvc, err := services.Create(ctx, model.Service{OrganizationID: other.ID, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: res("cold_water"), MeterTariff: tar(1), ComponentIDs: []int64{}, AccountPurpose: "utilities", Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}

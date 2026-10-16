@@ -1,6 +1,9 @@
 package model
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 var (
 	ServiceKinds       = []string{"utility", "maintenance", "additional"}
@@ -15,23 +18,35 @@ var (
 // Текущая цена и название организации вычисляются сервером и при записи игнорируются.
 type Service struct {
 	Meta
-	OrganizationID int64   `json:"organization_id" db:"organization_id"`
-	Kind           string  `json:"kind" db:"kind"`
-	Name           string  `json:"name" db:"name"`
-	Unit           string  `json:"unit" db:"unit"`
-	CalcMethod     string  `json:"calc_method" db:"calc_method"`
-	MeterResource  *string `json:"meter_resource" db:"meter_resource"`
-	MeterTariff    *int    `json:"meter_tariff" db:"meter_tariff"`
-	ComponentIDs   []int64 `json:"component_ids" db:"component_ids"`
-	Position       int     `json:"position" db:"position"`
-	Active         bool    `json:"active" db:"active"`
-	Comment        *string `json:"comment" db:"comment"`
+	OrganizationID int64    `json:"organization_id" db:"organization_id"`
+	Kind           string   `json:"kind" db:"kind"`
+	Name           string   `json:"name" db:"name"`
+	Unit           string   `json:"unit" db:"unit"`
+	CalcMethod     string   `json:"calc_method" db:"calc_method"`
+	MeterResource  *string  `json:"meter_resource" db:"meter_resource"`
+	MeterTariff    *int     `json:"meter_tariff" db:"meter_tariff"`
+	ComponentIDs   []int64  `json:"component_ids" db:"component_ids"`
+	AccountPurpose string   `json:"account_purpose" db:"account_purpose"` // на счёт какого типа попадает услуга (как purpose у лицевого счёта)
+	PremisesKinds  []string `json:"premises_kinds" db:"premises_kinds"`   // к каким видам помещений применима; пусто — к любым
+	ReceiptName    *string  `json:"receipt_name" db:"receipt_name"`       // название в квитанции; пусто — Name
+	Position       int      `json:"position" db:"position"`
+	Active         bool     `json:"active" db:"active"`
+	Comment        *string  `json:"comment" db:"comment"`
 
 	OrganizationName string   `json:"organization_name" db:"organization_name"`
 	CurrentPrice     *float64 `json:"current_price" db:"current_price"` // цена на сегодня; nil — тарифа на сегодня нет
 }
 
 func (s *Service) SetDefaults() {
+	if s.AccountPurpose == "" {
+		s.AccountPurpose = "utilities"
+	}
+	if s.PremisesKinds == nil {
+		s.PremisesKinds = []string{}
+	}
+	if s.ReceiptName != nil && strings.TrimSpace(*s.ReceiptName) == "" {
+		s.ReceiptName = nil
+	}
 	if s.ComponentIDs == nil {
 		s.ComponentIDs = []int64{}
 	}
@@ -69,9 +84,18 @@ func (s Service) Validate() error {
 	if s.CalcMethod == "sum" && len(s.ComponentIDs) == 0 {
 		components = invalid("component_ids", "must contain at least 1 item")
 	}
+	var kinds error
+	for _, k := range s.PremisesKinds {
+		if err := oneOf("premises_kinds", k, PremisesKinds); err != nil {
+			kinds = err
+			break
+		}
+	}
 	return firstErr(
 		positiveInt("organization_id", intPtr(s.OrganizationID)),
 		oneOf("kind", s.Kind, ServiceKinds),
+		oneOf("account_purpose", s.AccountPurpose, AccountPurposes),
+		kinds,
 		required("name", s.Name),
 		oneOf("unit", s.Unit, ServiceUnits),
 		oneOf("calc_method", s.CalcMethod, ServiceCalcMethods),

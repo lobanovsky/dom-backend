@@ -158,6 +158,7 @@ type ServiceFilter struct {
 	OrganizationID *int64
 	Kind           *string
 	CalcMethod     *string
+	AccountPurpose *string
 	Active         *bool
 	Q              *string // подстрока в названии
 }
@@ -165,4 +166,13 @@ type ServiceFilter struct {
 type ServiceTariffFilter struct {
 	Deleted   bool // true — только удалённые (корзина), false — только действующие
 	ServiceID *int64
+}
+
+type AccountServiceFilter struct {
+	Deleted    bool // true — только удалённые (корзина), false — только действующие
+	AccountID  *int64
+	ServiceID  *int64
+	PremisesID *int64
+	BuildingID *int64
+	ActiveOn   *Date // назначения, действующие в этот день
 }

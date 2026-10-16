@@ -282,7 +282,7 @@ func TestMeterReadingValidate(t *testing.T) {
 func TestServiceValidate(t *testing.T) {
 	str := func(v string) *string { return &v }
 	num := func(v int) *int { return &v }
-	base := Service{OrganizationID: 1, Kind: "utility", Name: "Электроэнергия Т1", Unit: "kwh", CalcMethod: "individual_meter", MeterResource: str("electricity"), MeterTariff: num(2), Active: true}
+	base := Service{OrganizationID: 1, Kind: "utility", Name: "Электроэнергия Т1", Unit: "kwh", CalcMethod: "individual_meter", MeterResource: str("electricity"), MeterTariff: num(2), AccountPurpose: "utilities", Active: true}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("valid service: %v", err)
 	}
@@ -298,11 +298,23 @@ func TestServiceValidate(t *testing.T) {
 		"tariff 4":         mut(func(s *Service) { s.MeterTariff = num(4) }),
 		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
 		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
+		"bad purpose":      mut(func(s *Service) { s.AccountPurpose = "rent" }),
+		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
 		"sum no component": mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum", nil, nil }),
 	} {
 		if s.Validate() == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+	ok := mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "parking_space"}; s.ReceiptName = str("  ") })
+	ok.SetDefaults()
+	if err := ok.Validate(); err != nil || ok.ReceiptName != nil {
+		t.Errorf("kinds list: %v, receipt = %v", err, ok.ReceiptName)
+	}
+	def := Service{OrganizationID: 1, Kind: "additional", Name: "Ключи", Unit: "piece", CalcMethod: "manual"}
+	def.SetDefaults()
+	if def.AccountPurpose != "utilities" || def.PremisesKinds == nil || def.Validate() != nil {
+		t.Errorf("defaults: %+v", def)
 	}
 	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water")}
 	sum.SetDefaults()

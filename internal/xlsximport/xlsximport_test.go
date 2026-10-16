@@ -77,3 +77,65 @@ func TestParseNotXLSX(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestParseReadings(t *testing.T) {
+	// Электричество: пустая колонка слева, числа и текст с разделителем тысяч, разное число тарифов.
+	rows, errs, err := ParseReadings(workbook(t, [][]any{
+		{"", "Квартира", "Номер счётчика", "Т1", "Т2", "Т3"},
+		{"", "1", "21666896", 30381.731, "21,865.790", "42,795.558"},
+		{},
+		{"", "2", "21949330", "5,5", 4818.633, ""},
+	}), "electricity")
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("err = %v, errs = %v", err, errs)
+	}
+	if len(rows) != 2 || rows[0].Row != 2 || rows[0].Premises != "1" || rows[0].Serial != "21666896" || rows[0].Tariffs() != 3 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if *rows[0].T[0] != 30381.731 || *rows[0].T[1] != 21865.79 || *rows[0].T[2] != 42795.558 {
+		t.Errorf("row 0 readings = %v %v %v", *rows[0].T[0], *rows[0].T[1], *rows[0].T[2])
+	}
+	if rows[1].Row != 4 || rows[1].Tariffs() != 2 || *rows[1].T[0] != 5.5 {
+		t.Errorf("row 1 = %+v", rows[1])
+	}
+
+	rows, _, _ = ParseReadings(workbook(t, [][]any{{"Квартира", "Номер", "Т1"}, {"1", "1", 6457.5545427526404}}), "cold_water")
+	if len(rows) != 1 || *rows[0].T[0] != 6457.555 {
+		t.Errorf("rounding: %+v", rows)
+	}
+
+	// Вода: без пустой колонки, одна квартира с несколькими счётчиками.
+	rows, errs, err = ParseReadings(workbook(t, [][]any{
+		{"Квартира", "Номер счётчика", "Сентябрь 2026"},
+		{"1", "863943", 633.99},
+		{"1", "864018", "2,347.77"},
+	}), "cold_water")
+	if err != nil || len(errs) != 0 || len(rows) != 2 || rows[1].Premises != "1" || *rows[1].T[0] != 2347.77 {
+		t.Fatalf("water: rows = %+v, errs = %v, err = %v", rows, errs, err)
+	}
+}
+
+func TestParseReadingsErrors(t *testing.T) {
+	_, errs, err := ParseReadings(workbook(t, [][]any{
+		{"Квартира", "Номер счётчика", "Т1", "Т2", "Т3"},
+		{"9", "100", 10, 1, 1},
+		{"1", "106", 10, "", 5},    // Т3 без Т2
+		{"2", "100", 10, 1, 1},     // повтор номера счётчика
+		{"3", "", 10, 1, 1},        // нет номера
+		{"4", "101", "abc", 1, 1},  // не число
+		{"5", "102", -1, 1, 1},     // отрицательное
+		{"6", "103", 1.2345, 1, 1}, // четыре знака
+		{"", "104", 1, 1, 1},       // нет квартиры
+		{"7", "105", "", "", ""},   // нет Т1
+	}), "electricity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 7 {
+		t.Fatalf("errs = %+v", errs)
+	}
+
+	if _, _, err := ParseReadings(workbook(t, [][]any{{"A", "B"}, {"1", "2"}}), "cold_water"); err == nil || !strings.Contains(err.Error(), "Квартира") {
+		t.Errorf("no header column: %v", err)
+	}
+}

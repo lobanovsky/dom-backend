@@ -27,3 +27,28 @@ type ImportResult struct {
 	PersonsCreated int `json:"persons_created"`
 	PersonsReused  int `json:"persons_reused"`
 }
+
+// MeterReadingImportRow — одна строка xlsx-файла с показаниями: помещение, номер счётчика и показания по тарифам.
+type MeterReadingImportRow struct {
+	Row      int // номер строки в файле (с 1)
+	Premises string
+	Serial   string
+	T        [3]*float64 // заполненные подряд тарифы с первого; число заполненных — число тарифов счётчика
+}
+
+// Tariffs — число заполненных показаний в строке.
+func (r MeterReadingImportRow) Tariffs() int {
+	n := 0
+	for _, v := range r.T {
+		if v != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// MeterReadingImportResult — что создано при загрузке показаний.
+type MeterReadingImportResult struct {
+	MetersCreated int `json:"meters_created"`
+	Readings      int `json:"readings"`
+}

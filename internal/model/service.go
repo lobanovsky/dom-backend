@@ -8,8 +8,11 @@ import (
 var (
 	ServiceKinds       = []string{"utility", "maintenance", "additional"}
 	ServiceUnits       = []string{"kwh", "m3", "gcal", "m2", "piece", "month"}
-	ServiceCalcMethods = []string{"fixed", "per_area", "individual_meter", "common_meter", "sum", "manual"}
+	ServiceCalcMethods = []string{"fixed", "per_area", "individual_meter", "common_meter", "sum_volumes", "sum_prices", "manual"}
 )
+
+// IsSum — составная услуга: sum_volumes (объём — сумма объёмов других услуг, тариф свой) или sum_prices (сумма цен, тарифов нет).
+func IsSum(method string) bool { return method == "sum_volumes" || method == "sum_prices" }
 
 // Service — услуга организации: коммунальная, эксплуатационная или дополнительная.
 // CalcMethod описывает, как считается объём: по индивидуальному счётчику (MeterResource + MeterTariff), по общедомовому
@@ -57,7 +60,7 @@ func (s *Service) SetDefaults() {
 		one := 1
 		s.MeterTariff = &one
 	}
-	if s.CalcMethod != "sum" {
+	if !IsSum(s.CalcMethod) {
 		s.ComponentIDs = []int64{}
 	}
 }
@@ -81,7 +84,7 @@ func (s Service) Validate() error {
 		unit = invalid("unit", "must be m2 for a per-area service")
 	}
 	var components error
-	if s.CalcMethod == "sum" && len(s.ComponentIDs) == 0 {
+	if IsSum(s.CalcMethod) && len(s.ComponentIDs) == 0 {
 		components = invalid("component_ids", "must contain at least 1 item")
 	}
 	var kinds error

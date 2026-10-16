@@ -84,13 +84,25 @@ func TestServicesAndTariffs(t *testing.T) {
 		t.Errorf("tariff list: %+v, %v", list, err)
 	}
 
-	// Составная услуга: водоотведение = ХВС + ХВС для ГВС; своих тарифов нет, цена — сумма.
-	sum := make(model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{cold.ID, hot.ID}})
+	// Составная услуга sum_prices: сумма цен слагаемых, своих тарифов нет.
+	sum := make(model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{cold.ID, hot.ID}})
 	if len(sum.ComponentIDs) != 2 || sum.CurrentPrice == nil || *sum.CurrentPrice != 144.1234 {
 		t.Errorf("sum service: %+v %v", sum.ComponentIDs, sum.CurrentPrice)
 	}
 	if _, err := add(sum.ID, 1, date(2026, 1, 1), nil); !errors.Is(err, ErrInvalid) {
 		t.Errorf("tariff for sum service: %v", err)
+	}
+	// Составная услуга sum_volumes: водоотведение = ХВС + ХВС для ГВС по объёму, а тариф на водоотведение свой.
+	vol := make(model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Водоотведение (объём)", Unit: "m3", CalcMethod: "sum_volumes", ComponentIDs: []int64{cold.ID, hot.ID}})
+	if len(vol.ComponentIDs) != 2 || vol.CurrentPrice != nil {
+		t.Errorf("sum_volumes service before tariff: %+v %v", vol.ComponentIDs, vol.CurrentPrice)
+	}
+	volTariff, err := add(vol.ID, 30.5, date(2026, 1, 1), nil)
+	if err != nil {
+		t.Fatalf("tariff for sum_volumes service: %v", err)
+	}
+	if got, err := services.Get(ctx, vol.ID); err != nil || got.CurrentPrice == nil || *got.CurrentPrice != 30.5 {
+		t.Errorf("sum_volumes price: %+v, %v", got.CurrentPrice, err)
 	}
 	bad := func(name string, in model.Service) {
 		t.Helper()
@@ -100,16 +112,16 @@ func TestServicesAndTariffs(t *testing.T) {
 			t.Errorf("%s: err = %v, want invalid", name, err)
 		}
 	}
-	bad("composite component", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма сумм", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{sum.ID}})
-	bad("other unit", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма единиц", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{e2.ID}})
+	bad("composite component", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма сумм", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{sum.ID}})
+	bad("other unit", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Сумма единиц", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{e2.ID}})
 	otherSvc, err := services.Create(ctx, model.Service{OrganizationID: other.ID, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: res("cold_water"), MeterTariff: tar(1), ComponentIDs: []int64{}, AccountPurpose: "utilities", Active: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad("other organization", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Чужая сумма", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{otherSvc.ID}})
+	bad("other organization", model.Service{OrganizationID: org.ID, Kind: "utility", Name: "Чужая сумма", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{otherSvc.ID}})
 	// Услугу, входящую в состав, нельзя превратить в сумму, а услугу с тарифами — тоже.
 	upd := cold
-	upd.CalcMethod, upd.MeterResource, upd.MeterTariff, upd.ComponentIDs = "sum", nil, nil, []int64{hot.ID}
+	upd.CalcMethod, upd.MeterResource, upd.MeterTariff, upd.ComponentIDs = "sum_prices", nil, nil, []int64{hot.ID}
 	if _, err := services.Update(ctx, cold.ID, upd); !errors.Is(err, ErrInvalid) {
 		t.Errorf("make component a sum: %v", err)
 	}
@@ -121,6 +133,12 @@ func TestServicesAndTariffs(t *testing.T) {
 		}
 	}
 	if err := services.Delete(ctx, sum.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tariffs.Delete(ctx, volTariff.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := services.Delete(ctx, vol.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := tariffs.Delete(ctx, old.ID); err != nil {

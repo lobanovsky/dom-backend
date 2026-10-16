@@ -94,8 +94,8 @@ func checkTariffService(ctx context.Context, tx pgx.Tx, serviceID int64) error {
 		}
 		return mapErr(err)
 	}
-	if method == "sum" {
-		return invalid("service_id: a sum service has no tariffs of its own")
+	if method == "sum_prices" {
+		return invalid("service_id: a sum-of-prices service has no tariffs of its own")
 	}
 	return nil
 }

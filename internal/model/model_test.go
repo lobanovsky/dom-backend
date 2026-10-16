@@ -288,19 +288,20 @@ func TestServiceValidate(t *testing.T) {
 	}
 	mut := func(f func(s *Service)) Service { s := base; f(&s); return s }
 	for name, s := range map[string]Service{
-		"no organization":  mut(func(s *Service) { s.OrganizationID = 0 }),
-		"bad kind":         mut(func(s *Service) { s.Kind = "other" }),
-		"no name":          mut(func(s *Service) { s.Name = " " }),
-		"bad unit":         mut(func(s *Service) { s.Unit = "kg" }),
-		"bad method":       mut(func(s *Service) { s.CalcMethod = "magic" }),
-		"no resource":      mut(func(s *Service) { s.MeterResource = nil }),
-		"no meter tariff":  mut(func(s *Service) { s.MeterTariff = nil }),
-		"tariff 4":         mut(func(s *Service) { s.MeterTariff = num(4) }),
-		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
-		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
-		"bad purpose":      mut(func(s *Service) { s.AccountPurpose = "rent" }),
-		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
-		"sum no component": mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum", nil, nil }),
+		"no organization":         mut(func(s *Service) { s.OrganizationID = 0 }),
+		"bad kind":                mut(func(s *Service) { s.Kind = "other" }),
+		"no name":                 mut(func(s *Service) { s.Name = " " }),
+		"bad unit":                mut(func(s *Service) { s.Unit = "kg" }),
+		"bad method":              mut(func(s *Service) { s.CalcMethod = "magic" }),
+		"no resource":             mut(func(s *Service) { s.MeterResource = nil }),
+		"no meter tariff":         mut(func(s *Service) { s.MeterTariff = nil }),
+		"tariff 4":                mut(func(s *Service) { s.MeterTariff = num(4) }),
+		"water tariff 2":          mut(func(s *Service) { s.MeterResource = str("cold_water") }),
+		"per area in kwh":         mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
+		"bad purpose":             mut(func(s *Service) { s.AccountPurpose = "rent" }),
+		"bad kind in list":        mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
+		"sum no component":        mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum_volumes", nil, nil }),
+		"sum prices no component": mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum_prices", nil, nil }),
 	} {
 		if s.Validate() == nil {
 			t.Errorf("%s: want error", name)
@@ -316,7 +317,7 @@ func TestServiceValidate(t *testing.T) {
 	if def.AccountPurpose != "utilities" || def.PremisesKinds == nil || def.Validate() != nil {
 		t.Errorf("defaults: %+v", def)
 	}
-	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water")}
+	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum_volumes", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water")}
 	sum.SetDefaults()
 	if sum.MeterResource != nil || sum.Validate() != nil {
 		t.Errorf("sum service: %+v, %v", sum, sum.Validate())

@@ -144,7 +144,7 @@ func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64
 		   JOIN services p ON p.id = c.service_id AND p.deleted_at IS NULL
 		   JOIN services k ON k.id = c.component_id
 		   WHERE (c.service_id = $1 OR c.component_id = $1)
-		     AND (p.calc_method <> 'sum' OR k.calc_method = 'sum' OR k.deleted_at IS NOT NULL
+		     AND (p.calc_method NOT IN ('sum_prices', 'sum_volumes') OR k.calc_method IN ('sum_prices', 'sum_volumes') OR k.deleted_at IS NOT NULL
 		          OR p.organization_id <> k.organization_id OR p.unit <> k.unit OR p.account_purpose <> k.account_purpose))`, id).Scan(&bad)
 	if err != nil {
 		return mapErr(err)
@@ -154,12 +154,12 @@ func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64
 	}
 	err = tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM services s JOIN service_tariffs t ON t.service_id = s.id AND t.deleted_at IS NULL
-		                WHERE s.id = $1 AND s.calc_method = 'sum')`, id).Scan(&bad)
+		                WHERE s.id = $1 AND s.calc_method = 'sum_prices')`, id).Scan(&bad)
 	if err != nil {
 		return mapErr(err)
 	}
 	if bad {
-		return invalid("calc_method: a sum service cannot have tariffs")
+		return invalid("calc_method: a sum-of-prices service cannot have tariffs")
 	}
 	return nil
 }

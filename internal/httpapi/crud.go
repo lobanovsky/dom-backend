@@ -261,4 +261,29 @@ func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterRead
 	return model.MeterReadingFilter{Deleted: p.Deleted, MeterID: p.Int("meter_id"), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to")}, p, true
 }
 
+func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id"}, Texts: []string{"kind", "calc_method", "q"}, Bools: []string{"active"}})
+	if !ok {
+		return model.ServiceFilter{}, p, false
+	}
+	if k := p.Text("kind"); k != nil && !slices.Contains(model.ServiceKinds, *k) {
+		writeError(w, http.StatusUnprocessableEntity, "kind: must be one of: "+strings.Join(model.ServiceKinds, ", "))
+		return model.ServiceFilter{}, p, false
+	}
+	if m := p.Text("calc_method"); m != nil && !slices.Contains(model.ServiceCalcMethods, *m) {
+		writeError(w, http.StatusUnprocessableEntity, "calc_method: must be one of: "+strings.Join(model.ServiceCalcMethods, ", "))
+		return model.ServiceFilter{}, p, false
+	}
+	return model.ServiceFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Kind: p.Text("kind"), CalcMethod: p.Text("calc_method"),
+		Active: p.Bool("active"), Q: p.Text("q")}, p, true
+}
+
+func serviceTariffFilter(w http.ResponseWriter, r *http.Request) (model.ServiceTariffFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"service_id"}})
+	if !ok {
+		return model.ServiceTariffFilter{}, p, false
+	}
+	return model.ServiceTariffFilter{Deleted: p.Deleted, ServiceID: p.Int("service_id")}, p, true
+}
+
 func isTrue(b *bool) bool { return b != nil && *b }

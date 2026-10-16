@@ -25,6 +25,9 @@ erDiagram
     premises |o--o{ meters : "индивидуальные счётчики"
     buildings |o--o{ meters : "общедомовые счётчики"
     meters ||--o{ meter_readings : "показания"
+    organizations ||--o{ services : "услуги"
+    services ||--o{ service_tariffs : "тарифы"
+    services ||--o{ service_components : "состав суммы"
     personal_accounts ||--o{ account_holders : "плательщики по периодам"
     persons |o--o{ account_holders : ""
     legal_entities |o--o{ account_holders : ""
@@ -58,6 +61,9 @@ erDiagram
 | `account_holders` | Плательщики счёта по периодам (физлицо **или** юрлицо) |
 | `meters` | Счётчик воды (`cold_water`, `hot_water`) или электроэнергии (`electricity`). Индивидуальный привязан к **помещению** (`premises_id`), общедомовой — к **дому** (`building_id`), задано ровно одно. `tariffs` 1–3 (многотарифным бывает только электросчётчик; у воды всегда 1), `coefficient` (коэффициент трансформации, по умолчанию 1), номер (`serial_number`, уникален в паре с ресурсом: `meters_serial_number_key`), ввод в эксплуатацию `installed_at` и окончание `removed_at` (после неё счётчик не активен: штатно вывод из работы делают датой, а не удалением), поверка `verified_at` / `next_verification_at`, начальные показания `initial_t1..t3` |
 | `meter_readings` | Показания счётчика на дату: `t1`, `t2`, `t3` (по числу тарифов счётчика), `source` (`manual` / `import`), комментарий. Одно действующее показание на счётчик и дату (`meter_readings_meter_date_key`) |
+| `services` | Услуга организации: вид (`utility` коммунальная / `maintenance` эксплуатационная / `additional` дополнительная), единица (`kwh`, `m3`, `gcal`, `m2`, `piece`, `month`), способ расчёта `calc_method`: `fixed` (цена × 1 в месяц), `per_area` (× площадь помещения, единица `m2`), `individual_meter` (по индивидуальному счётчику: `meter_resource` + `meter_tariff` 1–3), `common_meter` (общедомовой счётчик делится по площади), `sum` (сумма других услуг), `manual` (количество вводится при выставлении). Порядок в квитанции `position`, `active`. Уникальна по (организация, вид, название) |
+| `service_components` | Состав услуги `sum`: слагаемые — простые (не составные) услуги той же организации и с той же единицей; своих тарифов у суммы нет |
+| `service_tariffs` | Цена единицы услуги (до 4 знаков) в период `valid_from`–`valid_to` (включительно, пусто — до сих пор). Периоды одной услуги не пересекаются (`EXCLUDE`, расширение `btree_gist`). SQL-функция `service_price_on(service_id, date)` — цена на дату (у суммы — сумма цен слагаемых) |
 | `bank_accounts` | Расчётный счёт организации (не путать с лицевым): номер (20 цифр), БИК, банк, `is_special` (спецсчёт капремонта), описание, `registry_codes` (массив кодов реестра в имени файла; код принадлежит одному неудалённому счёту, без учёта регистра — проверяет триггер, конфликт даёт 409 `bank_accounts_registry_codes_key`), период действия. Поле `active` не хранится, а вычисляется: сегодня внутри периода |
 | `payment_categories` | Справочник категорий платежей (`direction`: incoming / outgoing): для платежей без лицевого счёта (аренда оборудования) и для расходов. Необязательные `color` (`#rrggbb`) и `icon` (эмодзи, до 16 символов) — оформление в таблицах платежей. При удалении категории она снимается со всех платежей (в том числе удалённых), `assigned_by`/`rule_id`/`run_id` у них сбрасываются |
 | `payment_registries` | Загруженный файл реестра платежей (`payment_id` — платёж из выписки, который реестр детализирует; `source`: `sber` или `vtb`, по формату файла): имя, sha256, сам файл, номер и дата реестра, итоги. sha256 уникален |
@@ -254,6 +260,12 @@ docker compose up -d --build
 - `/api/v1/meter-readings`: фильтры `meter_id`, `date_from`, `date_to`; порядок — от новых к старым. В ответе `delta_t1..t3` (только чтение) — расход с предыдущего действующего показания (для первого — с начальных показаний счётчика), умноженный на коэффициент счётчика.
 - `POST /api/v1/meter-readings/import` (только `admin`): загрузка показаний одного ресурса дома из xlsx, `multipart/form-data`: `building_id`, `resource`, `reading_date` (одна дата для всего файла), необязательное `installed_at` и `file`. Первый лист, первая строка — заголовок; колонки находятся по заголовку «Квартира», сразу за ней номер счётчика, затем показания (у воды одно, у электричества Т1–Т3; число заполненных тарифов должно совпадать с тарифностью счётчика). Пустые колонки слева допускаются, квартира с несколькими счётчиками — несколько строк. Квартира ищется по номеру среди помещений вида `apartment` дома, счётчик — по паре «ресурс + номер». Если `installed_at` задан, неизвестные счётчики создаются в квартире с этой датой ввода, нулевыми начальными показаниями и коэффициентом 1; иначе это ошибка строки. Показания записываются с `source = import` по тем же правилам, что и ручной ввод; значения округляются до 3 знаков (в Excel это часто результат формулы). Всё в одной транзакции: ошибки файла — `422` со списком `rows`, ошибки БД — `422`/`409` с номером строки, ничего не сохраняется. Ответ `201`: `{meters_created, readings}`.
 - Ошибки правил показаний — 422: `t1: must not be less than previous reading`, `t2: must not be greater than next reading`, `t3: is required for this meter`, `t2: must be empty for this meter`, `reading_date: must not be before the meter installation date` и т.п.; дубль даты — 409 `already exists: meter_readings_meter_date_key`, дубль номера счётчика — `meters_serial_number_key`.
+
+### Услуги и тарифы
+Обычные CRUD-ресурсы, запись только у `admin`:
+- `/api/v1/services`: фильтры `organization_id`, `kind`, `calc_method`, `active`, `q` (подстрока названия). В теле `component_ids` (состав суммы, только при `calc_method = sum`); поля счётчика обязательны для `individual_meter`/`common_meter` и сбрасываются у остальных способов. В ответе только для чтения: `organization_name`, `current_price` (цена на сегодня; у суммы — сумма цен слагаемых; `null` — тарифа на сегодня нет).
+- `/api/v1/service-tariffs`: фильтр `service_id`; порядок — от новых к старым. Тариф нельзя завести у составной услуги.
+- Ошибки: `409 already exists: service_tariffs_no_overlap` (пересечение периодов), `409 …services_org_kind_name_key`, `422 component_ids: components must be plain services of the same organization and unit`, `422 calc_method: a sum service cannot have tariffs`, `422 service_id: a sum service has no tariffs of its own`; удалить услугу с тарифами или входящую в состав другой нельзя (`cannot delete: has active tariffs / composite services`), организацию с услугами — тоже.
 
 ### Реестры платежей Сбера
 

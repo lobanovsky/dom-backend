@@ -35,6 +35,8 @@ type Deps struct {
 	OutgoingPayments     crudStore[model.OutgoingPayment, model.OutgoingPaymentFilter]
 	Meters               crudStore[model.Meter, model.MeterFilter]
 	MeterReadings        crudStore[model.MeterReading, model.MeterReadingFilter]
+	Services             crudStore[model.Service, model.ServiceFilter]
+	ServiceTariffs       crudStore[model.ServiceTariff, model.ServiceTariffFilter]
 	MeterReadingImporter MeterReadingImportStore
 	Properties           PropertiesStore
 	Sber                 SberStore
@@ -80,6 +82,8 @@ func NewRouter(d Deps) http.Handler {
 	crudHandlers[model.PaymentCategory, model.PaymentCategoryFilter]{path: "/api/v1/payment-categories", store: d.PaymentCategories, filter: paymentCategoryFilter}.register(api)
 	crudHandlers[model.Meter, model.MeterFilter]{path: "/api/v1/meters", store: d.Meters, filter: meterFilter, prepare: func(m *model.Meter) { m.SetDefaults() }}.register(api)
 	meterImportHandlers{d.MeterReadingImporter}.register(api)
+	crudHandlers[model.Service, model.ServiceFilter]{path: "/api/v1/services", store: d.Services, filter: serviceFilter, prepare: func(s *model.Service) { s.SetDefaults() }}.register(api)
+	crudHandlers[model.ServiceTariff, model.ServiceTariffFilter]{path: "/api/v1/service-tariffs", store: d.ServiceTariffs, filter: serviceTariffFilter}.register(api)
 	crudHandlers[model.MeterReading, model.MeterReadingFilter]{path: "/api/v1/meter-readings", store: d.MeterReadings, filter: meterReadingFilter, prepare: func(r *model.MeterReading) { r.SetDefaults() }}.register(api)
 	paymentExcelHandlers{d.IncomingPayments, d.OutgoingPayments, d.BankAccounts, d.PaymentCategories}.register(api)
 	crudHandlers[model.IncomingPayment, model.IncomingPaymentFilter]{path: "/api/v1/incoming-payments", store: d.IncomingPayments, filter: incomingPaymentFilter}.register(api)

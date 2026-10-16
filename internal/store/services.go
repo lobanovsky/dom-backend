@@ -1,0 +1,134 @@
+package store
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"dom-backend/internal/model"
+)
+
+const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff,
+	ARRAY(SELECT c.component_id FROM service_components c WHERE c.service_id = s.id ORDER BY c.component_id) AS component_ids,
+	s.position, s.active, s.comment, o.name AS organization_name, service_price_on(s.id, CURRENT_DATE) AS current_price,
+	s.created_at, s.updated_at, s.deleted_at
+	FROM services s JOIN organizations o ON o.id = s.organization_id`
+
+type Services struct{ pool *pgxpool.Pool }
+
+func NewServices(pool *pgxpool.Pool) *Services { return &Services{pool} }
+
+func (s *Services) List(ctx context.Context, f model.ServiceFilter, limit, offset int) ([]model.Service, error) {
+	return collect[model.Service](s.pool.Query(ctx,
+		serviceSelect+`
+		 WHERE ($1::bigint IS NULL OR s.organization_id = $1)
+		   AND ($2::text IS NULL OR s.kind = $2)
+		   AND ($3::text IS NULL OR s.calc_method = $3)
+		   AND ($4::bool IS NULL OR s.active = $4)
+		   AND ($5::text IS NULL OR s.name ILIKE $5)
+		   AND (s.deleted_at IS NOT NULL) = $6
+		 ORDER BY s.kind, s.position, s.name, s.id LIMIT $7 OFFSET $8`,
+		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.Deleted, limit, offset))
+}
+
+func (s *Services) Get(ctx context.Context, id int64) (model.Service, error) {
+	return one[model.Service](s.pool.Query(ctx, serviceSelect+` WHERE s.id = $1`, id))
+}
+
+func (s *Services) Create(ctx context.Context, in model.Service) (model.Service, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.Service{}, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	var id int64
+	err = tx.QueryRow(ctx,
+		`INSERT INTO services (organization_id, kind, name, unit, calc_method, meter_resource, meter_tariff, position, active, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+		in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.Position, in.Active, in.Comment).Scan(&id)
+	if err != nil {
+		return model.Service{}, mapErr(err)
+	}
+	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
+		return model.Service{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.Service{}, mapErr(err)
+	}
+	return s.Get(ctx, id)
+}
+
+func (s *Services) Update(ctx context.Context, id int64, in model.Service) (model.Service, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.Service{}, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	tag, err := tx.Exec(ctx,
+		`UPDATE services SET organization_id = $2, kind = $3, name = $4, unit = $5, calc_method = $6, meter_resource = $7, meter_tariff = $8,
+		        position = $9, active = $10, comment = $11, updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL`,
+		id, in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.Position, in.Active, in.Comment)
+	if err := checkDeleted(tag, err); err != nil {
+		return model.Service{}, err
+	}
+	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
+		return model.Service{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.Service{}, mapErr(err)
+	}
+	return s.Get(ctx, id)
+}
+
+// Restore снимает отметку удаления; если имя уже занято, БД вернёт ошибку.
+func (s *Services) Restore(ctx context.Context, id int64) (model.Service, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE services SET deleted_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NOT NULL`, id)
+	if err := checkDeleted(tag, err); err != nil {
+		return model.Service{}, err
+	}
+	return s.Get(ctx, id)
+}
+
+func (s *Services) Delete(ctx context.Context, id int64) error {
+	return softDelete(ctx, s.pool, "services", id)
+}
+
+// saveComponents заменяет состав услуги и проверяет составные связи услуги в обе стороны (она — сумма и она — слагаемое):
+// сумма складывает простые услуги (не составные) той же организации и с той же единицей; у суммы нет собственных тарифов.
+func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM service_components WHERE service_id = $1`, id); err != nil {
+		return mapErr(err)
+	}
+	for _, c := range components {
+		if _, err := tx.Exec(ctx, `INSERT INTO service_components (service_id, component_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, c); err != nil {
+			return mapErr(err)
+		}
+	}
+	var bad bool
+	err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM service_components c
+		   JOIN services p ON p.id = c.service_id AND p.deleted_at IS NULL
+		   JOIN services k ON k.id = c.component_id
+		   WHERE (c.service_id = $1 OR c.component_id = $1)
+		     AND (p.calc_method <> 'sum' OR k.calc_method = 'sum' OR k.deleted_at IS NOT NULL
+		          OR p.organization_id <> k.organization_id OR p.unit <> k.unit))`, id).Scan(&bad)
+	if err != nil {
+		return mapErr(err)
+	}
+	if bad {
+		return invalid("component_ids: components must be plain services of the same organization and unit")
+	}
+	err = tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM services s JOIN service_tariffs t ON t.service_id = s.id AND t.deleted_at IS NULL
+		                WHERE s.id = $1 AND s.calc_method = 'sum')`, id).Scan(&bad)
+	if err != nil {
+		return mapErr(err)
+	}
+	if bad {
+		return invalid("calc_method: a sum service cannot have tariffs")
+	}
+	return nil
+}

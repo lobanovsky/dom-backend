@@ -152,3 +152,17 @@ type MeterReadingFilter struct {
 	DateFrom *Date
 	DateTo   *Date
 }
+
+type ServiceFilter struct {
+	Deleted        bool // true — только удалённые (корзина), false — только действующие
+	OrganizationID *int64
+	Kind           *string
+	CalcMethod     *string
+	Active         *bool
+	Q              *string // подстрока в названии
+}
+
+type ServiceTariffFilter struct {
+	Deleted   bool // true — только удалённые (корзина), false — только действующие
+	ServiceID *int64
+}

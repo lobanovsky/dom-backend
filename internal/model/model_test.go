@@ -278,3 +278,68 @@ func TestMeterReadingValidate(t *testing.T) {
 		t.Errorf("Milli(10.123) = %d", Milli(10.123))
 	}
 }
+
+func TestServiceValidate(t *testing.T) {
+	str := func(v string) *string { return &v }
+	num := func(v int) *int { return &v }
+	base := Service{OrganizationID: 1, Kind: "utility", Name: "Электроэнергия Т1", Unit: "kwh", CalcMethod: "individual_meter", MeterResource: str("electricity"), MeterTariff: num(2), Active: true}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid service: %v", err)
+	}
+	mut := func(f func(s *Service)) Service { s := base; f(&s); return s }
+	for name, s := range map[string]Service{
+		"no organization":  mut(func(s *Service) { s.OrganizationID = 0 }),
+		"bad kind":         mut(func(s *Service) { s.Kind = "other" }),
+		"no name":          mut(func(s *Service) { s.Name = " " }),
+		"bad unit":         mut(func(s *Service) { s.Unit = "kg" }),
+		"bad method":       mut(func(s *Service) { s.CalcMethod = "magic" }),
+		"no resource":      mut(func(s *Service) { s.MeterResource = nil }),
+		"no meter tariff":  mut(func(s *Service) { s.MeterTariff = nil }),
+		"tariff 4":         mut(func(s *Service) { s.MeterTariff = num(4) }),
+		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
+		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
+		"sum no component": mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum", nil, nil }),
+	} {
+		if s.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water")}
+	sum.SetDefaults()
+	if sum.MeterResource != nil || sum.Validate() != nil {
+		t.Errorf("sum service: %+v, %v", sum, sum.Validate())
+	}
+	fixed := Service{OrganizationID: 1, Kind: "additional", Name: "Консьерж", Unit: "month", CalcMethod: "fixed", ComponentIDs: []int64{5}}
+	fixed.SetDefaults()
+	if len(fixed.ComponentIDs) != 0 || fixed.ComponentIDs == nil || fixed.Validate() != nil {
+		t.Errorf("fixed service: %+v", fixed)
+	}
+	water := Service{OrganizationID: 1, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: str("cold_water")}
+	water.SetDefaults()
+	if water.MeterTariff == nil || *water.MeterTariff != 1 || water.Validate() != nil {
+		t.Errorf("water defaults: %+v", water)
+	}
+}
+
+func TestServiceTariffValidate(t *testing.T) {
+	dp := func(d Date) *Date { return &d }
+	base := ServiceTariff{ServiceID: 1, Price: 5.8913, ValidFrom: NewDate(2026, 1, 1)}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid tariff: %v", err)
+	}
+	mut := func(f func(t *ServiceTariff)) ServiceTariff { t := base; f(&t); return t }
+	for name, tr := range map[string]ServiceTariff{
+		"no service": mut(func(t *ServiceTariff) { t.ServiceID = 0 }),
+		"negative":   mut(func(t *ServiceTariff) { t.Price = -1 }),
+		"5 decimals": mut(func(t *ServiceTariff) { t.Price = 1.23456 }),
+		"no from":    mut(func(t *ServiceTariff) { t.ValidFrom = Date{} }),
+		"to before":  mut(func(t *ServiceTariff) { t.ValidTo = dp(NewDate(2025, 12, 31)) }),
+	} {
+		if tr.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if err := mut(func(t *ServiceTariff) { t.ValidTo = dp(t.ValidFrom) }).Validate(); err != nil {
+		t.Errorf("one-day tariff: %v", err)
+	}
+}

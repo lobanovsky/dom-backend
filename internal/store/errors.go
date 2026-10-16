@@ -42,6 +42,8 @@ func mapErr(err error) error {
 		switch {
 		case pg.Code == "23505":
 			return &Error{ErrConflict, "already exists: " + pg.ConstraintName}
+		case pg.Code == "23P01": // пересечение периодов (EXCLUDE), см. service_tariffs_no_overlap
+			return &Error{ErrConflict, "already exists: " + pg.ConstraintName}
 		case pg.Code == "23503":
 			return &Error{ErrInvalid, "referenced or dependent record conflict: " + pg.ConstraintName}
 		case pg.Code == "23502":

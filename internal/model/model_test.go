@@ -384,3 +384,42 @@ func TestServiceTariffValidate(t *testing.T) {
 		t.Errorf("one-day tariff: %v", err)
 	}
 }
+
+func TestTariffValidate(t *testing.T) {
+	dp := func(d Date) *Date { return &d }
+	if err := (Tariff{OrganizationID: 1, Name: "Электроэнергия Т1", Unit: "kwh"}).Validate(); err != nil {
+		t.Fatalf("valid tariff: %v", err)
+	}
+	for name, tr := range map[string]Tariff{
+		"no org":   {Name: "x", Unit: "kwh"},
+		"no name":  {OrganizationID: 1, Name: " ", Unit: "kwh"},
+		"bad unit": {OrganizationID: 1, Name: "x", Unit: "kg"},
+	} {
+		if tr.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	base := TariffPrice{TariffID: 1, Price: 6.1, ValidFrom: NewDate(2026, 1, 1)}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid price: %v", err)
+	}
+	for name, p := range map[string]TariffPrice{
+		"no tariff":  {Price: 1, ValidFrom: NewDate(2026, 1, 1)},
+		"negative":   {TariffID: 1, Price: -1, ValidFrom: NewDate(2026, 1, 1)},
+		"5 decimals": {TariffID: 1, Price: 1.23456, ValidFrom: NewDate(2026, 1, 1)},
+		"no from":    {TariffID: 1, Price: 1},
+		"to before":  {TariffID: 1, Price: 1, ValidFrom: NewDate(2026, 1, 1), ValidTo: dp(NewDate(2025, 12, 31))},
+	} {
+		if p.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if (TariffFromServiceRequest{}).Validate() == nil {
+		t.Errorf("request without service")
+	}
+	id := int64(3)
+	linked := Service{OrganizationID: 1, Kind: "utility", Name: "Сумма", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{1}, AccountPurpose: "utilities", TariffID: &id}
+	if linked.Validate() == nil {
+		t.Errorf("sum_prices with tariff_id: want error")
+	}
+}

@@ -159,8 +159,21 @@ type ServiceFilter struct {
 	Kind           *string
 	CalcMethod     *string
 	AccountPurpose *string
+	TariffID       *int64
 	Active         *bool
 	Q              *string // подстрока в названии
+}
+
+type TariffFilter struct {
+	Deleted        bool // true — только удалённые (корзина), false — только действующие
+	OrganizationID *int64
+	Unit           *string
+	Q              *string // подстрока в названии
+}
+
+type TariffPriceFilter struct {
+	Deleted  bool // true — только удалённые (корзина), false — только действующие
+	TariffID *int64
 }
 
 type ServiceTariffFilter struct {

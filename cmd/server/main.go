@@ -69,6 +69,7 @@ func run(log *slog.Logger) error {
 	accounts := store.NewAccounts(pool)
 	meterReadings := store.NewMeterReadings(pool)
 	accountServices := store.NewAccountServices(pool)
+	tariffs := store.NewTariffs(pool)
 	paymentRules := store.NewPaymentRules(pool)
 
 	sberStore := store.NewSber(pool)
@@ -133,6 +134,9 @@ func run(log *slog.Logger) error {
 			Services:             store.NewServices(pool),
 			ServiceTariffs:       store.NewServiceTariffs(pool),
 			ServiceNorms:         store.NewServiceNorms(pool),
+			Tariffs:              tariffs,
+			TariffPrices:         store.NewTariffPrices(pool),
+			TariffFromService:    tariffs,
 			MeterReadingImporter: meterReadings,
 			Properties:           store.NewProperties(pool),
 			PaymentRegistries:    store.NewPaymentRegistries(pool),

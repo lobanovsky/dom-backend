@@ -32,11 +32,13 @@ type Service struct {
 	AccountPurpose string   `json:"account_purpose" db:"account_purpose"` // на счёт какого типа попадает услуга (как purpose у лицевого счёта)
 	PremisesKinds  []string `json:"premises_kinds" db:"premises_kinds"`   // к каким видам помещений применима; пусто — к любым
 	ReceiptName    *string  `json:"receipt_name" db:"receipt_name"`       // название в квитанции; пусто — Name
+	TariffID       *int64   `json:"tariff_id" db:"tariff_id"`             // тариф из справочника вместо собственных цен услуги; у sum_prices не бывает
 	Position       int      `json:"position" db:"position"`
 	Active         bool     `json:"active" db:"active"`
 	Comment        *string  `json:"comment" db:"comment"`
 
 	OrganizationName string   `json:"organization_name" db:"organization_name"`
+	TariffName       *string  `json:"tariff_name" db:"tariff_name"`
 	CurrentPrice     *float64 `json:"current_price" db:"current_price"` // цена на сегодня; nil — тарифа на сегодня нет
 }
 
@@ -87,6 +89,13 @@ func (s Service) Validate() error {
 	if s.CalcMethod == "per_area_norm" && s.Unit != "gcal" {
 		normUnit = invalid("unit", "must be gcal for an area-norm service")
 	}
+	var tariff error
+	switch {
+	case s.TariffID != nil && *s.TariffID <= 0:
+		tariff = invalid("tariff_id", "must be positive")
+	case s.TariffID != nil && s.CalcMethod == "sum_prices":
+		tariff = invalid("tariff_id", "a sum-of-prices service has no tariff of its own")
+	}
 	var components error
 	if IsSum(s.CalcMethod) && len(s.ComponentIDs) == 0 {
 		components = invalid("component_ids", "must contain at least 1 item")
@@ -106,7 +115,7 @@ func (s Service) Validate() error {
 		required("name", s.Name),
 		oneOf("unit", s.Unit, ServiceUnits),
 		oneOf("calc_method", s.CalcMethod, ServiceCalcMethods),
-		meter, unit, normUnit, components,
+		meter, unit, normUnit, tariff, components,
 	)
 }
 
@@ -173,4 +182,68 @@ func (n ServiceNorm) Validate() error {
 		requiredDate("valid_from", n.ValidFrom),
 		period,
 	)
+}
+
+// Tariff — тариф из справочника («Электроэнергия Т1», «ХВС»): цена единицы по периодам (TariffPrice).
+// Услуги организации с той же единицей могут брать цену из тарифа вместо собственных (Service.TariffID).
+// Текущая цена, название организации и число услуг вычисляются сервером и при записи игнорируются.
+type Tariff struct {
+	Meta
+	OrganizationID int64   `json:"organization_id" db:"organization_id"`
+	Name           string  `json:"name" db:"name"`
+	Unit           string  `json:"unit" db:"unit"`
+	Comment        *string `json:"comment" db:"comment"`
+
+	OrganizationName string   `json:"organization_name" db:"organization_name"`
+	CurrentPrice     *float64 `json:"current_price" db:"current_price"` // цена на сегодня; nil — на сегодня цены нет
+	ServicesCount    int      `json:"services_count" db:"services_count"`
+}
+
+func (t Tariff) Validate() error {
+	return firstErr(
+		positiveInt("organization_id", intPtr(t.OrganizationID)),
+		required("name", t.Name),
+		oneOf("unit", t.Unit, ServiceUnits),
+	)
+}
+
+// TariffPrice — цена тарифа в период [ValidFrom, ValidTo]; пустой ValidTo — действует до сих пор.
+// Периоды одного тарифа не пересекаются (это проверяет БД).
+type TariffPrice struct {
+	Meta
+	TariffID  int64   `json:"tariff_id" db:"tariff_id"`
+	Price     float64 `json:"price" db:"price"`
+	ValidFrom Date    `json:"valid_from" db:"valid_from"`
+	ValidTo   *Date   `json:"valid_to" db:"valid_to"`
+	Comment   *string `json:"comment" db:"comment"`
+}
+
+func (p TariffPrice) Validate() error {
+	var period error
+	if p.ValidTo != nil && p.ValidTo.Before(p.ValidFrom.Time) {
+		period = invalid("valid_to", "must not be before valid_from")
+	}
+	var price error
+	if p.Price < 0 {
+		price = invalid("price", "must not be negative")
+	} else {
+		price = decimals("price", p.Price, 4)
+	}
+	return firstErr(
+		positiveInt("tariff_id", intPtr(p.TariffID)),
+		price,
+		requiredDate("valid_from", p.ValidFrom),
+		period,
+	)
+}
+
+// TariffFromServiceRequest — «вынести» собственные цены услуги в новый тариф справочника: цены копируются в тариф,
+// у услуги удаляются, а сама услуга начинает ссылаться на тариф. Name пусто — название услуги.
+type TariffFromServiceRequest struct {
+	ServiceID int64   `json:"service_id"`
+	Name      *string `json:"name"`
+}
+
+func (r TariffFromServiceRequest) Validate() error {
+	return positiveInt("service_id", intPtr(r.ServiceID))
 }

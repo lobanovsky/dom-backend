@@ -262,7 +262,7 @@ func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterRead
 }
 
 func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id"}, Texts: []string{"kind", "calc_method", "account_purpose", "q"}, Bools: []string{"active"}})
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id", "tariff_id"}, Texts: []string{"kind", "calc_method", "account_purpose", "q"}, Bools: []string{"active"}})
 	if !ok {
 		return model.ServiceFilter{}, p, false
 	}
@@ -278,7 +278,7 @@ func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter,
 		writeError(w, http.StatusUnprocessableEntity, "account_purpose: must be one of: "+strings.Join(model.AccountPurposes, ", "))
 		return model.ServiceFilter{}, p, false
 	}
-	return model.ServiceFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Kind: p.Text("kind"), CalcMethod: p.Text("calc_method"), AccountPurpose: p.Text("account_purpose"),
+	return model.ServiceFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Kind: p.Text("kind"), CalcMethod: p.Text("calc_method"), AccountPurpose: p.Text("account_purpose"), TariffID: p.Int("tariff_id"),
 		Active: p.Bool("active"), Q: p.Text("q")}, p, true
 }
 
@@ -288,6 +288,26 @@ func serviceNormFilter(w http.ResponseWriter, r *http.Request) (model.ServiceNor
 		return model.ServiceNormFilter{}, p, false
 	}
 	return model.ServiceNormFilter{Deleted: p.Deleted, ServiceID: p.Int("service_id"), BuildingID: p.Int("building_id")}, p, true
+}
+
+func tariffFilter(w http.ResponseWriter, r *http.Request) (model.TariffFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"organization_id"}, Texts: []string{"unit", "q"}})
+	if !ok {
+		return model.TariffFilter{}, p, false
+	}
+	if u := p.Text("unit"); u != nil && !slices.Contains(model.ServiceUnits, *u) {
+		writeError(w, http.StatusUnprocessableEntity, "unit: must be one of: "+strings.Join(model.ServiceUnits, ", "))
+		return model.TariffFilter{}, p, false
+	}
+	return model.TariffFilter{Deleted: p.Deleted, OrganizationID: p.Int("organization_id"), Unit: p.Text("unit"), Q: p.Text("q")}, p, true
+}
+
+func tariffPriceFilter(w http.ResponseWriter, r *http.Request) (model.TariffPriceFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"tariff_id"}})
+	if !ok {
+		return model.TariffPriceFilter{}, p, false
+	}
+	return model.TariffPriceFilter{Deleted: p.Deleted, TariffID: p.Int("tariff_id")}, p, true
 }
 
 func serviceTariffFilter(w http.ResponseWriter, r *http.Request) (model.ServiceTariffFilter, listParams, bool) {

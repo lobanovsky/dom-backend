@@ -9,11 +9,11 @@ import (
 	"dom-backend/internal/model"
 )
 
-const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff, s.account_purpose, s.premises_kinds, s.receipt_name,
+const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff, s.account_purpose, s.premises_kinds, s.receipt_name, s.tariff_id, tf.name AS tariff_name,
 	ARRAY(SELECT c.component_id FROM service_components c WHERE c.service_id = s.id ORDER BY c.component_id) AS component_ids,
 	s.position, s.active, s.comment, o.name AS organization_name, service_price_on(s.id, CURRENT_DATE) AS current_price,
 	s.created_at, s.updated_at, s.deleted_at
-	FROM services s JOIN organizations o ON o.id = s.organization_id`
+	FROM services s JOIN organizations o ON o.id = s.organization_id LEFT JOIN tariffs tf ON tf.id = s.tariff_id`
 
 type Services struct{ pool *pgxpool.Pool }
 
@@ -28,9 +28,10 @@ func (s *Services) List(ctx context.Context, f model.ServiceFilter, limit, offse
 		   AND ($4::bool IS NULL OR s.active = $4)
 		   AND ($5::text IS NULL OR s.name ILIKE $5)
 		   AND ($6::text IS NULL OR s.account_purpose = $6)
-		   AND (s.deleted_at IS NOT NULL) = $7
-		 ORDER BY s.kind, s.position, s.name, s.id LIMIT $8 OFFSET $9`,
-		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.AccountPurpose, f.Deleted, limit, offset))
+		   AND ($7::bigint IS NULL OR s.tariff_id = $7)
+		   AND (s.deleted_at IS NOT NULL) = $8
+		 ORDER BY s.kind, s.position, s.name, s.id LIMIT $9 OFFSET $10`,
+		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.AccountPurpose, f.TariffID, f.Deleted, limit, offset))
 }
 
 func (s *Services) Get(ctx context.Context, id int64) (model.Service, error) {
@@ -46,9 +47,9 @@ func (s *Services) Create(ctx context.Context, in model.Service) (model.Service,
 	defer rollback(ctx, tx)
 	var id int64
 	err = tx.QueryRow(ctx,
-		`INSERT INTO services (organization_id, kind, name, unit, calc_method, meter_resource, meter_tariff, account_purpose, premises_kinds, receipt_name, position, active, comment)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-		in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName,
+		`INSERT INTO services (organization_id, kind, name, unit, calc_method, meter_resource, meter_tariff, account_purpose, premises_kinds, receipt_name, tariff_id, position, active, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+		in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName, in.TariffID,
 		in.Position, in.Active, in.Comment).Scan(&id)
 	if err != nil {
 		return model.Service{}, mapErr(err)
@@ -71,9 +72,9 @@ func (s *Services) Update(ctx context.Context, id int64, in model.Service) (mode
 	defer rollback(ctx, tx)
 	tag, err := tx.Exec(ctx,
 		`UPDATE services SET organization_id = $2, kind = $3, name = $4, unit = $5, calc_method = $6, meter_resource = $7, meter_tariff = $8,
-		        account_purpose = $9, premises_kinds = $10, receipt_name = $11, position = $12, active = $13, comment = $14, updated_at = now()
+		        account_purpose = $9, premises_kinds = $10, receipt_name = $11, tariff_id = $12, position = $13, active = $14, comment = $15, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL`,
-		id, in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName,
+		id, in.OrganizationID, in.Kind, in.Name, in.Unit, in.CalcMethod, in.MeterResource, in.MeterTariff, in.AccountPurpose, in.PremisesKinds, in.ReceiptName, in.TariffID,
 		in.Position, in.Active, in.Comment)
 	if err := checkDeleted(tag, err); err != nil {
 		return model.Service{}, err

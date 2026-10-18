@@ -288,18 +288,21 @@ func TestServiceValidate(t *testing.T) {
 	}
 	mut := func(f func(s *Service)) Service { s := base; f(&s); return s }
 	for name, s := range map[string]Service{
-		"no organization":         mut(func(s *Service) { s.OrganizationID = 0 }),
-		"bad kind":                mut(func(s *Service) { s.Kind = "other" }),
-		"no name":                 mut(func(s *Service) { s.Name = " " }),
-		"bad unit":                mut(func(s *Service) { s.Unit = "kg" }),
-		"bad method":              mut(func(s *Service) { s.CalcMethod = "magic" }),
-		"no resource":             mut(func(s *Service) { s.MeterResource = nil }),
-		"no meter tariff":         mut(func(s *Service) { s.MeterTariff = nil }),
-		"tariff 4":                mut(func(s *Service) { s.MeterTariff = num(4) }),
-		"water tariff 2":          mut(func(s *Service) { s.MeterResource = str("cold_water") }),
-		"per area in kwh":         mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
-		"bad purpose":             mut(func(s *Service) { s.AccountPurpose = "rent" }),
-		"bad kind in list":        mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
+		"no organization":  mut(func(s *Service) { s.OrganizationID = 0 }),
+		"bad kind":         mut(func(s *Service) { s.Kind = "other" }),
+		"no name":          mut(func(s *Service) { s.Name = " " }),
+		"bad unit":         mut(func(s *Service) { s.Unit = "kg" }),
+		"bad method":       mut(func(s *Service) { s.CalcMethod = "magic" }),
+		"no resource":      mut(func(s *Service) { s.MeterResource = nil }),
+		"no meter tariff":  mut(func(s *Service) { s.MeterTariff = nil }),
+		"tariff 4":         mut(func(s *Service) { s.MeterTariff = num(4) }),
+		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
+		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
+		"bad purpose":      mut(func(s *Service) { s.AccountPurpose = "rent" }),
+		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
+		"area norm in m2": mut(func(s *Service) {
+			s.CalcMethod, s.Unit, s.MeterResource, s.MeterTariff = "per_area_norm", "m2", nil, nil
+		}),
 		"sum no component":        mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum_volumes", nil, nil }),
 		"sum prices no component": mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "sum_prices", nil, nil }),
 	} {
@@ -331,6 +334,31 @@ func TestServiceValidate(t *testing.T) {
 	water.SetDefaults()
 	if water.MeterTariff == nil || *water.MeterTariff != 1 || water.Validate() != nil {
 		t.Errorf("water defaults: %+v", water)
+	}
+}
+
+func TestServiceNormValidate(t *testing.T) {
+	dp := func(d Date) *Date { return &d }
+	base := ServiceNorm{ServiceID: 1, BuildingID: 2, Value: 0.011, ValidFrom: NewDate(2026, 1, 1)}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid norm: %v", err)
+	}
+	mut := func(f func(n *ServiceNorm)) ServiceNorm { n := base; f(&n); return n }
+	for name, n := range map[string]ServiceNorm{
+		"no service":  mut(func(n *ServiceNorm) { n.ServiceID = 0 }),
+		"no building": mut(func(n *ServiceNorm) { n.BuildingID = 0 }),
+		"zero":        mut(func(n *ServiceNorm) { n.Value = 0 }),
+		"negative":    mut(func(n *ServiceNorm) { n.Value = -0.01 }),
+		"6 decimals":  mut(func(n *ServiceNorm) { n.Value = 0.011111 }),
+		"no from":     mut(func(n *ServiceNorm) { n.ValidFrom = Date{} }),
+		"to before":   mut(func(n *ServiceNorm) { n.ValidTo = dp(NewDate(2025, 12, 31)) }),
+	} {
+		if n.Validate() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if err := mut(func(n *ServiceNorm) { n.Value = 0.01625; n.ValidTo = dp(n.ValidFrom) }).Validate(); err != nil {
+		t.Errorf("valid norm with 5 decimals: %v", err)
 	}
 }
 

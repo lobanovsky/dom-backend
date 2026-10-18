@@ -282,6 +282,14 @@ func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter,
 		Active: p.Bool("active"), Q: p.Text("q")}, p, true
 }
 
+func serviceNormFilter(w http.ResponseWriter, r *http.Request) (model.ServiceNormFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"service_id", "building_id"}})
+	if !ok {
+		return model.ServiceNormFilter{}, p, false
+	}
+	return model.ServiceNormFilter{Deleted: p.Deleted, ServiceID: p.Int("service_id"), BuildingID: p.Int("building_id")}, p, true
+}
+
 func serviceTariffFilter(w http.ResponseWriter, r *http.Request) (model.ServiceTariffFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"service_id"}})
 	if !ok {

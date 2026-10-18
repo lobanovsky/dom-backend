@@ -8,7 +8,7 @@ import (
 var (
 	ServiceKinds       = []string{"utility", "maintenance", "additional"}
 	ServiceUnits       = []string{"kwh", "m3", "gcal", "m2", "piece", "month"}
-	ServiceCalcMethods = []string{"fixed", "per_area", "individual_meter", "common_meter", "sum_volumes", "sum_prices", "manual"}
+	ServiceCalcMethods = []string{"fixed", "per_area", "per_area_norm", "individual_meter", "common_meter", "sum_volumes", "sum_prices", "manual"}
 )
 
 // IsSum — составная услуга: sum_volumes (объём — сумма объёмов других услуг, тариф свой) или sum_prices (сумма цен, тарифов нет).
@@ -16,7 +16,7 @@ func IsSum(method string) bool { return method == "sum_volumes" || method == "su
 
 // Service — услуга организации: коммунальная, эксплуатационная или дополнительная.
 // CalcMethod описывает, как считается объём: по индивидуальному счётчику (MeterResource + MeterTariff), по общедомовому
-// счётчику с делением по площади, фиксированно за помещение или за м², суммой других услуг (ComponentIDs) или вводом вручную.
+// счётчику с делением по площади, фиксированно за помещение, за м² или по площади с нормативом дома (per_area_norm), суммой других услуг (ComponentIDs) или вводом вручную.
 // Цена задаётся тарифами (ServiceTariff); у составной услуги (sum) тарифов нет, цена — сумма цен компонентов.
 // Текущая цена и название организации вычисляются сервером и при записи игнорируются.
 type Service struct {
@@ -83,6 +83,10 @@ func (s Service) Validate() error {
 	if s.CalcMethod == "per_area" && s.Unit != "m2" {
 		unit = invalid("unit", "must be m2 for a per-area service")
 	}
+	var normUnit error
+	if s.CalcMethod == "per_area_norm" && s.Unit != "gcal" {
+		normUnit = invalid("unit", "must be gcal for an area-norm service")
+	}
 	var components error
 	if IsSum(s.CalcMethod) && len(s.ComponentIDs) == 0 {
 		components = invalid("component_ids", "must contain at least 1 item")
@@ -102,7 +106,7 @@ func (s Service) Validate() error {
 		required("name", s.Name),
 		oneOf("unit", s.Unit, ServiceUnits),
 		oneOf("calc_method", s.CalcMethod, ServiceCalcMethods),
-		meter, unit, components,
+		meter, unit, normUnit, components,
 	)
 }
 
@@ -132,6 +136,41 @@ func (t ServiceTariff) Validate() error {
 		positiveInt("service_id", intPtr(t.ServiceID)),
 		price,
 		requiredDate("valid_from", t.ValidFrom),
+		period,
+	)
+}
+
+// ServiceNorm — норматив услуги «площадь × норматив» (Гкал на м²) для дома в период [ValidFrom, ValidTo];
+// пустой ValidTo — действует до сих пор. Периоды одной пары «услуга + дом» не пересекаются (это проверяет БД).
+// Адрес дома вычисляется сервером и при записи игнорируется.
+type ServiceNorm struct {
+	Meta
+	ServiceID  int64   `json:"service_id" db:"service_id"`
+	BuildingID int64   `json:"building_id" db:"building_id"`
+	Value      float64 `json:"value" db:"value"`
+	ValidFrom  Date    `json:"valid_from" db:"valid_from"`
+	ValidTo    *Date   `json:"valid_to" db:"valid_to"`
+	Comment    *string `json:"comment" db:"comment"`
+
+	BuildingAddress string `json:"building_address" db:"building_address"`
+}
+
+func (n ServiceNorm) Validate() error {
+	var period error
+	if n.ValidTo != nil && n.ValidTo.Before(n.ValidFrom.Time) {
+		period = invalid("valid_to", "must not be before valid_from")
+	}
+	var value error
+	if n.Value <= 0 {
+		value = invalid("value", "must be positive")
+	} else {
+		value = decimals("value", n.Value, 5)
+	}
+	return firstErr(
+		positiveInt("service_id", intPtr(n.ServiceID)),
+		positiveInt("building_id", intPtr(n.BuildingID)),
+		value,
+		requiredDate("valid_from", n.ValidFrom),
 		period,
 	)
 }

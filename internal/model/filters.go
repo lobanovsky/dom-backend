@@ -168,6 +168,12 @@ type ServiceTariffFilter struct {
 	ServiceID *int64
 }
 
+type ServiceNormFilter struct {
+	Deleted    bool // true — только удалённые (корзина), false — только действующие
+	ServiceID  *int64
+	BuildingID *int64
+}
+
 type AccountServiceFilter struct {
 	Deleted    bool // true — только удалённые (корзина), false — только действующие
 	AccountID  *int64

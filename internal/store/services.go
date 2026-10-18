@@ -81,6 +81,9 @@ func (s *Services) Update(ctx context.Context, id int64, in model.Service) (mode
 	if err := checkAssignments(ctx, tx, id); err != nil {
 		return model.Service{}, err
 	}
+	if err := checkNorms(ctx, tx, id); err != nil {
+		return model.Service{}, err
+	}
 	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
 		return model.Service{}, err
 	}
@@ -160,6 +163,21 @@ func saveComponents(ctx context.Context, tx pgx.Tx, id int64, components []int64
 	}
 	if bad {
 		return invalid("calc_method: a sum-of-prices service cannot have tariffs")
+	}
+	return nil
+}
+
+// checkNorms не даёт сменить способ расчёта услуги, пока у неё есть действующие нормативы домов.
+func checkNorms(ctx context.Context, tx pgx.Tx, id int64) error {
+	var bad bool
+	err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM services s JOIN service_norms n ON n.service_id = s.id AND n.deleted_at IS NULL
+		                WHERE s.id = $1 AND s.calc_method <> 'per_area_norm')`, id).Scan(&bad)
+	if err != nil {
+		return mapErr(err)
+	}
+	if bad {
+		return invalid("calc_method: a service with norms must stay an area-norm service")
 	}
 	return nil
 }

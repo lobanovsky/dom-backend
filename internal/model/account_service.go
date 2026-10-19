@@ -107,3 +107,45 @@ func (r AccountServiceCloseRequest) Validate() error {
 type AccountServiceCloseResult struct {
 	Closed int `json:"closed"`
 }
+
+// AccountServicePeriodRequest — массово заменить период назначений услуги. Выбираются действующие назначения услуги
+// в доме BuildingID (пусто — любом) в помещениях видов PremisesKinds (пусто — любых); CurrentValidFrom сужает выбор
+// назначениями, начинающимися с этой даты (так можно поправить одну партию назначений, не трогая остальные).
+// Период (ValidFrom, ValidTo) заменяет прежний у всех выбранных; ValidTo пусто — продолжается.
+type AccountServicePeriodRequest struct {
+	ServiceID        int64    `json:"service_id"`
+	BuildingID       *int64   `json:"building_id"`
+	PremisesKinds    []string `json:"premises_kinds"`
+	CurrentValidFrom *Date    `json:"current_valid_from"`
+	ValidFrom        Date     `json:"valid_from"`
+	ValidTo          *Date    `json:"valid_to"`
+}
+
+func (r AccountServicePeriodRequest) Validate() error {
+	return AccountServiceBulkRequest{ServiceID: r.ServiceID, ValidFrom: r.ValidFrom, ValidTo: r.ValidTo, PremisesKinds: r.PremisesKinds}.Validate()
+}
+
+// AccountServicePeriodSample — назначение из предпросмотра смены периода.
+type AccountServicePeriodSample struct {
+	AccountNumber   string `json:"account_number"`
+	PremisesKind    string `json:"premises_kind"`
+	PremisesNumber  string `json:"premises_number"`
+	BuildingAddress string `json:"building_address"`
+	ValidFrom       Date   `json:"valid_from"`
+	ValidTo         *Date  `json:"valid_to"`
+}
+
+// AccountServicePeriodPreview — что сделает смена периода.
+type AccountServicePeriodPreview struct {
+	Matched        int                          `json:"matched"`         // выбрано назначений
+	ToChange       int                          `json:"to_change"`       // получат новый период
+	Unchanged      int                          `json:"unchanged"`       // период уже такой
+	Conflicts      int                          `json:"conflicts"`       // новый период пересекается с другим назначением этой услуги у того же счёта
+	Sample         []AccountServicePeriodSample `json:"sample"`          // первые из изменяемых
+	ConflictSample []AccountServicePeriodSample `json:"conflict_sample"` // первые из конфликтующих
+}
+
+// AccountServicePeriodResult — сколько назначений изменено.
+type AccountServicePeriodResult struct {
+	Changed int `json:"changed"`
+}

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -207,4 +208,126 @@ func (s *AccountServices) BulkClose(ctx context.Context, req model.AccountServic
 		return model.AccountServiceCloseResult{}, mapErr(err)
 	}
 	return model.AccountServiceCloseResult{Closed: int(tag.RowsAffected())}, nil
+}
+
+// periodMatched — назначения услуги, выбранные для смены периода; changes — период отличается от нового,
+// conflict — новый период пересекается с другим действующим назначением этой услуги у того же счёта.
+const periodMatched = `
+	SELECT x.id, a.number AS account_number, p.kind AS premises_kind, p.number AS premises_number, b.address AS building_address,
+	       x.valid_from, x.valid_to,
+	       (x.valid_from, x.valid_to) IS DISTINCT FROM ($5::date, $6::date) AS changes,
+	       EXISTS (SELECT 1 FROM account_services o
+	               WHERE o.account_id = x.account_id AND o.service_id = x.service_id AND o.deleted_at IS NULL AND o.id <> x.id
+	                 AND daterange(o.valid_from, o.valid_to, '[]') && daterange($5::date, $6::date, '[]')) AS conflict
+	FROM account_services x
+	JOIN personal_accounts a ON a.id = x.account_id
+	JOIN premises p ON p.id = a.premises_id
+	JOIN buildings b ON b.id = p.building_id
+	WHERE x.service_id = $1 AND x.deleted_at IS NULL
+	  AND ($2::bigint IS NULL OR b.id = $2)
+	  AND (cardinality($3::text[]) = 0 OR p.kind = ANY ($3))
+	  AND ($4::date IS NULL OR x.valid_from = $4)`
+
+type periodRow struct {
+	ID              int64       `db:"id"`
+	AccountNumber   string      `db:"account_number"`
+	PremisesKind    string      `db:"premises_kind"`
+	PremisesNumber  string      `db:"premises_number"`
+	BuildingAddress string      `db:"building_address"`
+	ValidFrom       model.Date  `db:"valid_from"`
+	ValidTo         *model.Date `db:"valid_to"`
+	Changes         bool        `db:"changes"`
+	Conflict        bool        `db:"conflict"`
+}
+
+func periodArgs(req model.AccountServicePeriodRequest) []any {
+	kinds := req.PremisesKinds
+	if kinds == nil {
+		kinds = []string{}
+	}
+	return []any{req.ServiceID, req.BuildingID, kinds, req.CurrentValidFrom, req.ValidFrom, req.ValidTo}
+}
+
+func (r periodRow) sample() model.AccountServicePeriodSample {
+	return model.AccountServicePeriodSample{AccountNumber: r.AccountNumber, PremisesKind: r.PremisesKind, PremisesNumber: r.PremisesNumber,
+		BuildingAddress: r.BuildingAddress, ValidFrom: r.ValidFrom, ValidTo: r.ValidTo}
+}
+
+func loadPeriodRows(ctx context.Context, q pgx.Tx, req model.AccountServicePeriodRequest) ([]periodRow, error) {
+	return collect[periodRow](q.Query(ctx, `SELECT * FROM (`+periodMatched+`) m
+		ORDER BY m.building_address, substring(m.premises_number from '\d+')::numeric NULLS LAST, m.premises_number, m.id`, periodArgs(req)...))
+}
+
+// PeriodPreview показывает, какие назначения получат новый период, ничего не записывая.
+func (s *AccountServices) PeriodPreview(ctx context.Context, req model.AccountServicePeriodRequest) (model.AccountServicePeriodPreview, error) {
+	if err := req.Validate(); err != nil {
+		return model.AccountServicePeriodPreview{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.AccountServicePeriodPreview{}, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	rows, err := loadPeriodRows(ctx, tx, req)
+	if err != nil {
+		return model.AccountServicePeriodPreview{}, err
+	}
+	out := model.AccountServicePeriodPreview{Matched: len(rows), Sample: []model.AccountServicePeriodSample{}, ConflictSample: []model.AccountServicePeriodSample{}}
+	for _, r := range rows {
+		switch {
+		case !r.Changes:
+			out.Unchanged++
+		case r.Conflict:
+			out.Conflicts++
+			if len(out.ConflictSample) < 10 {
+				out.ConflictSample = append(out.ConflictSample, r.sample())
+			}
+		default:
+			out.ToChange++
+			if len(out.Sample) < 10 {
+				out.Sample = append(out.Sample, r.sample())
+			}
+		}
+	}
+	return out, nil
+}
+
+// PeriodApply заменяет период выбранных назначений одной транзакцией. Если у какого-то счёта новый период пересёкся бы
+// с другим назначением этой услуги, не меняется ничего (422): сначала нужно разобраться с такими назначениями.
+func (s *AccountServices) PeriodApply(ctx context.Context, req model.AccountServicePeriodRequest) (model.AccountServicePeriodResult, error) {
+	if err := req.Validate(); err != nil {
+		return model.AccountServicePeriodResult{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.AccountServicePeriodResult{}, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	rows, err := loadPeriodRows(ctx, tx, req)
+	if err != nil {
+		return model.AccountServicePeriodResult{}, err
+	}
+	var ids []int64
+	conflicts := 0
+	for _, r := range rows {
+		if !r.Changes {
+			continue
+		}
+		if r.Conflict {
+			conflicts++
+		}
+		ids = append(ids, r.ID)
+	}
+	if conflicts > 0 {
+		return model.AccountServicePeriodResult{}, invalid(fmt.Sprintf("valid_from: the new period overlaps other assignments of the same service on %d accounts", conflicts))
+	}
+	tag, err := tx.Exec(ctx, `UPDATE account_services SET valid_from = $2, valid_to = $3, updated_at = now() WHERE id = ANY ($1)`,
+		ids, req.ValidFrom, req.ValidTo)
+	if err != nil {
+		return model.AccountServicePeriodResult{}, mapErr(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.AccountServicePeriodResult{}, mapErr(err)
+	}
+	return model.AccountServicePeriodResult{Changed: int(tag.RowsAffected())}, nil
 }

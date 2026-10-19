@@ -118,6 +118,39 @@ func TestAccountServices(t *testing.T) {
 	if res, err := assigned.BulkAssign(ctx, req); err != nil || res.Created != 0 {
 		t.Errorf("repeat bulk: %+v, %v", res, err)
 	}
+	// Смена периода: всем назначениям услуги в доме — с 1 августа; повтор ничего не меняет.
+	aug := model.AccountServicePeriodRequest{ServiceID: upkeep.ID, BuildingID: &b.ID, ValidFrom: date(2026, 8, 1)}
+	if pp, err := assigned.PeriodPreview(ctx, aug); err != nil || pp.Matched != 2 || pp.ToChange != 2 || pp.Conflicts != 0 || len(pp.Sample) != 2 {
+		t.Fatalf("period preview: %+v, %v", pp, err)
+	}
+	// Отбор по текущей дате начала: назначений с другой датой нет.
+	if pp, err := assigned.PeriodPreview(ctx, model.AccountServicePeriodRequest{ServiceID: upkeep.ID, CurrentValidFrom: ptr(date(2026, 9, 9)), ValidFrom: date(2026, 8, 1)}); err != nil || pp.Matched != 0 {
+		t.Errorf("period preview by current date: %+v, %v", pp, err)
+	}
+	// Назначение за сентябрь у счёта 1 пересеклось бы с новым периодом: ничего не меняется.
+	sep, err := assign(a1.ID, upkeep.ID, date(2026, 9, 1), ptr(date(2026, 9, 30)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pp, err := assigned.PeriodPreview(ctx, aug); err != nil || pp.Conflicts != 2 || pp.ToChange != 1 {
+		// сентябрьское назначение тоже выбрано: оно и «Октябрьское» счёта 1 конфликтуют друг с другом в новом периоде
+		t.Errorf("period preview conflicts: %+v, %v", pp, err)
+	}
+	if _, err := assigned.PeriodApply(ctx, aug); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "overlaps") {
+		t.Errorf("period apply with conflicts: %v", err)
+	}
+	if err := assigned.Delete(ctx, sep.ID); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := assigned.PeriodApply(ctx, aug); err != nil || r.Changed != 2 {
+		t.Fatalf("period apply: %+v, %v", r, err)
+	}
+	if r, err := assigned.PeriodApply(ctx, aug); err != nil || r.Changed != 0 {
+		t.Errorf("repeat period apply: %+v, %v", r, err)
+	}
+	if got, err := assigned.Get(ctx, x.ID); err != nil || got.ValidFrom.Format("2006-01-02") != "2026-08-01" {
+		t.Errorf("shifted assignment: %+v, %v", got, err)
+	}
 	// Капремонт идёт только на счета капремонта; ручная услуга требует количество.
 	if pv, err := assigned.BulkPreview(ctx, model.AccountServiceBulkRequest{ServiceID: fund.ID, ValidFrom: from, BuildingID: &b.ID}); err != nil || pv.ToAssign != 1 {
 		t.Errorf("capital preview: %+v, %v", pv, err)

@@ -13,7 +13,7 @@ import (
 )
 
 type MeterReadingImportStore interface {
-	ImportReadings(ctx context.Context, buildingID int64, resource string, date model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
+	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
@@ -41,7 +41,7 @@ func formDate(w http.ResponseWriter, r *http.Request, field string, required boo
 }
 
 // importFile принимает multipart/form-data: building_id, resource, reading_date (дата показаний), необязательное
-// installed_at (если задано, неизвестные счётчики создаются с этой датой ввода) и xlsx-файл в поле file.
+// period (расчётный месяц YYYY-MM; по умолчанию месяц даты показаний), необязательное installed_at (если задано, неизвестные счётчики создаются с этой датой ввода) и xlsx-файл в поле file.
 func (h meterImportHandlers) importFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportSize)
 	if err := r.ParseMultipartForm(maxImportSize); err != nil {
@@ -61,6 +61,18 @@ func (h meterImportHandlers) importFile(w http.ResponseWriter, r *http.Request) 
 	date, ok := formDate(w, r, "reading_date", true)
 	if !ok {
 		return
+	}
+	period := date.FirstOfMonth()
+	if v := strings.TrimSpace(r.FormValue("period")); v != "" {
+		if len(v) == 7 { // YYYY-MM из поля выбора месяца
+			v += "-01"
+		}
+		t, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "period: month must be YYYY-MM")
+			return
+		}
+		period = model.Date{Time: t}.FirstOfMonth()
 	}
 	installedAt, ok := formDate(w, r, "installed_at", false)
 	if !ok {
@@ -85,7 +97,7 @@ func (h meterImportHandlers) importFile(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	res, err := h.store.ImportReadings(r.Context(), buildingID, resource, *date, installedAt, rows)
+	res, err := h.store.ImportReadings(r.Context(), buildingID, resource, *date, period, installedAt, rows)
 	if err != nil {
 		writeErr(w, err)
 		return

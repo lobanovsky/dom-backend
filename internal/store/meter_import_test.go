@@ -44,13 +44,13 @@ func TestImportReadings(t *testing.T) {
 	installed := ptr(date(2015, 1, 1))
 
 	// Без даты ввода неизвестный счётчик — ошибка строки, ничего не записывается.
-	_, err = readings.ImportReadings(ctx, b.ID, "cold_water", sep, nil, []model.MeterReadingImportRow{row(2, "1", "mi-1", 10)})
+	_, err = readings.ImportReadings(ctx, b.ID, "cold_water", sep, sep.FirstOfMonth(), nil, []model.MeterReadingImportRow{row(2, "1", "mi-1", 10)})
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "row 2") {
 		t.Errorf("unknown meter: %v", err)
 	}
 
 	// Счётчики создаются, у квартиры 1 их два.
-	res, err := readings.ImportReadings(ctx, b.ID, "cold_water", sep, installed, []model.MeterReadingImportRow{
+	res, err := readings.ImportReadings(ctx, b.ID, "cold_water", sep, sep.FirstOfMonth(), installed, []model.MeterReadingImportRow{
 		row(2, "1", "mi-1", 10.5), row(3, "1", "mi-2", 20), row(4, "2", "mi-3", 30),
 	})
 	if err != nil || res.MetersCreated != 3 || res.Readings != 3 {
@@ -65,8 +65,8 @@ func TestImportReadings(t *testing.T) {
 		t.Fatalf("meters: %+v, %v", list, err)
 	}
 
-	// Повторная загрузка на ту же дату — конфликт, число счётчиков не растёт.
-	_, err = readings.ImportReadings(ctx, b.ID, "cold_water", sep, installed, []model.MeterReadingImportRow{row(2, "1", "mi-1", 11)})
+	// Повторная загрузка за тот же месяц — конфликт, число счётчиков не растёт.
+	_, err = readings.ImportReadings(ctx, b.ID, "cold_water", sep, sep.FirstOfMonth(), installed, []model.MeterReadingImportRow{row(2, "1", "mi-1", 11)})
 	if !errors.Is(err, ErrConflict) {
 		t.Errorf("same date: %v", err)
 	}
@@ -81,11 +81,11 @@ func TestImportReadings(t *testing.T) {
 		{row(7, "99", "mi-1", 12), "not found"},
 		{row(8, "1", "mi-1", 12, 5), "tariff"},
 	} {
-		if _, err := readings.ImportReadings(ctx, b.ID, "cold_water", oct, nil, []model.MeterReadingImportRow{c.r}); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+		if _, err := readings.ImportReadings(ctx, b.ID, "cold_water", oct, oct.FirstOfMonth(), nil, []model.MeterReadingImportRow{c.r}); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: err = %v, want %q", c.r, err, c.want)
 		}
 	}
-	res, err = readings.ImportReadings(ctx, b.ID, "cold_water", oct, nil, []model.MeterReadingImportRow{row(2, "1", "mi-1", 12), row(3, "1", "mi-2", 25)})
+	res, err = readings.ImportReadings(ctx, b.ID, "cold_water", oct, oct.FirstOfMonth(), nil, []model.MeterReadingImportRow{row(2, "1", "mi-1", 12), row(3, "1", "mi-2", 25)})
 	if err != nil || res.MetersCreated != 0 || res.Readings != 2 {
 		t.Errorf("next month: %+v, %v", res, err)
 	}

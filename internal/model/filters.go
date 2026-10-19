@@ -149,6 +149,7 @@ type MeterFilter struct {
 type MeterReadingFilter struct {
 	Deleted  bool // true — только удалённые (корзина), false — только действующие
 	MeterID  *int64
+	Period   *Date // расчётный месяц
 	DateFrom *Date
 	DateTo   *Date
 }

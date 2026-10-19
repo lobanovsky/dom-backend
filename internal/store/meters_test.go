@@ -54,8 +54,9 @@ func TestMetersAndReadings(t *testing.T) {
 	}
 
 	f := func(v float64) *float64 { return &v }
+	// В месяце одно показание, а тест проверяет порядок и расход по датам: периоды разнесены по разным месяцам (day -> месяц).
 	add := func(day int, t1 float64, t2, t3 *float64) (model.MeterReading, error) {
-		return readings.Create(ctx, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, day), T1: t1, T2: t2, T3: t3, Source: "manual"})
+		return readings.Create(ctx, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, day), Period: model.Date{Time: date(2026, 1, 1).AddDate(0, day, 0)}, T1: t1, T2: t2, T3: t3, Source: "manual"})
 	}
 	r1, err := add(1, 110, f(60), f(15))
 	if err != nil {
@@ -95,7 +96,7 @@ func TestMetersAndReadings(t *testing.T) {
 		"t2 below previous":  {15, 140, f(65), f(22), "t2: must not be less than previous"},
 		"below initial":      {0, 99, f(60), f(15), "must not be before"},
 		"missing t3":         {15, 140, f(75), nil, "t3: is required"},
-		"duplicate date":     {10, 131, f(71), f(21), "meter_readings_meter_date_key"},
+		"duplicate date":     {10, 131, f(71), f(21), "meter_readings_meter_period_key"},
 	} {
 		day := tc.day
 		if day == 0 {
@@ -115,11 +116,11 @@ func TestMetersAndReadings(t *testing.T) {
 	}
 
 	// Правка и удаление с восстановлением.
-	upd, err := readings.Update(ctx, r2.ID, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, 10), T1: 135, T2: f(70), T3: f(20), Source: "manual"})
+	upd, err := readings.Update(ctx, r2.ID, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, 10), Period: r2.Period, T1: 135, T2: f(70), T3: f(20), Source: "manual"})
 	if err != nil || *upd.DeltaT1 != 50 {
 		t.Errorf("update: %v %+v", err, upd)
 	}
-	if _, err := readings.Update(ctx, r2.ID, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, 10), T1: 151, T2: f(70), T3: f(20), Source: "manual"}); err == nil {
+	if _, err := readings.Update(ctx, r2.ID, model.MeterReading{MeterID: elec.ID, ReadingDate: date(2026, 2, 10), Period: r2.Period, T1: 151, T2: f(70), T3: f(20), Source: "manual"}); err == nil {
 		t.Error("update above next reading: want error")
 	}
 	if err := readings.Delete(ctx, r2.ID); err != nil {

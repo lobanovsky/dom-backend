@@ -103,6 +103,7 @@ type MeterReading struct {
 	Meta
 	MeterID     int64    `json:"meter_id" db:"meter_id"`
 	ReadingDate Date     `json:"reading_date" db:"reading_date"`
+	Period      Date     `json:"period" db:"period"` // расчётный месяц (первое число); пусто — месяц даты показаний
 	T1          float64  `json:"t1" db:"t1"`
 	T2          *float64 `json:"t2" db:"t2"`
 	T3          *float64 `json:"t3" db:"t3"`
@@ -115,6 +116,11 @@ type MeterReading struct {
 }
 
 func (r *MeterReading) SetDefaults() {
+	if r.Period.IsZero() {
+		r.Period = r.ReadingDate.FirstOfMonth()
+	} else {
+		r.Period = r.Period.FirstOfMonth()
+	}
 	if r.Source == "" {
 		r.Source = "manual"
 	}

@@ -16,9 +16,15 @@ func NewDate(y int, m time.Month, d int) Date {
 	return Date{time.Date(y, m, d, 0, 0, 0, 0, time.UTC)}
 }
 
+// FirstOfMonth — первое число месяца этой даты.
+func (d Date) FirstOfMonth() Date { return NewDate(d.Year(), d.Month(), 1) }
+
 func (d Date) MarshalJSON() ([]byte, error) { return json.Marshal(d.Format(dateLayout)) }
 
 func (d *Date) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" { // как у обычных типов JSON: null ничего не меняет (пустая дата)
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
 		return fmt.Errorf("date must be a string YYYY-MM-DD")

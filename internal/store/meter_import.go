@@ -10,11 +10,11 @@ import (
 	"dom-backend/internal/model"
 )
 
-// ImportReadings записывает показания на дату date одной транзакцией: при любой ошибке не сохраняется ничего.
+// ImportReadings записывает показания на дату date (расчётный месяц period) одной транзакцией: при любой ошибке не сохраняется ничего.
 // Помещение (квартира) ищется по номеру в доме, счётчик — по ресурсу и номеру. Если installedAt задан, неизвестные
 // счётчики создаются в этом помещении с этой датой ввода и нулевыми начальными показаниями; иначе это ошибка строки.
 // Показания записываются с источником import по тем же правилам, что и ручной ввод.
-func (s *MeterReadings) ImportReadings(ctx context.Context, buildingID int64, resource string, date model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error) {
+func (s *MeterReadings) ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error) {
 	var res model.MeterReadingImportResult
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -31,7 +31,7 @@ func (s *MeterReadings) ImportReadings(ctx context.Context, buildingID int64, re
 	}
 
 	for _, r := range rows {
-		if err := importReading(ctx, tx, buildingID, resource, date, installedAt, r, &res); err != nil {
+		if err := importReading(ctx, tx, buildingID, resource, date, period, installedAt, r, &res); err != nil {
 			return model.MeterReadingImportResult{}, rowErr(r.Row, err)
 		}
 	}
@@ -41,7 +41,7 @@ func (s *MeterReadings) ImportReadings(ctx context.Context, buildingID int64, re
 	return res, nil
 }
 
-func importReading(ctx context.Context, tx pgx.Tx, buildingID int64, resource string, date model.Date, installedAt *model.Date, r model.MeterReadingImportRow, res *model.MeterReadingImportResult) error {
+func importReading(ctx context.Context, tx pgx.Tx, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, r model.MeterReadingImportRow, res *model.MeterReadingImportResult) error {
 	var premisesID int64
 	err := tx.QueryRow(ctx,
 		`SELECT id FROM premises WHERE building_id = $1 AND kind = 'apartment' AND number = $2 AND deleted_at IS NULL`,
@@ -81,13 +81,13 @@ func importReading(ctx context.Context, tx pgx.Tx, buildingID int64, resource st
 		return err
 	}
 
-	in := model.MeterReading{MeterID: meterID, ReadingDate: date, T1: *r.T[0], T2: r.T[1], T3: r.T[2], Source: "import"}
+	in := model.MeterReading{MeterID: meterID, ReadingDate: date, Period: period, T1: *r.T[0], T2: r.T[1], T3: r.T[2], Source: "import"}
 	if err := checkReading(ctx, tx, in, 0); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO meter_readings (meter_id, reading_date, t1, t2, t3, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-		in.MeterID, in.ReadingDate, in.T1, in.T2, in.T3, in.Source); err != nil {
+		`INSERT INTO meter_readings (meter_id, reading_date, period, t1, t2, t3, source) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Source); err != nil {
 		return err
 	}
 	res.Readings++

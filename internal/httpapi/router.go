@@ -43,6 +43,7 @@ type Deps struct {
 	Tariffs              crudStore[model.Tariff, model.TariffFilter]
 	TariffPrices         crudStore[model.TariffPrice, model.TariffPriceFilter]
 	TariffFromService    TariffFromServiceStore
+	Calculator           CalculationStore
 	MeterReadingImporter MeterReadingImportStore
 	Properties           PropertiesStore
 	Sber                 SberStore
@@ -95,6 +96,7 @@ func NewRouter(d Deps) http.Handler {
 	crudHandlers[model.Tariff, model.TariffFilter]{path: "/api/v1/tariffs", store: d.Tariffs, filter: tariffFilter}.register(api)
 	crudHandlers[model.TariffPrice, model.TariffPriceFilter]{path: "/api/v1/tariff-prices", store: d.TariffPrices, filter: tariffPriceFilter}.register(api)
 	tariffFromServiceHandler{d.TariffFromService}.register(api)
+	calculationHandlers{d.Calculator}.register(api)
 	crudHandlers[model.ServiceNorm, model.ServiceNormFilter]{path: "/api/v1/service-norms", store: d.ServiceNorms, filter: serviceNormFilter}.register(api)
 	crudHandlers[model.MeterReading, model.MeterReadingFilter]{path: "/api/v1/meter-readings", store: d.MeterReadings, filter: meterReadingFilter, prepare: func(r *model.MeterReading) { r.SetDefaults() }}.register(api)
 	paymentExcelHandlers{d.IncomingPayments, d.OutgoingPayments, d.BankAccounts, d.PaymentCategories}.register(api)

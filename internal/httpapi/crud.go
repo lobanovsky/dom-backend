@@ -254,11 +254,11 @@ func meterFilter(w http.ResponseWriter, r *http.Request) (model.MeterFilter, lis
 }
 
 func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterReadingFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"meter_id"}, Dates: []string{"date_from", "date_to"}})
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"meter_id"}, Dates: []string{"date_from", "date_to", "period"}})
 	if !ok {
 		return model.MeterReadingFilter{}, p, false
 	}
-	return model.MeterReadingFilter{Deleted: p.Deleted, MeterID: p.Int("meter_id"), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to")}, p, true
+	return model.MeterReadingFilter{Deleted: p.Deleted, MeterID: p.Int("meter_id"), Period: monthOf(p.Date("period")), DateFrom: p.Date("date_from"), DateTo: p.Date("date_to")}, p, true
 }
 
 func serviceFilter(w http.ResponseWriter, r *http.Request) (model.ServiceFilter, listParams, bool) {
@@ -328,3 +328,12 @@ func accountServiceFilter(w http.ResponseWriter, r *http.Request) (model.Account
 }
 
 func isTrue(b *bool) bool { return b != nil && *b }
+
+// monthOf приводит дату к первому числу её месяца; nil остаётся nil.
+func monthOf(d *model.Date) *model.Date {
+	if d == nil {
+		return nil
+	}
+	m := d.FirstOfMonth()
+	return &m
+}

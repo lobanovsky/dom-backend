@@ -29,6 +29,7 @@ type Service struct {
 	MeterResource  *string  `json:"meter_resource" db:"meter_resource"`
 	MeterTariff    *int     `json:"meter_tariff" db:"meter_tariff"`
 	ComponentIDs   []int64  `json:"component_ids" db:"component_ids"`
+	MeterIDs       []int64  `json:"meter_ids" db:"meter_ids"`             // общедомовые счётчики услуги common_meter; расход складывается и делится по площади
 	AccountPurpose string   `json:"account_purpose" db:"account_purpose"` // на счёт какого типа попадает услуга (как purpose у лицевого счёта)
 	PremisesKinds  []string `json:"premises_kinds" db:"premises_kinds"`   // к каким видам помещений применима; пусто — к любым
 	ReceiptName    *string  `json:"receipt_name" db:"receipt_name"`       // название в квитанции; пусто — Name
@@ -64,6 +65,9 @@ func (s *Service) SetDefaults() {
 	}
 	if !IsSum(s.CalcMethod) {
 		s.ComponentIDs = []int64{}
+	}
+	if s.MeterIDs == nil || s.CalcMethod != "common_meter" {
+		s.MeterIDs = []int64{}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 const serviceSelect = `SELECT s.id, s.organization_id, s.kind, s.name, s.unit, s.calc_method, s.meter_resource, s.meter_tariff, s.account_purpose, s.premises_kinds, s.receipt_name, s.tariff_id, tf.name AS tariff_name,
 	ARRAY(SELECT c.component_id FROM service_components c WHERE c.service_id = s.id ORDER BY c.component_id) AS component_ids,
+	ARRAY(SELECT sm.meter_id FROM service_meters sm JOIN meters m ON m.id = sm.meter_id AND m.deleted_at IS NULL WHERE sm.service_id = s.id ORDER BY sm.meter_id) AS meter_ids,
 	s.position, s.active, s.comment, o.name AS organization_name, service_price_on(s.id, CURRENT_DATE) AS current_price,
 	s.created_at, s.updated_at, s.deleted_at
 	FROM services s JOIN organizations o ON o.id = s.organization_id LEFT JOIN tariffs tf ON tf.id = s.tariff_id`
@@ -57,6 +58,9 @@ func (s *Services) Create(ctx context.Context, in model.Service) (model.Service,
 	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
 		return model.Service{}, err
 	}
+	if err := saveMeters(ctx, tx, id, in.MeterIDs); err != nil {
+		return model.Service{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.Service{}, mapErr(err)
 	}
@@ -86,6 +90,9 @@ func (s *Services) Update(ctx context.Context, id int64, in model.Service) (mode
 		return model.Service{}, err
 	}
 	if err := saveComponents(ctx, tx, id, in.ComponentIDs); err != nil {
+		return model.Service{}, err
+	}
+	if err := saveMeters(ctx, tx, id, in.MeterIDs); err != nil {
 		return model.Service{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -179,6 +186,37 @@ func checkNorms(ctx context.Context, tx pgx.Tx, id int64) error {
 	}
 	if bad {
 		return invalid("calc_method: a service with norms must stay an area-norm service")
+	}
+	return nil
+}
+
+// saveMeters заменяет общедомовые счётчики услуги. Счётчик должен быть общедомовым, живым, с тем же ресурсом, что у услуги,
+// иметь нужный тариф (у электросчётчика) и стоять в доме той же организации.
+func saveMeters(ctx context.Context, tx pgx.Tx, id int64, meters []int64) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM service_meters WHERE service_id = $1`, id); err != nil {
+		return mapErr(err)
+	}
+	for _, m := range meters {
+		if _, err := tx.Exec(ctx, `INSERT INTO service_meters (service_id, meter_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, m); err != nil {
+			return mapErr(err)
+		}
+	}
+	var bad bool
+	err := tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM service_meters sm
+		   JOIN services s ON s.id = sm.service_id
+		   JOIN meters m ON m.id = sm.meter_id
+		   LEFT JOIN buildings b ON b.id = m.building_id
+		   WHERE sm.service_id = $1
+		     AND (s.calc_method <> 'common_meter' OR m.deleted_at IS NOT NULL OR m.building_id IS NULL
+		          OR m.resource IS DISTINCT FROM s.meter_resource OR m.tariffs < s.meter_tariff
+		          OR b.organization_id IS DISTINCT FROM s.organization_id))`, id).Scan(&bad)
+	if err != nil {
+		return mapErr(err)
+	}
+	if bad {
+		return invalid("meter_ids: meters must be common meters of the service resource, with the service tariff, in a building of the service organization")
 	}
 	return nil
 }

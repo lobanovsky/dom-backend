@@ -10,7 +10,7 @@ import (
 )
 
 // Расход считается от предыдущего действующего показания (для первого — от начальных показаний счётчика) с учётом коэффициента.
-const readingSelect = `SELECT r.id, r.meter_id, r.reading_date, r.t1, r.t2, r.t3, r.source, r.comment,
+const readingSelect = `SELECT r.id, r.meter_id, r.reading_date, r.period, r.t1, r.t2, r.t3, r.source, r.comment,
 	(r.t1 - COALESCE(prev.t1, m.initial_t1)) * m.coefficient AS delta_t1,
 	CASE WHEN r.t2 IS NULL THEN NULL ELSE (r.t2 - COALESCE(prev.t2, m.initial_t2)) * m.coefficient END AS delta_t2,
 	CASE WHEN r.t3 IS NULL THEN NULL ELSE (r.t3 - COALESCE(prev.t3, m.initial_t3)) * m.coefficient END AS delta_t3,
@@ -33,9 +33,10 @@ func (s *MeterReadings) List(ctx context.Context, f model.MeterReadingFilter, li
 		 WHERE ($1::bigint IS NULL OR r.meter_id = $1)
 		   AND ($2::date IS NULL OR r.reading_date >= $2)
 		   AND ($3::date IS NULL OR r.reading_date <= $3)
-		   AND (r.deleted_at IS NOT NULL) = $4
-		 ORDER BY r.reading_date DESC, r.id DESC LIMIT $5 OFFSET $6`,
-		f.MeterID, f.DateFrom, f.DateTo, f.Deleted, limit, offset))
+		   AND ($4::date IS NULL OR r.period = $4)
+		   AND (r.deleted_at IS NOT NULL) = $5
+		 ORDER BY r.reading_date DESC, r.id DESC LIMIT $6 OFFSET $7`,
+		f.MeterID, f.DateFrom, f.DateTo, f.Period, f.Deleted, limit, offset))
 }
 
 func (s *MeterReadings) Get(ctx context.Context, id int64) (model.MeterReading, error) {
@@ -43,6 +44,7 @@ func (s *MeterReadings) Get(ctx context.Context, id int64) (model.MeterReading, 
 }
 
 func (s *MeterReadings) Create(ctx context.Context, in model.MeterReading) (model.MeterReading, error) {
+	in.SetDefaults()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.MeterReading{}, mapErr(err)
@@ -53,8 +55,8 @@ func (s *MeterReadings) Create(ctx context.Context, in model.MeterReading) (mode
 	}
 	var id int64
 	err = tx.QueryRow(ctx,
-		`INSERT INTO meter_readings (meter_id, reading_date, t1, t2, t3, source, comment) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-		in.MeterID, in.ReadingDate, in.T1, in.T2, in.T3, in.Source, in.Comment).Scan(&id)
+		`INSERT INTO meter_readings (meter_id, reading_date, period, t1, t2, t3, source, comment) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+		in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Source, in.Comment).Scan(&id)
 	if err != nil {
 		return model.MeterReading{}, mapErr(err)
 	}
@@ -65,6 +67,7 @@ func (s *MeterReadings) Create(ctx context.Context, in model.MeterReading) (mode
 }
 
 func (s *MeterReadings) Update(ctx context.Context, id int64, in model.MeterReading) (model.MeterReading, error) {
+	in.SetDefaults()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.MeterReading{}, mapErr(err)
@@ -74,9 +77,9 @@ func (s *MeterReadings) Update(ctx context.Context, id int64, in model.MeterRead
 		return model.MeterReading{}, err
 	}
 	tag, err := tx.Exec(ctx,
-		`UPDATE meter_readings SET meter_id = $2, reading_date = $3, t1 = $4, t2 = $5, t3 = $6, source = $7, comment = $8, updated_at = now()
+		`UPDATE meter_readings SET meter_id = $2, reading_date = $3, period = $4, t1 = $5, t2 = $6, t3 = $7, source = $8, comment = $9, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL`,
-		id, in.MeterID, in.ReadingDate, in.T1, in.T2, in.T3, in.Source, in.Comment)
+		id, in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Source, in.Comment)
 	if err := checkDeleted(tag, err); err != nil {
 		return model.MeterReading{}, err
 	}

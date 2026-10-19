@@ -423,3 +423,21 @@ func TestTariffValidate(t *testing.T) {
 		t.Errorf("sum_prices with tariff_id: want error")
 	}
 }
+
+func TestReadingPeriodDefaults(t *testing.T) {
+	r := MeterReading{MeterID: 1, ReadingDate: NewDate(2026, 10, 25), T1: 5}
+	r.SetDefaults()
+	if r.Period != NewDate(2026, 10, 1) {
+		t.Errorf("default period: %v", r.Period)
+	}
+	r = MeterReading{MeterID: 1, ReadingDate: NewDate(2026, 9, 28), Period: NewDate(2026, 10, 17), T1: 5}
+	r.SetDefaults()
+	if r.Period != NewDate(2026, 10, 1) || r.Validate() != nil {
+		t.Errorf("explicit period must be normalized to the first of the month: %v", r.Period)
+	}
+	s := Service{CalcMethod: "fixed", MeterIDs: []int64{1}}
+	s.SetDefaults()
+	if len(s.MeterIDs) != 0 || s.MeterIDs == nil {
+		t.Errorf("meter ids of a non common-meter service: %v", s.MeterIDs)
+	}
+}

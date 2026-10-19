@@ -137,6 +137,7 @@ func run(log *slog.Logger) error {
 			Tariffs:              tariffs,
 			TariffPrices:         store.NewTariffPrices(pool),
 			TariffFromService:    tariffs,
+			Calculator:           store.NewCalculator(pool),
 			MeterReadingImporter: meterReadings,
 			Properties:           store.NewProperties(pool),
 			PaymentRegistries:    store.NewPaymentRegistries(pool),

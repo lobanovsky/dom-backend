@@ -41,6 +41,7 @@ type Reading struct {
 type Meter struct {
 	ID          int64
 	Serial      string
+	Name        string // название счётчика («ИТП»); может быть пустым
 	Resource    string
 	Tariffs     int
 	Coefficient *big.Rat
@@ -92,6 +93,7 @@ type Input struct {
 type MeterUse struct {
 	MeterID     int64    `json:"meter_id"`
 	Serial      string   `json:"serial_number"`
+	Name        string   `json:"name"`
 	Previous    *float64 `json:"previous"`
 	Current     *float64 `json:"current"`
 	Consumption *float64 `json:"consumption"`
@@ -369,7 +371,7 @@ func (c *calculator) consumption(meters []Meter, s *Service) (*big.Rat, string, 
 		if m.InstalledAt.After(c.last) || (m.RemovedAt != nil && m.RemovedAt.Before(c.in.Period)) {
 			continue
 		}
-		use := MeterUse{MeterID: m.ID, Serial: m.Serial, Status: StatusOK}
+		use := MeterUse{MeterID: m.ID, Serial: m.Serial, Name: m.Name, Status: StatusOK}
 		idx := tariff - 1
 		var cur, prev *big.Rat
 		switch {

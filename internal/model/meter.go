@@ -1,6 +1,9 @@
 package model
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 var (
 	MeterResources      = []string{"cold_water", "hot_water", "electricity"}
@@ -17,6 +20,7 @@ type Meter struct {
 	Resource           string  `json:"resource" db:"resource"`
 	Tariffs            int     `json:"tariffs" db:"tariffs"` // у электросчётчика 1–3, у водяного всегда 1
 	SerialNumber       string  `json:"serial_number" db:"serial_number"`
+	Name               *string `json:"name" db:"name"` // название для различения счётчиков (например, «ИТП»); не уникально
 	Model              *string `json:"model" db:"model"`
 	Comment            *string `json:"comment" db:"comment"`
 	Coefficient        float64 `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
@@ -68,6 +72,10 @@ func (m Meter) Validate() error {
 	case m.Resource != "electricity" && m.Tariffs != 1:
 		tariffs = invalid("tariffs", "must be 1 for water meters")
 	}
+	var name error
+	if m.Name != nil && strings.TrimSpace(*m.Name) == "" {
+		name = invalid("name", "must not be blank")
+	}
 	var removed, next error
 	if m.RemovedAt != nil && m.RemovedAt.Before(m.InstalledAt.Time) {
 		removed = invalid("removed_at", "must not be before installed_at")
@@ -86,6 +94,7 @@ func (m Meter) Validate() error {
 		oneOf("resource", m.Resource, MeterResources),
 		tariffs,
 		required("serial_number", m.SerialNumber),
+		name,
 		coefficient,
 		requiredDate("installed_at", m.InstalledAt),
 		removed,

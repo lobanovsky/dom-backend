@@ -19,7 +19,7 @@ func NewCalculator(pool *pgxpool.Pool) *Calculator { return &Calculator{pool} }
 
 // meterCalcSelect — счётчик с показанием расчётного месяца ($1) и предыдущим показанием (период раньше). Если в месяце
 // несколько показаний (старые данные до привязки к месяцам), берётся последнее по дате.
-const meterCalcSelect = `SELECT m.id, m.serial_number, m.resource, m.tariffs, m.coefficient::text, m.installed_at, m.removed_at,
+const meterCalcSelect = `SELECT m.id, m.serial_number, COALESCE(m.name, ''), m.resource, m.tariffs, m.coefficient::text, m.installed_at, m.removed_at,
 	m.initial_t1::text, m.initial_t2::text, m.initial_t3::text,
 	cur.id, cur.t1::text, cur.t2::text, cur.t3::text,
 	prev.id, prev.period, prev.t1::text, prev.t2::text, prev.t3::text
@@ -66,7 +66,7 @@ func (c *Calculator) meters(ctx context.Context, period time.Time, cond string, 
 			installed           time.Time
 			removed             *time.Time
 		)
-		if err := rows.Scan(&m.ID, &m.Serial, &m.Resource, &m.Tariffs, &coef, &installed, &removed, &init1, &init2, &init3,
+		if err := rows.Scan(&m.ID, &m.Serial, &m.Name, &m.Resource, &m.Tariffs, &coef, &installed, &removed, &init1, &init2, &init3,
 			&curID, &cur1, &cur2, &cur3, &prevID, &prevPeriod, &prev1, &prev2, &prev3); err != nil {
 			return nil, mapErr(err)
 		}

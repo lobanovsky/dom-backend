@@ -1,0 +1,1 @@
+ALTER TABLE meters DROP COLUMN name;

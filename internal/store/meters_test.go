@@ -41,11 +41,14 @@ func TestMetersAndReadings(t *testing.T) {
 		t.Errorf("computed fields: %+v", elec)
 	}
 	// Общедомовой счётчик воды.
-	water, err := meters.Create(ctx, model.Meter{BuildingID: &b.ID, Resource: "cold_water", Tariffs: 1, SerialNumber: "meter-test-2", Coefficient: 1, InstalledAt: date(2026, 1, 1)})
+	water, err := meters.Create(ctx, model.Meter{BuildingID: &b.ID, Resource: "cold_water", Tariffs: 1, SerialNumber: "meter-test-2", Name: ptr("ИТП"), Coefficient: 1, InstalledAt: date(2026, 1, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	cleanup(t, pool, "meters", water.ID)
+	if water.Name == nil || *water.Name != "ИТП" {
+		t.Errorf("name: %v", water.Name)
+	}
 	if water.LocationBuildingID != b.ID || water.PremisesNumber != nil {
 		t.Errorf("common meter: %+v", water)
 	}

@@ -11,7 +11,7 @@ import (
 // Счётчик активен между вводом в эксплуатацию и датой окончания (включительно).
 const meterActive = `(m.installed_at <= CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE))`
 
-const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.tariffs, m.serial_number, m.model, m.comment, m.coefficient,
+const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.tariffs, m.serial_number, m.name, m.model, m.comment, m.coefficient,
 	m.installed_at, m.removed_at, m.verified_at, m.next_verification_at, m.initial_t1, m.initial_t2, m.initial_t3,
 	` + meterActive + ` AS active,
 	COALESCE(m.next_verification_at < CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE), false) AS verification_overdue,
@@ -38,7 +38,7 @@ func (s *Meters) List(ctx context.Context, f model.MeterFilter, limit, offset in
 		   AND ($3::bigint IS NULL OR m.premises_id = $3)
 		   AND ($4::text IS NULL OR m.resource = $4)
 		   AND ($5::bool IS NULL OR `+meterActive+` = $5)
-		   AND ($6::text IS NULL OR m.serial_number ILIKE $6 OR p.number ILIKE $7)
+		   AND ($6::text IS NULL OR m.serial_number ILIKE $6 OR m.name ILIKE $6 OR p.number ILIKE $7)
 		   AND (m.deleted_at IS NOT NULL) = $8
 		 ORDER BY m.premises_id IS NOT NULL, substring(p.number from '\d+')::numeric NULLS LAST, p.number, m.resource, m.serial_number, m.id LIMIT $9 OFFSET $10`,
 		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), prefixPattern(f.Q), f.Deleted, limit, offset))
@@ -51,10 +51,10 @@ func (s *Meters) Get(ctx context.Context, id int64) (model.Meter, error) {
 func (s *Meters) Create(ctx context.Context, in model.Meter) (model.Meter, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO meters (building_id, premises_id, resource, tariffs, serial_number, model, comment, coefficient,
+		`INSERT INTO meters (building_id, premises_id, resource, tariffs, serial_number, name, model, comment, coefficient,
 		        installed_at, removed_at, verified_at, next_verification_at, initial_t1, initial_t2, initial_t3)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
-		in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Model, in.Comment, in.Coefficient,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+		in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Name, in.Model, in.Comment, in.Coefficient,
 		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3).Scan(&id)
 	if err != nil {
 		return model.Meter{}, mapErr(err)
@@ -98,10 +98,10 @@ func (s *Meters) Update(ctx context.Context, id int64, in model.Meter) (model.Me
 		}
 	}
 	_, err = tx.Exec(ctx,
-		`UPDATE meters SET building_id = $2, premises_id = $3, resource = $4, tariffs = $5, serial_number = $6, model = $7, comment = $8, coefficient = $9,
-		        installed_at = $10, removed_at = $11, verified_at = $12, next_verification_at = $13, initial_t1 = $14, initial_t2 = $15, initial_t3 = $16, updated_at = now()
+		`UPDATE meters SET building_id = $2, premises_id = $3, resource = $4, tariffs = $5, serial_number = $6, name = $7, model = $8, comment = $9, coefficient = $10,
+		        installed_at = $11, removed_at = $12, verified_at = $13, next_verification_at = $14, initial_t1 = $15, initial_t2 = $16, initial_t3 = $17, updated_at = now()
 		 WHERE id = $1`,
-		id, in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Model, in.Comment, in.Coefficient,
+		id, in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Name, in.Model, in.Comment, in.Coefficient,
 		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3)
 	if err != nil {
 		return model.Meter{}, mapErr(err)

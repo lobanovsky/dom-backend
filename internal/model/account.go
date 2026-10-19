@@ -1,7 +1,7 @@
 package model
 
 var (
-	AccountPurposes = []string{"utilities", "capital_repair", "parking", "other"}
+	AccountPurposes = []string{"utilities", "capital_repair"}
 	AccountStatuses = []string{"active", "closed"}
 )
 

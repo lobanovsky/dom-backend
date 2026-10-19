@@ -12,7 +12,7 @@ type Account struct {
 	ID         int64
 	Number     string
 	PremisesID int64
-	Purpose    string // utilities | capital_repair | parking | other
+	Purpose    string // utilities | capital_repair
 }
 
 // Premises — помещение.

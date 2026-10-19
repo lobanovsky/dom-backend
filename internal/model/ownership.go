@@ -53,6 +53,7 @@ type OwnedPremises struct {
 	TotalArea       *float64 `json:"total_area" db:"total_area"`
 	BuildingID      int64    `json:"building_id" db:"building_id"`
 	BuildingAddress string   `json:"building_address" db:"building_address"`
+	BuildingName    *string  `json:"building_name" db:"building_name"`
 	ShareNum        int      `json:"share_num" db:"share_num"`
 	ShareDen        int      `json:"share_den" db:"share_den"`
 	ValidFrom       Date     `json:"valid_from" db:"valid_from"`

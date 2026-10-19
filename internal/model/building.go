@@ -1,5 +1,10 @@
 package model
 
+import (
+	"strings"
+	"unicode/utf8"
+)
+
 var BuildingKinds = []string{"apartment_building", "parking", "common_premises", "other"}
 
 // Building — дом, паркинг или помещения общего пользования.
@@ -7,6 +12,7 @@ type Building struct {
 	Meta
 	OrganizationID  int64    `json:"organization_id" db:"organization_id"`
 	Kind            string   `json:"kind" db:"kind"`
+	Name            *string  `json:"name" db:"name"` // короткое название, уникально среди действующих домов без учёта регистра
 	Address         string   `json:"address" db:"address"`
 	CadastralNumber *string  `json:"cadastral_number" db:"cadastral_number"`
 	Floors          *int     `json:"floors" db:"floors"`
@@ -20,7 +26,12 @@ func (b Building) Validate() error {
 	if b.YearBuilt != nil && (*b.YearBuilt < 1700 || *b.YearBuilt > 2200) {
 		year = invalid("year_built", "must be between 1700 and 2200")
 	}
+	var name error
+	if b.Name != nil && (strings.TrimSpace(*b.Name) == "" || utf8.RuneCountInString(*b.Name) > 100) {
+		name = invalid("name", "must be 1 to 100 characters")
+	}
 	return firstErr(
+		name,
 		positiveInt("organization_id", intPtr(b.OrganizationID)),
 		oneOf("kind", b.Kind, BuildingKinds),
 		required("address", b.Address),

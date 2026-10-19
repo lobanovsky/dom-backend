@@ -15,7 +15,7 @@ const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.ta
 	m.installed_at, m.removed_at, m.verified_at, m.next_verification_at, m.initial_t1, m.initial_t2, m.initial_t3,
 	` + meterActive + ` AS active,
 	COALESCE(m.next_verification_at < CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE), false) AS verification_overdue,
-	b.id AS location_building_id, b.address AS building_address, p.kind AS premises_kind, p.number AS premises_number,
+	b.id AS location_building_id, b.address AS building_address, b.name AS building_name, p.kind AS premises_kind, p.number AS premises_number,
 	lr.reading_date AS last_reading_date, lr.t1 AS last_t1, lr.t2 AS last_t2, lr.t3 AS last_t3,
 	m.created_at, m.updated_at, m.deleted_at
 	FROM meters m

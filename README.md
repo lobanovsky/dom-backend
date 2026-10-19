@@ -57,7 +57,7 @@ erDiagram
 | Таблица | Назначение |
 |---|---|
 | `organizations` | УК или ТСН/ТСЖ (`kind`: uk / tsn / tszh), ИНН, КПП, ОГРН |
-| `buildings` | Дом: `apartment_building`, `parking`, `common_premises`, `other` |
+| `buildings` | Дом: `apartment_building`, `parking`, `common_premises`, `other`. Необязательное короткое название `name` — уникально среди действующих домов без учёта регистра (`buildings_name_uq`, migration `0028`); в связанных записях (счётчики, нормативы, назначения услуг, имущество владельца) приходит как `building_name` рядом с `building_address` |
 | `premises` | Объект недвижимости: `apartment`, `non_residential`, `commercial`, `parking_space`, `storage`. Уникален по (дом, вид, номер) |
 | `persons` | Физлица: фамилия, имя, отчество отдельными полями, дата рождения, списки телефонов (`phones`) и email (`emails`). Один человек может быть и собственником, и жителем |
 | `legal_entities` | Юрлица-собственники |

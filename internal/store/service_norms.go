@@ -8,7 +8,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-const normSelect = `SELECT n.id, n.service_id, n.building_id, n.value, n.valid_from, n.valid_to, n.comment, b.address AS building_address,
+const normSelect = `SELECT n.id, n.service_id, n.building_id, n.value, n.valid_from, n.valid_to, n.comment, b.address AS building_address, b.name AS building_name,
 	n.created_at, n.updated_at, n.deleted_at
 	FROM service_norms n JOIN buildings b ON b.id = n.building_id`
 

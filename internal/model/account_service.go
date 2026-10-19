@@ -18,6 +18,7 @@ type AccountService struct {
 	PremisesKind    string   `json:"premises_kind" db:"premises_kind"`
 	PremisesNumber  string   `json:"premises_number" db:"premises_number"`
 	BuildingAddress string   `json:"building_address" db:"building_address"`
+	BuildingName    *string  `json:"building_name" db:"building_name"`
 	ServiceName     string   `json:"service_name" db:"service_name"`
 	ServiceUnit     string   `json:"service_unit" db:"service_unit"`
 	CurrentPrice    *float64 `json:"current_price" db:"current_price"`

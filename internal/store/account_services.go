@@ -12,7 +12,7 @@ import (
 )
 
 const accountServiceSelect = `SELECT x.id, x.account_id, x.service_id, x.valid_from, x.valid_to, x.quantity, x.comment,
-	a.number AS account_number, p.id AS premises_id, p.kind AS premises_kind, p.number AS premises_number, b.address AS building_address,
+	a.number AS account_number, p.id AS premises_id, p.kind AS premises_kind, p.number AS premises_number, b.address AS building_address, b.name AS building_name,
 	s.name AS service_name, s.unit AS service_unit, service_price_on(s.id, CURRENT_DATE) AS current_price,
 	x.created_at, x.updated_at, x.deleted_at
 	FROM account_services x

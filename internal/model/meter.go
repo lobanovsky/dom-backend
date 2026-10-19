@@ -36,6 +36,7 @@ type Meter struct {
 	VerificationOverdue bool     `json:"verification_overdue" db:"verification_overdue"`
 	LocationBuildingID  int64    `json:"location_building_id" db:"location_building_id"` // дом счётчика, в том числе через помещение
 	BuildingAddress     string   `json:"building_address" db:"building_address"`
+	BuildingName        *string  `json:"building_name" db:"building_name"`
 	PremisesKind        *string  `json:"premises_kind" db:"premises_kind"`
 	PremisesNumber      *string  `json:"premises_number" db:"premises_number"`
 	LastReadingDate     *Date    `json:"last_reading_date" db:"last_reading_date"`

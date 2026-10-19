@@ -25,7 +25,7 @@ func (s *Properties) ByLegalEntity(ctx context.Context, id int64) ([]model.Owned
 func (s *Properties) list(ctx context.Context, col string, id int64) ([]model.OwnedPremises, error) {
 	return collect[model.OwnedPremises](s.pool.Query(ctx,
 		`SELECT o.id AS ownership_id, p.id AS premises_id, p.kind AS premises_kind, p.number AS premises_number,
-		        p.total_area, b.id AS building_id, b.address AS building_address,
+		        p.total_area, b.id AS building_id, b.address AS building_address, b.name AS building_name,
 		        o.share_num, o.share_den, o.valid_from, o.valid_to
 		 FROM ownerships o
 		 JOIN premises p ON p.id = o.premises_id

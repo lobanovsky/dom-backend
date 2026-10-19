@@ -165,7 +165,8 @@ type ServiceNorm struct {
 	ValidTo    *Date   `json:"valid_to" db:"valid_to"`
 	Comment    *string `json:"comment" db:"comment"`
 
-	BuildingAddress string `json:"building_address" db:"building_address"`
+	BuildingAddress string  `json:"building_address" db:"building_address"`
+	BuildingName    *string `json:"building_name" db:"building_name"`
 }
 
 func (n ServiceNorm) Validate() error {

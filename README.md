@@ -336,6 +336,7 @@ docker compose up -d --build
 
 - `POST /api/v1/payment-assignments/preview` и `POST /api/v1/payment-assignments`: тело `{"direction":"incoming|outgoing","mode":"unassigned|recompute","scope":{...}}`, `scope` как фильтры списка платежей (у исходящих без `registry_id`); для проверки одного правила `rule_id` или черновик `rule`. Предпросмотр ничего не пишет; применение идёт одной транзакцией и записывает запуск с прежним состоянием платежей.
 - `GET /api/v1/payment-assignments?direction=...`: история запусков; `POST /payment-assignments/{id}/rollback`: откат (платежи, которые после запуска изменили вручную или другим запуском, не трогаются).
+- У входящего платежа с лицевым счётом в ответе только для чтения `personal_account_number` и `personal_account_purpose` (`utilities|capital_repair`): по нему список выделяет счета капремонта.
 - У платежа `assigned_by` (`registry|manual|rule`; у исходящих `manual|rule`), `rule_id`, `run_id`, `rule_name`: правила не перезаписывают `manual` и `registry`, ручная смена привязки/категории переводит платёж в `manual`. Входящий платёж из реестра также отдаёт для отображения `registry_number` и `registry_file_name` (только чтение).
 
 ### Реестры из почты (IMAP)

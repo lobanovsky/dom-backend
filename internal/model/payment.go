@@ -68,11 +68,12 @@ type IncomingPayment struct {
 	RuleID     *int64  `json:"rule_id" db:"rule_id"`
 	RunID      *int64  `json:"run_id" db:"run_id"`
 	// Только чтение: название правила, номер лицевого счёта и номер и имя файла реестра для отображения в списках.
-	RuleName              *string `json:"rule_name" db:"rule_name"`
-	PersonalAccountNumber *string `json:"personal_account_number" db:"personal_account_number"`
-	PremisesID            *int64  `json:"premises_id" db:"premises_id"` // помещение лицевого счёта: по нему в списке строится ссылка
-	RegistryNumber        *string `json:"registry_number" db:"registry_number"`
-	RegistryFileName      *string `json:"registry_file_name" db:"registry_file_name"` // имя файла реестра: в списках говорит больше, чем номер
+	RuleName               *string `json:"rule_name" db:"rule_name"`
+	PersonalAccountNumber  *string `json:"personal_account_number" db:"personal_account_number"`
+	PersonalAccountPurpose *string `json:"personal_account_purpose" db:"personal_account_purpose"` // utilities | capital_repair
+	PremisesID             *int64  `json:"premises_id" db:"premises_id"`                           // помещение лицевого счёта: по нему в списке строится ссылка
+	RegistryNumber         *string `json:"registry_number" db:"registry_number"`
+	RegistryFileName       *string `json:"registry_file_name" db:"registry_file_name"` // имя файла реестра: в списках говорит больше, чем номер
 	// Только чтение: если этот платёж из банка детализирован реестром (в назначении имя файла реестра) — сам реестр.
 	DetailRegistryID       *int64  `json:"detail_registry_id" db:"detail_registry_id"`
 	DetailRegistryFileName *string `json:"detail_registry_file_name" db:"detail_registry_file_name"`

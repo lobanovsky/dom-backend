@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,6 +152,28 @@ func TestMetersAndReadings(t *testing.T) {
 	}
 	if ml, _ := meters.List(ctx, model.MeterFilter{Scope: ptr("individual"), BuildingID: &b.ID}, 50, 0); len(ml) != 1 || ml[0].ID != elec.ID {
 		t.Errorf("individual scope: %+v", ml)
+	}
+
+	// Общедомовые: по ресурсу (холодная, горячая, электроэнергия), внутри — по названию, без названия в конце.
+	mkCommon := func(resource, serial string, name *string) int64 {
+		m, err := meters.Create(ctx, model.Meter{BuildingID: &b.ID, Resource: resource, Tariffs: 1, SerialNumber: serial, Name: name, Coefficient: 1, InstalledAt: date(2026, 1, 1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup(t, pool, "meters", m.ID)
+		return m.ID
+	}
+	park := mkCommon("electricity", "meter-test-c1", ptr("Паркинг"))
+	office := mkCommon("cold_water", "meter-test-c2", ptr("офисы"))
+	plain := mkCommon("cold_water", "meter-test-c3", nil)
+	hot := mkCommon("hot_water", "meter-test-c4", ptr("ИТП"))
+	order, err := meters.List(ctx, model.MeterFilter{Scope: ptr("common"), BuildingID: &b.ID}, 50, 0)
+	var got5 []int64
+	for _, m := range order {
+		got5 = append(got5, m.ID)
+	}
+	if want := []int64{water.ID, office, plain, hot, park}; err != nil || !slices.Equal(got5, want) {
+		t.Errorf("common order: got %v, want %v (err %v)", got5, want, err)
 	}
 
 	// Изменения счётчика, ломающие введённые показания, запрещены.

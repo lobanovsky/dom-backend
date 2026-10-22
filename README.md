@@ -58,7 +58,8 @@ erDiagram
 |---|---|
 | `organizations` | УК или ТСН/ТСЖ (`kind`: uk / tsn / tszh), ИНН, КПП, ОГРН |
 | `buildings` | Дом: `apartment_building`, `parking`, `common_premises`, `other`. Необязательное короткое название `name` — уникально среди действующих домов без учёта регистра (`buildings_name_uq`, migration `0028`); в связанных записях (счётчики, нормативы, назначения услуг, имущество владельца) приходит как `building_name` рядом с `building_address` |
-| `premises` | Объект недвижимости: `apartment`, `non_residential`, `commercial`, `parking_space`, `storage`. Уникален по (дом, вид, номер) |
+| `premises_kinds` | Справочник видов помещений (migration `0030`): `code` (латиница `^[a-z][a-z0-9_]{0,39}$`, неизменяем, уникален и среди удалённых), `name` (уникально без учёта регистра среди действующих), `position` (порядок в списках). Изначально: `apartment`, `non_residential`, `commercial`, `parking_space`, `storage`. Вид нельзя удалить, пока им пользуются действующие помещения или услуги (`cannot delete: has active premises` / `has active services`) |
+| `premises` | Объект недвижимости; `kind` — код действующего вида из `premises_kinds` (триггер БД, иначе 422 `cannot save: premises kind is unknown or deleted`; то же для `services.premises_kinds`). Уникален по (дом, вид, номер) |
 | `persons` | Физлица: фамилия, имя, отчество отдельными полями, дата рождения, списки телефонов (`phones`) и email (`emails`). Один человек может быть и собственником, и жителем |
 | `legal_entities` | Юрлица-собственники |
 | `ownerships` | Владение: помещение, владелец (физлицо **или** юрлицо), доля `share_num/share_den`, период, основание |
@@ -199,7 +200,7 @@ docker compose up -d --build
 - `GET /api/v1/users`, `POST /api/v1/users` `{"username","password","role"}`, `PUT /api/v1/users/{id}` `{"role","active","password"?}` (непустой `password` — сброс пароля, прежние сессии пользователя завершаются) — только `admin`. Пользователей не удаляют, а отключают (`active:false`). Отключить или понизить последнего действующего администратора нельзя (409 `cannot remove the last admin`). Ответ не содержит пароль и хеш, но содержит `last_login_at` и `last_seen_at`.
 - `GET /api/v1/users/logins?user_id=&limit=&offset=` — история входов (новые сверху), только `admin`. Пишутся и успешные, и неудачные попытки; записи не удаляются автоматически.
 
-Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`, `bank-accounts`, `payment-categories`, `incoming-payments`, `outgoing-payments` (последние четыре работают так же, `payment-registries` только читаются и загружаются, см. ниже).
+Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`, `premises-kinds`, `bank-accounts`, `payment-categories`, `incoming-payments`, `outgoing-payments` (последние четыре работают так же, `payment-registries` только читаются и загружаются, см. ниже).
 
 | Метод и путь | Действие |
 |---|---|
@@ -218,6 +219,7 @@ docker compose up -d --build
 - `organizations`: `kind`
 - `buildings`: `organization_id`, `kind`
 - `premises`: `building_id`, `kind`, `number`
+- `premises-kinds`: только `deleted=only`; сортировка по `position`
 - `persons`: `last_name`, `phone` (точное совпадение с одним из телефонов), `q` (подстрока в ФИО, любом телефоне или email, без учёта регистра; сортировка по фамилии)
 - `legal-entities`: `inn`, `q` (подстрока в названии или ИНН; сортировка по названию)
 - `ownerships`: `premises_id`, `person_id`, `legal_entity_id`

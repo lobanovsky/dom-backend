@@ -1,7 +1,5 @@
 package model
 
-var PremisesKinds = []string{"apartment", "non_residential", "commercial", "parking_space", "storage"}
-
 // Premises — объект недвижимости в доме. Лицевые счета и владение привязаны к нему.
 type Premises struct {
 	Meta
@@ -29,7 +27,7 @@ func (p Premises) Validate() error {
 	}
 	return firstErr(
 		positiveInt("building_id", intPtr(p.BuildingID)),
-		oneOf("kind", p.Kind, PremisesKinds),
+		kindCode("kind", p.Kind),
 		required("number", p.Number),
 		positive("total_area", p.TotalArea),
 		positive("living_area", p.LivingArea),

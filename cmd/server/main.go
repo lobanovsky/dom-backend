@@ -155,6 +155,7 @@ func run(log *slog.Logger) error {
 			Assignments:          store.NewAssignments(pool),
 			BankAccounts:         store.NewBankAccounts(pool),
 			PaymentCategories:    store.NewPaymentCategories(pool),
+			PremisesKinds:        store.NewPremisesKinds(pool),
 			IncomingPayments:     store.NewIncomingPayments(pool),
 			OutgoingPayments:     store.NewOutgoingPayments(pool),
 			PremisesOwnerships:   ownerships,

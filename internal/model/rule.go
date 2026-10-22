@@ -228,7 +228,7 @@ func (a RuleAction) validate(direction string) error {
 			return invalid("action.field", "must be one of: %s", strings.Join(textFieldsFor(direction), ", "))
 		}
 		if a.Type == ActionPremisesFromText {
-			if err := oneOf("action.premises_kind", a.PremisesKind, PremisesKinds); err != nil {
+			if err := kindCode("action.premises_kind", a.PremisesKind); err != nil {
 				return err
 			}
 			if a.Pattern == "" {

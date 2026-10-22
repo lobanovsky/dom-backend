@@ -158,6 +158,14 @@ func paymentCategoryFilter(w http.ResponseWriter, r *http.Request) (model.Paymen
 	return model.PaymentCategoryFilter{Deleted: p.Deleted, Direction: p.Text("direction")}, p, true
 }
 
+func premisesKindFilter(w http.ResponseWriter, r *http.Request) (model.PremisesKindFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{})
+	if !ok {
+		return model.PremisesKindFilter{}, p, false
+	}
+	return model.PremisesKindFilter{Deleted: p.Deleted}, p, true
+}
+
 func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRegistryFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"bank_account_id"}, Texts: []string{"q"}, Dates: []string{"date_from", "date_to"}, Bools: []string{"no_payment"}})
 	if !ok {

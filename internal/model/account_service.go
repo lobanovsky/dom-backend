@@ -60,7 +60,7 @@ type AccountServiceBulkRequest struct {
 func (r AccountServiceBulkRequest) Validate() error {
 	var kinds error
 	for _, k := range r.PremisesKinds {
-		if err := oneOf("premises_kinds", k, PremisesKinds); err != nil {
+		if err := kindCode("premises_kinds", k); err != nil {
 			kinds = err
 			break
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -154,6 +155,14 @@ var premisesLabels = map[string]string{
 	"apartment": "КВ.", "parking_space": "МАШИНОМЕСТО.", "storage": "КЛАДОВАЯ.", "non_residential": "НЕЖИЛОЕ.", "commercial": "КОММЕРЧЕСКОЕ.",
 }
 
+// premisesLabel — подпись вида в адресе; для видов из справочника без своей подписи — код заглавными.
+func premisesLabel(kind string) string {
+	if l, ok := premisesLabels[kind]; ok {
+		return l
+	}
+	return strings.ToUpper(kind) + "."
+}
+
 func (r exportRow) address() string {
 	a := ""
 	if r.Address != nil {
@@ -163,7 +172,7 @@ func (r exportRow) address() string {
 		if a != "" {
 			a += ", "
 		}
-		a += premisesLabels[*r.PremisesKind] + *r.PremisesNo
+		a += premisesLabel(*r.PremisesKind) + *r.PremisesNo
 	}
 	return a
 }

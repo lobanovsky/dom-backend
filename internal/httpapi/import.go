@@ -3,8 +3,6 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"slices"
-	"strings"
 
 	"dom-backend/internal/model"
 	"dom-backend/internal/xlsximport"
@@ -34,8 +32,8 @@ func (h importHandlers) importFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := r.FormValue("kind")
-	if !slices.Contains(model.PremisesKinds, kind) {
-		writeError(w, http.StatusUnprocessableEntity, "kind: must be one of: "+strings.Join(model.PremisesKinds, ", "))
+	if !model.ValidKindCode(kind) {
+		writeError(w, http.StatusUnprocessableEntity, "kind: must be a premises kind code")
 		return
 	}
 	file, _, err := r.FormFile("file")

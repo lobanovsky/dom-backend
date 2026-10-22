@@ -299,7 +299,7 @@ func TestServiceValidate(t *testing.T) {
 		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
 		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
 		"bad purpose":      mut(func(s *Service) { s.AccountPurpose = "rent" }),
-		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "garage"} }),
+		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "Bad Kind"} }),
 		"area norm in m2": mut(func(s *Service) {
 			s.CalcMethod, s.Unit, s.MeterResource, s.MeterTariff = "per_area_norm", "m2", nil, nil
 		}),

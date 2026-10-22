@@ -16,6 +16,12 @@ type Premises struct {
 	CadastralNumber *string  `json:"cadastral_number" db:"cadastral_number"`
 }
 
+// PremisesView — помещение со списком текущих собственников (только для списка).
+type PremisesView struct {
+	Premises
+	OwnerNames []string `json:"owner_names" db:"owner_names"`
+}
+
 func (p Premises) Validate() error {
 	var area error
 	if p.LivingArea != nil && p.TotalArea != nil && *p.LivingArea > *p.TotalArea {

@@ -8,7 +8,7 @@ import (
 )
 
 type PremisesStore interface {
-	List(ctx context.Context, f model.PremisesFilter, limit, offset int) ([]model.Premises, error)
+	List(ctx context.Context, f model.PremisesFilter, limit, offset int) ([]model.PremisesView, error)
 	Get(ctx context.Context, id int64) (model.Premises, error)
 	Create(ctx context.Context, in model.Premises) (model.Premises, error)
 	Update(ctx context.Context, id int64, in model.Premises) (model.Premises, error)

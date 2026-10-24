@@ -80,6 +80,9 @@ func TestTariffCatalog(t *testing.T) {
 	got, _ := tariffs.Get(ctx, tar.ID)
 	if got.ServicesCount != 2 || got.CurrentPrice == nil || *got.CurrentPrice != 6.1 || got.OrganizationName != "tariffs-test" {
 		t.Errorf("tariff: %+v", got)
+		if got.CurrentPriceFrom == nil || *got.CurrentPriceFrom != date(2026, 7, 1) || got.CurrentPriceTo != nil {
+			t.Errorf("current price period: from %v to %v", got.CurrentPriceFrom, got.CurrentPriceTo)
+		}
 	}
 	byTariff, err := services.List(ctx, model.ServiceFilter{TariffID: &tar.ID}, 10, 0)
 	if err != nil || len(byTariff) != 2 {

@@ -203,7 +203,9 @@ type Tariff struct {
 	Comment        *string `json:"comment" db:"comment"`
 
 	OrganizationName string   `json:"organization_name" db:"organization_name"`
-	CurrentPrice     *float64 `json:"current_price" db:"current_price"` // цена на сегодня; nil — на сегодня цены нет
+	CurrentPrice     *float64 `json:"current_price" db:"current_price"`           // цена на сегодня; nil — на сегодня цены нет
+	CurrentPriceFrom *Date    `json:"current_price_from" db:"current_price_from"` // период действия цены на сегодня; пусто, если цены нет
+	CurrentPriceTo   *Date    `json:"current_price_to" db:"current_price_to"`     // пусто — действует до сих пор
 	ServicesCount    int      `json:"services_count" db:"services_count"`
 }
 

@@ -9,11 +9,12 @@ import (
 )
 
 const tariffCatalogSelect = `SELECT t.id, t.organization_id, t.name, t.unit, t.comment, o.name AS organization_name,
-	(SELECT p.price FROM tariff_prices p WHERE p.tariff_id = t.id AND p.deleted_at IS NULL AND p.valid_from <= CURRENT_DATE
-	   AND (p.valid_to IS NULL OR p.valid_to >= CURRENT_DATE)) AS current_price,
+	cp.price AS current_price, cp.valid_from AS current_price_from, cp.valid_to AS current_price_to,
 	(SELECT count(*) FROM services s WHERE s.tariff_id = t.id AND s.deleted_at IS NULL)::int AS services_count,
 	t.created_at, t.updated_at, t.deleted_at
-	FROM tariffs t JOIN organizations o ON o.id = t.organization_id`
+	FROM tariffs t JOIN organizations o ON o.id = t.organization_id
+	LEFT JOIN LATERAL (SELECT p.price, p.valid_from, p.valid_to FROM tariff_prices p WHERE p.tariff_id = t.id AND p.deleted_at IS NULL
+	   AND p.valid_from <= CURRENT_DATE AND (p.valid_to IS NULL OR p.valid_to >= CURRENT_DATE)) cp ON true`
 
 // Tariffs — справочник тарифов; цены тарифа — в TariffPrices.
 type Tariffs struct{ pool *pgxpool.Pool }

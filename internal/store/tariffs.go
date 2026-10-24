@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dom-backend/internal/model"
@@ -66,67 +65,4 @@ func (s *Tariffs) Restore(ctx context.Context, id int64) (model.Tariff, error) {
 
 func (s *Tariffs) Delete(ctx context.Context, id int64) error {
 	return softDelete(ctx, s.pool, "tariffs", id)
-}
-
-// FromService выносит собственные цены услуги в новый тариф справочника в одной транзакции: цены копируются
-// в тариф, у услуги удаляются (мягко), услуга начинает ссылаться на тариф.
-func (s *Tariffs) FromService(ctx context.Context, req model.TariffFromServiceRequest) (model.Tariff, error) {
-	if err := req.Validate(); err != nil {
-		return model.Tariff{}, err
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	defer rollback(ctx, tx)
-	var (
-		orgID  int64
-		name   string
-		unit   string
-		method string
-		linked *int64
-	)
-	err = tx.QueryRow(ctx, `SELECT organization_id, name, unit, calc_method, tariff_id FROM services WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, req.ServiceID).
-		Scan(&orgID, &name, &unit, &method, &linked)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return model.Tariff{}, invalid("service_id: service not found")
-		}
-		return model.Tariff{}, mapErr(err)
-	}
-	switch {
-	case method == "sum_prices":
-		return model.Tariff{}, invalid("service_id: a sum-of-prices service has no tariffs of its own")
-	case linked != nil:
-		return model.Tariff{}, invalid("service_id: service already uses a catalog tariff")
-	}
-	var has bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM service_tariffs WHERE service_id = $1 AND deleted_at IS NULL)`, req.ServiceID).Scan(&has); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	if !has {
-		return model.Tariff{}, invalid("service_id: service has no tariffs of its own")
-	}
-	if req.Name != nil && *req.Name != "" {
-		name = *req.Name
-	}
-	var id int64
-	if err := tx.QueryRow(ctx, `INSERT INTO tariffs (organization_id, name, unit) VALUES ($1, $2, $3) RETURNING id`, orgID, name, unit).Scan(&id); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO tariff_prices (tariff_id, price, valid_from, valid_to, comment)
-		 SELECT $1, price, valid_from, valid_to, comment FROM service_tariffs WHERE service_id = $2 AND deleted_at IS NULL`, id, req.ServiceID); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE service_tariffs SET deleted_at = now(), updated_at = now() WHERE service_id = $1 AND deleted_at IS NULL`, req.ServiceID); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE services SET tariff_id = $2, updated_at = now() WHERE id = $1`, req.ServiceID, id); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return model.Tariff{}, mapErr(err)
-	}
-	return s.Get(ctx, id)
 }

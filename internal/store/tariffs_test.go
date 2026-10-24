@@ -122,24 +122,6 @@ func TestTariffCatalog(t *testing.T) {
 		t.Errorf("delete with prices: %v", err)
 	}
 
-	// Вынос собственных цен услуги в справочник.
-	moved, err := tariffs.FromService(ctx, model.TariffFromServiceRequest{ServiceID: plain.ID, Name: res("Свой тариф")})
-	if err != nil || moved.Name != "Свой тариф" || moved.ServicesCount != 1 || moved.CurrentPrice == nil || *moved.CurrentPrice != 4 {
-		t.Fatalf("from service: %+v %v", moved, err)
-	}
-	if left, _ := own.List(ctx, model.ServiceTariffFilter{ServiceID: &plain.ID}, 10, 0); len(left) != 0 {
-		t.Errorf("own tariffs must be removed: %+v", left)
-	}
-	if p, _ := services.Get(ctx, plain.ID); p.TariffID == nil || *p.TariffID != moved.ID || *p.CurrentPrice != 4 {
-		t.Errorf("service after move: %+v", p)
-	}
-	if _, err := tariffs.FromService(ctx, model.TariffFromServiceRequest{ServiceID: plain.ID}); err == nil || !strings.Contains(err.Error(), "already uses") {
-		t.Errorf("second move: %v", err)
-	}
-	if _, err := tariffs.FromService(ctx, model.TariffFromServiceRequest{ServiceID: 0}); err == nil {
-		t.Errorf("no service id")
-	}
-
 	// Тариф с услугами не удалить, организацию с тарифами — тоже; цену можно удалить и вернуть.
 	if err := prices.Delete(ctx, first.ID); err != nil {
 		t.Fatal(err)

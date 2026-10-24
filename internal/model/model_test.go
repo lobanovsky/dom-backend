@@ -282,7 +282,8 @@ func TestMeterReadingValidate(t *testing.T) {
 func TestServiceValidate(t *testing.T) {
 	str := func(v string) *string { return &v }
 	num := func(v int) *int { return &v }
-	base := Service{OrganizationID: 1, Kind: "utility", Name: "Электроэнергия Т1", Unit: "kwh", CalcMethod: "individual_meter", MeterResource: str("electricity"), MeterTariff: num(2), AccountPurpose: "utilities", Active: true}
+	tid := int64(7)
+	base := Service{OrganizationID: 1, Kind: "utility", Name: "Электроэнергия Т1", Unit: "kwh", CalcMethod: "individual_meter", MeterResource: str("electricity"), MeterTariff: num(2), AccountPurpose: "utilities", Active: true, TariffID: &tid}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("valid service: %v", err)
 	}
@@ -299,6 +300,7 @@ func TestServiceValidate(t *testing.T) {
 		"water tariff 2":   mut(func(s *Service) { s.MeterResource = str("cold_water") }),
 		"per area in kwh":  mut(func(s *Service) { s.CalcMethod, s.MeterResource, s.MeterTariff = "per_area", nil, nil }),
 		"bad purpose":      mut(func(s *Service) { s.AccountPurpose = "rent" }),
+		"no tariff":        mut(func(s *Service) { s.TariffID = nil }),
 		"bad kind in list": mut(func(s *Service) { s.PremisesKinds = []string{"apartment", "Bad Kind"} }),
 		"area norm in m2": mut(func(s *Service) {
 			s.CalcMethod, s.Unit, s.MeterResource, s.MeterTariff = "per_area_norm", "m2", nil, nil
@@ -315,22 +317,22 @@ func TestServiceValidate(t *testing.T) {
 	if err := ok.Validate(); err != nil || ok.ReceiptName != nil {
 		t.Errorf("kinds list: %v, receipt = %v", err, ok.ReceiptName)
 	}
-	def := Service{OrganizationID: 1, Kind: "additional", Name: "Ключи", Unit: "piece", CalcMethod: "manual"}
+	def := Service{OrganizationID: 1, Kind: "additional", Name: "Ключи", Unit: "piece", CalcMethod: "manual", TariffID: &tid}
 	def.SetDefaults()
 	if def.AccountPurpose != "utilities" || def.PremisesKinds == nil || def.Validate() != nil {
 		t.Errorf("defaults: %+v", def)
 	}
-	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum_volumes", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water")}
+	sum := Service{OrganizationID: 1, Kind: "utility", Name: "Водоотведение", Unit: "m3", CalcMethod: "sum_volumes", ComponentIDs: []int64{1, 2}, MeterResource: str("hot_water"), TariffID: &tid}
 	sum.SetDefaults()
 	if sum.MeterResource != nil || sum.Validate() != nil {
 		t.Errorf("sum service: %+v, %v", sum, sum.Validate())
 	}
-	fixed := Service{OrganizationID: 1, Kind: "additional", Name: "Консьерж", Unit: "month", CalcMethod: "fixed", ComponentIDs: []int64{5}}
+	fixed := Service{OrganizationID: 1, Kind: "additional", Name: "Консьерж", Unit: "month", CalcMethod: "fixed", ComponentIDs: []int64{5}, TariffID: &tid}
 	fixed.SetDefaults()
 	if len(fixed.ComponentIDs) != 0 || fixed.ComponentIDs == nil || fixed.Validate() != nil {
 		t.Errorf("fixed service: %+v", fixed)
 	}
-	water := Service{OrganizationID: 1, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: str("cold_water")}
+	water := Service{OrganizationID: 1, Kind: "utility", Name: "ХВС", Unit: "m3", CalcMethod: "individual_meter", MeterResource: str("cold_water"), TariffID: &tid}
 	water.SetDefaults()
 	if water.MeterTariff == nil || *water.MeterTariff != 1 || water.Validate() != nil {
 		t.Errorf("water defaults: %+v", water)
@@ -413,9 +415,6 @@ func TestTariffValidate(t *testing.T) {
 		if p.Validate() == nil {
 			t.Errorf("%s: want error", name)
 		}
-	}
-	if (TariffFromServiceRequest{}).Validate() == nil {
-		t.Errorf("request without service")
 	}
 	id := int64(3)
 	linked := Service{OrganizationID: 1, Kind: "utility", Name: "Сумма", Unit: "m3", CalcMethod: "sum_prices", ComponentIDs: []int64{1}, AccountPurpose: "utilities", TariffID: &id}

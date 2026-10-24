@@ -17,7 +17,7 @@ func IsSum(method string) bool { return method == "sum_volumes" || method == "su
 // Service — услуга организации: коммунальная, эксплуатационная или дополнительная.
 // CalcMethod описывает, как считается объём: по индивидуальному счётчику (MeterResource + MeterTariff), по общедомовому
 // счётчику с делением по площади, фиксированно за помещение, за м² или по площади с нормативом дома (per_area_norm), суммой других услуг (ComponentIDs) или вводом вручную.
-// Цена задаётся тарифами (ServiceTariff); у составной услуги (sum) тарифов нет, цена — сумма цен компонентов.
+// Цена берётся из тарифа справочника (TariffID, обязателен); у услуги «сумма цен» тарифа нет, цена — сумма цен компонентов.
 // Текущая цена и название организации вычисляются сервером и при записи игнорируются.
 type Service struct {
 	Meta
@@ -99,6 +99,8 @@ func (s Service) Validate() error {
 		tariff = invalid("tariff_id", "must be positive")
 	case s.TariffID != nil && s.CalcMethod == "sum_prices":
 		tariff = invalid("tariff_id", "a sum-of-prices service has no tariff of its own")
+	case s.TariffID == nil && s.CalcMethod != "sum_prices":
+		tariff = invalid("tariff_id", "is required for this calculation method") // цены хранятся только в справочнике тарифов
 	}
 	var components error
 	if IsSum(s.CalcMethod) && len(s.ComponentIDs) == 0 {
@@ -123,7 +125,8 @@ func (s Service) Validate() error {
 	)
 }
 
-// ServiceTariff — цена единицы услуги в период [ValidFrom, ValidTo]; пустой ValidTo — действует до сих пор.
+// ServiceTariff — архив прежних собственных цен услуги (до миграции 0031; теперь цены ведутся в справочнике тарифов, через API только чтение).
+// Цена единицы услуги в период [ValidFrom, ValidTo]; пустой ValidTo — действует до сих пор.
 // Периоды одной услуги не пересекаются (это проверяет БД).
 type ServiceTariff struct {
 	Meta
@@ -240,15 +243,4 @@ func (p TariffPrice) Validate() error {
 		requiredDate("valid_from", p.ValidFrom),
 		period,
 	)
-}
-
-// TariffFromServiceRequest — «вынести» собственные цены услуги в новый тариф справочника: цены копируются в тариф,
-// у услуги удаляются, а сама услуга начинает ссылаться на тариф. Name пусто — название услуги.
-type TariffFromServiceRequest struct {
-	ServiceID int64   `json:"service_id"`
-	Name      *string `json:"name"`
-}
-
-func (r TariffFromServiceRequest) Validate() error {
-	return positiveInt("service_id", intPtr(r.ServiceID))
 }

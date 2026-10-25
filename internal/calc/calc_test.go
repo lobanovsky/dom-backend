@@ -328,3 +328,36 @@ func TestTotalIsSumOfRoundedLines(t *testing.T) {
 		t.Errorf("total: %v", res.Total)
 	}
 }
+
+func TestRetiredMeterWithoutReadingDoesNotBlock(t *testing.T) {
+	sep := d(2026, 9, 1)
+	svc := &Service{ID: 1, Name: "ОДН", Method: "common_meter", Unit: "kwh", MeterResource: "electricity", MeterTariff: 1, PriceFirst: r("6"), ShareBase: r("2000")}
+	old := meter(8, "electricity", 1, rd(sep, "5"), nil)
+	removed := d(2026, 10, 13)
+	old.RemovedAt = &removed
+	// Старый счётчик снят в октябре без показаний, новый работает: расчёт идёт по новому, старый помечен.
+	svc.CommonMeters = []Meter{old, meter(9, "electricity", 1, rd(sep, "1000"), rd(oct, "2000"))}
+	l := only(t, Compute(input("50", svc)))
+	if l.Status != StatusOK || f(l.Quantity) != 25 || len(l.Meters) != 2 || l.Meters[0].Status != StatusRetired {
+		t.Errorf("retired skipped: %+v", l)
+	}
+	// Снят в этом месяце, но показание передано — учитывается как обычно.
+	old.Current = rd(oct, "15")
+	svc.CommonMeters = []Meter{old}
+	if l := only(t, Compute(input("50", svc))); l.Status != StatusOK || f(l.CommonTotal) != 10 {
+		t.Errorf("retired with reading: %+v", l)
+	}
+	// Все счётчики сняты без показаний — считать не из чего.
+	old.Current = nil
+	svc.CommonMeters = []Meter{old}
+	if l := only(t, Compute(input("50", svc))); l.Status != StatusNoReading {
+		t.Errorf("all retired: %+v", l)
+	}
+	// Снят позже месяца — в месяце работал, показание обязательно.
+	later := d(2026, 11, 5)
+	old.RemovedAt = &later
+	svc.CommonMeters = []Meter{old}
+	if l := only(t, Compute(input("50", svc))); l.Status != StatusNoReading || l.Meters[0].Status != StatusNoReading {
+		t.Errorf("retired later: %+v", l)
+	}
+}

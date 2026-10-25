@@ -22,6 +22,8 @@ const (
 	StatusNegative        = "negative"         // показание меньше предыдущего
 	StatusNoQuantity      = "no_quantity"      // не задано количество (ручная услуга)
 	StatusComponentFailed = "component_failed" // не посчиталась одна из услуг состава
+	// StatusRetired — только у счётчика в строке расчёта: снят с учёта в этом месяце и показаний за месяц нет; расчёт не блокирует.
+	StatusRetired = "retired"
 )
 
 // Предупреждения: расчёт выполнен, но на это стоит посмотреть.
@@ -373,6 +375,12 @@ func (c *calculator) consumption(meters []Meter, s *Service) (*big.Rat, string, 
 		}
 		use := MeterUse{MeterID: m.ID, Serial: m.Serial, Name: m.Name, Status: StatusOK}
 		idx := tariff - 1
+		// Снятый в этом месяце счётчик без показаний за месяц не мешает расчёту: показание при снятии никто не обязан передавать.
+		if m.RemovedAt != nil && !m.RemovedAt.After(c.last) && (m.Current == nil || m.Current.T[idx] == nil) {
+			use.Status = StatusRetired
+			uses = append(uses, use)
+			continue
+		}
 		var cur, prev *big.Rat
 		switch {
 		case m.Current == nil || m.Current.T[idx] == nil:
@@ -411,9 +419,17 @@ func (c *calculator) consumption(meters []Meter, s *Service) (*big.Rat, string, 
 		}
 		uses = append(uses, use)
 	}
+	counted := 0
+	for _, u := range uses {
+		if u.Status != StatusRetired {
+			counted++
+		}
+	}
 	switch {
 	case len(uses) == 0:
 		return nil, StatusNoMeters, uses
+	case counted == 0: // все счётчики сняты без показаний: считать не из чего
+		return nil, StatusNoReading, uses
 	case problem != "":
 		return nil, problem, uses
 	}

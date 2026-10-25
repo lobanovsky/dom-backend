@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	ServiceKinds       = []string{"utility", "maintenance", "additional"}
+	ServiceKinds       = []string{"utility", "maintenance", "additional", "capital_repair"}
 	ServiceUnits       = []string{"kwh", "m3", "gcal", "m2", "piece", "month"}
 	ServiceCalcMethods = []string{"fixed", "per_area", "per_area_norm", "individual_meter", "common_meter", "sum_volumes", "sum_prices", "manual"}
 )

@@ -31,7 +31,7 @@ func (s *Services) List(ctx context.Context, f model.ServiceFilter, limit, offse
 		   AND ($6::text IS NULL OR s.account_purpose = $6)
 		   AND ($7::bigint IS NULL OR s.tariff_id = $7)
 		   AND (s.deleted_at IS NOT NULL) = $8
-		 ORDER BY CASE s.kind WHEN 'additional' THEN 1 WHEN 'utility' THEN 2 WHEN 'maintenance' THEN 3 ELSE 4 END, s.position, s.name, s.id LIMIT $9 OFFSET $10`,
+		 ORDER BY CASE s.kind WHEN 'additional' THEN 1 WHEN 'utility' THEN 2 WHEN 'maintenance' THEN 3 WHEN 'capital_repair' THEN 4 ELSE 5 END, s.position, s.name, s.id LIMIT $9 OFFSET $10`,
 		f.OrganizationID, f.Kind, f.CalcMethod, f.Active, likePattern(f.Q), f.AccountPurpose, f.TariffID, f.Deleted, limit, offset))
 }
 

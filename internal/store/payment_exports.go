@@ -20,6 +20,12 @@ const maxExportRows = 20000
 // exportLockKey — пространство ключей advisory-блокировки нумерации реестров (второй ключ — банковский счёт).
 const exportLockKey = 7316
 
+// nextRegistryNumberSQL — следующий номер реестра банковского счёта: общий для выгрузок и корректировочных реестров,
+// чтобы имена файлов (<ИНН>_<счёт>_<номер>.txt) не повторялись. Вызывать под advisory-блокировкой exportLockKey.
+const nextRegistryNumberSQL = `SELECT GREATEST(
+	COALESCE((SELECT max(number) FROM payment_exports WHERE bank_account_id = $1), 0),
+	COALESCE((SELECT max(number) FROM adjustment_registries WHERE bank_account_id = $1), 0)) + 1`
+
 var errTooMany = invalid(fmt.Sprintf("too many payments: at most %d per registry", maxExportRows))
 
 const exportCols = `id, bank_account_id, number, file_name, payments_count, total_amount, created_at, updated_at, deleted_at`
@@ -217,7 +223,7 @@ func (s *PaymentExports) Create(ctx context.Context, f model.IncomingPaymentFilt
 		return model.PaymentExport{}, mapErr(err)
 	}
 	var next int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(number), 0) + 1 FROM payment_exports WHERE bank_account_id = $1`, bankID).Scan(&next); err != nil {
+	if err := tx.QueryRow(ctx, nextRegistryNumberSQL, bankID).Scan(&next); err != nil {
 		return model.PaymentExport{}, mapErr(err)
 	}
 

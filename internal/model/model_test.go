@@ -440,3 +440,25 @@ func TestReadingPeriodDefaults(t *testing.T) {
 		t.Errorf("meter ids of a non common-meter service: %v", s.MeterIDs)
 	}
 }
+
+func TestAdjustmentRegistryRequestValidate(t *testing.T) {
+	ok := AdjustmentRegistryRequest{BankAccountID: 1, PersonalAccountID: 2, Amount: 100.5, PayerName: " Корректировка "}
+	if err := ok.Validate(); err != nil || ok.PayerName != "Корректировка" {
+		t.Errorf("valid: %v, payer %q", err, ok.PayerName)
+	}
+	for name, mut := range map[string]func(*AdjustmentRegistryRequest){
+		"bank":     func(r *AdjustmentRegistryRequest) { r.BankAccountID = 0 },
+		"account":  func(r *AdjustmentRegistryRequest) { r.PersonalAccountID = 0 },
+		"zero":     func(r *AdjustmentRegistryRequest) { r.Amount = 0 },
+		"negative": func(r *AdjustmentRegistryRequest) { r.Amount = -5 },
+		"huge":     func(r *AdjustmentRegistryRequest) { r.Amount = MaxAdjustmentAmount + 1 },
+		"kopecks":  func(r *AdjustmentRegistryRequest) { r.Amount = 10.123 },
+		"payer":    func(r *AdjustmentRegistryRequest) { r.PayerName = "  " },
+	} {
+		r := ok
+		mut(&r)
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}

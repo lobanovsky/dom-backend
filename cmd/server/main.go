@@ -141,6 +141,7 @@ func run(log *slog.Logger) error {
 			Properties:           store.NewProperties(pool),
 			PaymentRegistries:    store.NewPaymentRegistries(pool),
 			PaymentExports:       store.NewPaymentExports(pool),
+			AdjustmentRegistries: store.NewAdjustmentRegistries(pool),
 			Counterparties:       store.NewCounterparties(pool),
 			BankStatements:       bankStatements,
 			Sber:                 sberStore,

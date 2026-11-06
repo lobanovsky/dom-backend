@@ -11,15 +11,16 @@ type Deps struct {
 	Auth  *auth.Auth
 	Users UserStore
 
-	Organizations OrganizationStore
-	Buildings     BuildingStore
-	Premises      PremisesStore
-	Persons       PersonStore
-	LegalEntities LegalEntityStore
-	Ownerships    OwnershipStore
-	Residencies   ResidencyStore
-	Accounts      AccountStore
-	Holders       AccountHolderStore
+	Organizations  OrganizationStore
+	Buildings      BuildingStore
+	OwnersRegistry OwnersRegistryStore
+	Premises       PremisesStore
+	Persons        PersonStore
+	LegalEntities  LegalEntityStore
+	Ownerships     OwnershipStore
+	Residencies    ResidencyStore
+	Accounts       AccountStore
+	Holders        AccountHolderStore
 
 	Importer             ImportStore
 	PaymentRegistries    PaymentRegistryStore
@@ -75,6 +76,7 @@ func NewRouter(d Deps) http.Handler {
 	userHandlers{d.Users, a}.register(api)
 	organizationHandlers{d.Organizations}.register(api)
 	buildingHandlers{d.Buildings}.register(api)
+	ownersRegistryHandlers{d.OwnersRegistry}.register(api)
 	premisesHandlers{d.Premises}.register(api)
 	premisesNestedHandlers{d.PremisesOwnerships, d.PremisesAccounts}.register(api)
 	importHandlers{d.Importer}.register(api)

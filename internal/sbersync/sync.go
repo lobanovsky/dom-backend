@@ -58,6 +58,8 @@ type Syncer struct {
 	Journal    Journal
 	Tokens     Tokens
 	Log        *slog.Logger
+	// AfterImport вызывается после запуска, загрузившего новые платежи (например, автоматическое определение счетов и категорий).
+	AfterImport func(ctx context.Context)
 }
 
 // run — начатый запуск: блокировка взята, запись в журнале создана. Освобождается в exec.
@@ -144,6 +146,9 @@ func (r *run) exec(ctx context.Context) (Result, error) {
 	_ = s.Journal.FinishRun(context.WithoutCancel(ctx), r.id, res.Accounts, res.Incoming, res.Outgoing, res.Skipped, strings.Join(res.Errors, "; "))
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return res, ctx.Err()
+	}
+	if res.Incoming+res.Outgoing > 0 && s.AfterImport != nil {
+		s.AfterImport(ctx)
 	}
 	return res, nil
 }

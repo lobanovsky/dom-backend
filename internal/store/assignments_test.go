@@ -175,6 +175,28 @@ func TestAssignmentsLifecycle(t *testing.T) {
 		t.Errorf("second apply: %+v, err = %v", again, err)
 	}
 
+	// запуски различаются по источнику: кнопка — manual, автоматическое определение после загрузки платежей — auto
+	pNew := mkPay("Новый Плательщик", "оплата asg-u7 за февраль", nil)
+	auto, err := asg.apply(ctx, req, model.AssignTriggerAuto)
+	if err != nil || auto.RunID == 0 || auto.New != 1 {
+		t.Fatalf("auto apply: %+v, err = %v", auto, err)
+	}
+	check(pNew.ID, &accParking.ID, nil, "rule", auto.RunID)
+	recentRuns, err := asg.Runs(ctx, "incoming", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggers := map[int64]string{}
+	for _, r := range recentRuns {
+		triggers[r.ID] = r.Trigger
+	}
+	if triggers[auto.RunID] != model.AssignTriggerAuto || triggers[run1] != model.AssignTriggerManual {
+		t.Errorf("run triggers: %v (auto run %d, manual run %d)", triggers, auto.RunID, run1)
+	}
+	if err := pays.Delete(ctx, pNew.ID); err != nil { // чтобы не влиять на проверки ниже
+		t.Fatal(err)
+	}
+
 	// правило отключили: пересчёт снимает привязку «аренды» (cleared), остальные без изменений
 	disabled := ruleCat
 	disabled.Enabled = false

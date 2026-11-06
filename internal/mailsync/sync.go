@@ -67,7 +67,9 @@ type Syncer struct {
 	Folder    string // имя папки: часть ключа обработанных писем
 	SinceDays int
 	Log       *slog.Logger
-	now       func() time.Time
+	// AfterImport вызывается после запуска, загрузившего новые платежи (например, автоматическое определение счетов и категорий).
+	AfterImport func(ctx context.Context)
+	now         func() time.Time
 }
 
 func (s *Syncer) clock() time.Time {
@@ -167,6 +169,9 @@ func (r *run) exec(ctx context.Context) model.MailRun {
 	s.Log.Info("mail sync", "run", r.id, "trigger", r.trigger, "messages", res.Messages, "files", res.Files,
 		"imported", res.Imported, "payments", res.Payments, "duplicates", res.Duplicates, "failed", res.Failed, "errors", len(errs))
 	_ = s.Journal.FinishRun(context.WithoutCancel(ctx), r.id, res)
+	if res.Payments > 0 && s.AfterImport != nil && ctx.Err() == nil {
+		s.AfterImport(ctx)
+	}
 	return res
 }
 

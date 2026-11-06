@@ -103,9 +103,14 @@ func TestSyncIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	afterImport := 0
+	s.AfterImport = func(context.Context) { afterImport++ }
 	res, err := s.Sync(ctx, "manual", from, to)
 	if err != nil || len(res.Errors) != 0 {
 		t.Fatalf("first sync: %+v, %v", res, err)
+	}
+	if afterImport != 1 {
+		t.Fatalf("AfterImport after the first sync = %d, want 1", afterImport)
 	}
 	// в базе могут быть и другие счета Сбера; наш вклад проверяем по платежам счёта
 	var in, out int
@@ -123,6 +128,9 @@ func TestSyncIsIdempotent(t *testing.T) {
 	res, err = s.Sync(ctx, "manual", from.AddDate(0, 0, -1), to)
 	if err != nil || res.Incoming != 0 || res.Outgoing != 0 || res.Skipped < 2 {
 		t.Fatalf("wider period: %+v, %v", res, err)
+	}
+	if afterImport != 1 {
+		t.Errorf("AfterImport must not run when nothing new was imported, calls = %d", afterImport)
 	}
 	pool.QueryRow(ctx, `SELECT count(*) FROM incoming_payments WHERE bank_account_id = $1`, ba.ID).Scan(&in)
 	if in != 1 {

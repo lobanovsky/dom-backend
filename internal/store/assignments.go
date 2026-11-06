@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,9 +23,12 @@ const (
 )
 
 // Assignments определяет лицевые счета входящих платежей по правилам: предпросмотр, применение, история, откат.
-type Assignments struct{ pool *pgxpool.Pool }
+type Assignments struct {
+	pool *pgxpool.Pool
+	auto sync.Mutex // автоматические запуски (после почты и банка) идут по одному
+}
 
-func NewAssignments(pool *pgxpool.Pool) *Assignments { return &Assignments{pool} }
+func NewAssignments(pool *pgxpool.Pool) *Assignments { return &Assignments{pool: pool} }
 
 // candidate — платёж, к которому применяются правила, и его текущее состояние.
 type candidate struct {
@@ -450,6 +454,27 @@ func truncate(s string, n int) string {
 // Apply применяет правила одной транзакцией и записывает запуск с прежним состоянием платежей (для отката).
 // Платежи с привязкой «вручную» или «из реестра» не затрагиваются. Если менять нечего, запуск не создаётся.
 func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model.AssignResult, error) {
+	return s.apply(ctx, req, model.AssignTriggerManual)
+}
+
+// ApplyAuto — автоматическое определение после загрузки платежей (почта, банк): для входящих лицевые счета и категории,
+// для исходящих категории; только платежи без привязки, всё принимается без предпросмотра. Каждый запуск пишется в историю
+// с отметкой «auto», его можно откатить. Запуски идут по одному.
+func (s *Assignments) ApplyAuto(ctx context.Context) (map[string]model.AssignResult, error) {
+	s.auto.Lock()
+	defer s.auto.Unlock()
+	out := map[string]model.AssignResult{}
+	for _, direction := range []string{model.DirectionIncoming, model.DirectionOutgoing} {
+		res, err := s.apply(ctx, model.AssignRequest{Direction: direction, Mode: model.AssignUnassigned}, model.AssignTriggerAuto)
+		if err != nil {
+			return out, fmt.Errorf("%s: %w", direction, err)
+		}
+		out[direction] = res
+	}
+	return out, nil
+}
+
+func (s *Assignments) apply(ctx context.Context, req model.AssignRequest, trigger string) (model.AssignResult, error) {
 	if err := prepare(&req); err != nil {
 		return model.AssignResult{}, err
 	}
@@ -485,9 +510,9 @@ func (s *Assignments) Apply(ctx context.Context, req model.AssignRequest) (model
 
 	filters, _ := json.Marshal(req.Scope)
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO assignment_runs (mode, filters, candidates, assigned_count, changed_count, cleared_count, direction)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-		req.Mode, string(filters), res.Candidates, res.New+res.Changed, res.Changed, res.Cleared, req.Direction).Scan(&res.RunID); err != nil {
+		`INSERT INTO assignment_runs (mode, filters, candidates, assigned_count, changed_count, cleared_count, direction, trigger)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+		req.Mode, string(filters), res.Candidates, res.New+res.Changed, res.Changed, res.Cleared, req.Direction, trigger).Scan(&res.RunID); err != nil {
 		return model.AssignResult{}, mapErr(err)
 	}
 	for i, cand := range c.cands {
@@ -601,7 +626,7 @@ func (s *Assignments) Rollback(ctx context.Context, runID int64) (model.Rollback
 // direction: incoming | outgoing; пусто — все.
 func (s *Assignments) Runs(ctx context.Context, direction string, limit, offset int) ([]model.AssignRun, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, direction, mode, filters, candidates, assigned_count, changed_count, cleared_count, created_at, rolled_back_at, rolled_back_kept
+		`SELECT id, direction, mode, trigger, filters, candidates, assigned_count, changed_count, cleared_count, created_at, rolled_back_at, rolled_back_kept
 		 FROM assignment_runs WHERE ($3 = '' OR direction = $3) ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset, direction)
 	if err != nil {
 		return nil, mapErr(err)
@@ -611,7 +636,7 @@ func (s *Assignments) Runs(ctx context.Context, direction string, limit, offset 
 	for rows.Next() {
 		var r model.AssignRun
 		var filters []byte
-		if err := rows.Scan(&r.ID, &r.Direction, &r.Mode, &filters, &r.Candidates, &r.AssignedCount, &r.ChangedCount, &r.ClearedCount, &r.CreatedAt, &r.RolledBackAt, &r.RolledBackKept); err != nil {
+		if err := rows.Scan(&r.ID, &r.Direction, &r.Mode, &r.Trigger, &filters, &r.Candidates, &r.AssignedCount, &r.ChangedCount, &r.ClearedCount, &r.CreatedAt, &r.RolledBackAt, &r.RolledBackKept); err != nil {
 			return nil, mapErr(err)
 		}
 		if err := json.Unmarshal(filters, &r.Scope); err != nil {

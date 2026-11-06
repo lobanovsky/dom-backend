@@ -207,3 +207,26 @@ func TestSyncBusy(t *testing.T) {
 		t.Errorf("Start при занятой блокировке: %v", err)
 	}
 }
+
+// После запуска, загрузившего платежи, вызывается AfterImport (автоматическое определение счетов и категорий);
+// запуск без новых платежей его не вызывает.
+func TestSyncCallsAfterImportOnlyWithNewPayments(t *testing.T) {
+	sess := &fakeSession{messages: map[uint32]mailfetch.Message{1: msg("known_1.txt"), 2: msg("dup_2.txt")}}
+	j := &fakeJournal{}
+	s, _ := newSyncer(sess, j)
+	calls := 0
+	s.AfterImport = func(context.Context) { calls++ }
+
+	if res, err := s.Sync(context.Background(), "schedule"); err != nil || res.Payments == 0 {
+		t.Fatalf("first run: %+v, %v", res, err)
+	}
+	if calls != 1 {
+		t.Fatalf("AfterImport calls after a run with payments = %d, want 1", calls)
+	}
+	if res, err := s.Sync(context.Background(), "schedule"); err != nil || res.Payments != 0 {
+		t.Fatalf("second run: %+v, %v", res, err)
+	}
+	if calls != 1 {
+		t.Errorf("AfterImport must not run without new payments, calls = %d", calls)
+	}
+}

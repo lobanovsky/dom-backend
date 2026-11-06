@@ -8,6 +8,12 @@ const (
 	AssignRecompute  = "recompute"  // ещё и пересчитать то, что раньше определили правила
 )
 
+// Кто запустил определение: человек (кнопка) или сервер после загрузки платежей.
+const (
+	AssignTriggerManual = "manual"
+	AssignTriggerAuto   = "auto"
+)
+
 // AssignRequest — запрос на предпросмотр или применение правил.
 type AssignRequest struct {
 	Direction string          `json:"direction"` // incoming (по умолчанию) | outgoing
@@ -73,6 +79,7 @@ type AssignRun struct {
 	ID             int64           `json:"id"`
 	Direction      string          `json:"direction"`
 	Mode           string          `json:"mode"`
+	Trigger        string          `json:"trigger"` // manual | auto
 	Scope          AssignmentScope `json:"scope"`
 	Candidates     int             `json:"candidates"`
 	AssignedCount  int             `json:"assigned_count"`

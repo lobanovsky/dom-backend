@@ -72,6 +72,19 @@ func run(log *slog.Logger) error {
 	tariffs := store.NewTariffs(pool)
 	paymentRules := store.NewPaymentRules(pool)
 
+	// После каждой загрузки платежей (почта, банк) сразу определяем лицевые счета и категории по правилам.
+	assignments := store.NewAssignments(pool)
+	autoAssign := func(ctx context.Context) {
+		res, err := assignments.ApplyAuto(context.WithoutCancel(ctx))
+		if err != nil {
+			log.Error("auto assign failed", "err", err)
+			return
+		}
+		for direction, r := range res {
+			log.Info("auto assign", "direction", direction, "run", r.RunID, "candidates", r.Candidates, "new", r.New, "changed", r.Changed, "unresolved", r.Unresolved)
+		}
+	}
+
 	sberStore := store.NewSber(pool)
 	if err := sberStore.AbortUnfinished(ctx); err != nil {
 		return err
@@ -84,6 +97,7 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		sc.AfterImport = autoAssign
 		syncer = sc
 		sberInfo.Configured, sberInfo.CertExpires, sberInfo.SyncAt, sberInfo.SyncTZ = true, &certExpires, cfg.Sber.SyncAt, cfg.Sber.SyncLocation.String()
 		go sc.Run(ctx, cfg.Sber.SyncAt, cfg.Sber.SyncLocation, cfg.Sber.SyncDays)
@@ -102,6 +116,7 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		ms.AfterImport = autoAssign
 		mailSyncer = ms
 		mailInfo.Configured, mailInfo.User, mailInfo.Folder, mailInfo.SinceDays = true, cfg.Mail.User, cfg.Mail.Folder, cfg.Mail.SinceDays
 		if cfg.Mail.SyncEvery > 0 {
@@ -153,7 +168,7 @@ func run(log *slog.Logger) error {
 			MailInfo:             mailInfo,
 			PaymentRules:         paymentRules,
 			RuleOrder:            paymentRules,
-			Assignments:          store.NewAssignments(pool),
+			Assignments:          assignments,
 			BankAccounts:         store.NewBankAccounts(pool),
 			PaymentCategories:    store.NewPaymentCategories(pool),
 			PremisesKinds:        store.NewPremisesKinds(pool),

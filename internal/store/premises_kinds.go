@@ -8,7 +8,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-const premisesKindCols = `id, code, name, position, created_at, updated_at, deleted_at`
+const premisesKindCols = `id, code, name, position, no_residents, single_owner, created_at, updated_at, deleted_at`
 
 type PremisesKinds struct{ pool *pgxpool.Pool }
 
@@ -26,7 +26,8 @@ func (s *PremisesKinds) Get(ctx context.Context, id int64) (model.PremisesKind, 
 
 func (s *PremisesKinds) Create(ctx context.Context, in model.PremisesKind) (model.PremisesKind, error) {
 	return one[model.PremisesKind](s.pool.Query(ctx,
-		`INSERT INTO premises_kinds (code, name, position) VALUES ($1, $2, $3) RETURNING `+premisesKindCols, in.Code, in.Name, in.Position))
+		`INSERT INTO premises_kinds (code, name, position, no_residents, single_owner) VALUES ($1, $2, $3, $4, $5) RETURNING `+premisesKindCols,
+		in.Code, in.Name, in.Position, in.NoResidents, in.SingleOwner))
 }
 
 // Update меняет название и порядок; код — идентификатор, на который ссылаются помещения, он неизменен.
@@ -39,8 +40,8 @@ func (s *PremisesKinds) Update(ctx context.Context, id int64, in model.PremisesK
 		return model.PremisesKind{}, invalid("code: cannot be changed")
 	}
 	return one[model.PremisesKind](s.pool.Query(ctx,
-		`UPDATE premises_kinds SET name = $2, position = $3, updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+premisesKindCols, id, in.Name, in.Position))
+		`UPDATE premises_kinds SET name = $2, position = $3, no_residents = $4, single_owner = $5, updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL RETURNING `+premisesKindCols, id, in.Name, in.Position, in.NoResidents, in.SingleOwner))
 }
 
 func (s *PremisesKinds) Restore(ctx context.Context, id int64) (model.PremisesKind, error) {

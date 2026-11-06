@@ -9,6 +9,10 @@ type PremisesKind struct {
 	Code     string `json:"code" db:"code"`
 	Name     string `json:"name" db:"name"`
 	Position int    `json:"position" db:"position"`
+	// Правила вида: NoResidents — в таких помещениях не бывает проживающих, SingleOwner — у них один собственник
+	// (периоды действующих владений не пересекаются). Ноль = прежнее поведение; правила проверяют триггеры БД.
+	NoResidents bool `json:"no_residents" db:"no_residents"`
+	SingleOwner bool `json:"single_owner" db:"single_owner"`
 }
 
 var kindCodeRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)

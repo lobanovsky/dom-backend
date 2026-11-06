@@ -1,8 +1,7 @@
 package model
 
-var ResidencyRelations = []string{"spouse", "child", "parent", "relative", "tenant", "other"}
-
-// Residency — проживание человека в помещении. Родство с собственником необязательно.
+// Residency — проживание человека в помещении. Родство с собственником необязательно;
+// relation — код записи справочника kinships (существование проверяет триггер БД).
 type Residency struct {
 	Meta
 	PersonID       int64  `json:"person_id" db:"person_id"`
@@ -18,7 +17,7 @@ func (r Residency) Validate() error {
 	return firstErr(
 		positiveInt("person_id", intPtr(r.PersonID)),
 		positiveInt("premises_id", intPtr(r.PremisesID)),
-		oneOf("relation", r.Relation, ResidencyRelations),
+		kindCode("relation", r.Relation),
 		period(r.ValidFrom, r.ValidTo),
 	)
 }

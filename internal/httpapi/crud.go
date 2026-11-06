@@ -166,6 +166,14 @@ func premisesKindFilter(w http.ResponseWriter, r *http.Request) (model.PremisesK
 	return model.PremisesKindFilter{Deleted: p.Deleted}, p, true
 }
 
+func kinshipFilter(w http.ResponseWriter, r *http.Request) (model.KinshipFilter, listParams, bool) {
+	p, ok := parseListSpec(w, r, listSpec{})
+	if !ok {
+		return model.KinshipFilter{}, p, false
+	}
+	return model.KinshipFilter{Deleted: p.Deleted}, p, true
+}
+
 func paymentRegistryFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRegistryFilter, listParams, bool) {
 	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"bank_account_id"}, Texts: []string{"q"}, Dates: []string{"date_from", "date_to"}, Bools: []string{"no_payment"}})
 	if !ok {

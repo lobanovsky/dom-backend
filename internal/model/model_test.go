@@ -38,7 +38,7 @@ func TestValidate(t *testing.T) {
 		{"ownership no owner", func() error { o := validOwnership(); o.PersonID = nil; return o.Validate() }(), "person_id"},
 		{"ownership bad period", func() error { o := validOwnership(); o.ValidTo = ptr(d(2019, 1, 1)); return o.Validate() }(), "valid_to"},
 		{"ownership no start", func() error { o := validOwnership(); o.ValidFrom = Date{}; return o.Validate() }(), "valid_from"},
-		{"residency bad relation", Residency{PersonID: 1, PremisesID: 1, Relation: "friend", ValidFrom: d(2020, 1, 1)}.Validate(), "relation"},
+		{"residency bad relation", Residency{PersonID: 1, PremisesID: 1, Relation: "Не код", ValidFrom: d(2020, 1, 1)}.Validate(), "relation"},
 		{"account closed before opened", Account{Number: "1", PremisesID: 1, Purpose: "utilities", Status: "closed", OpenedAt: d(2020, 1, 1), ClosedAt: ptr(d(2019, 1, 1))}.Validate(), "closed_at"},
 		{"holder ok", AccountHolder{AccountID: 1, LegalEntityID: ptr(int64(1)), ValidFrom: d(2020, 1, 1)}.Validate(), ""},
 	}

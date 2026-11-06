@@ -63,7 +63,8 @@ erDiagram
 | `persons` | Физлица: фамилия, имя, отчество отдельными полями, дата рождения, списки телефонов (`phones`) и email (`emails`). Один человек может быть и собственником, и жителем |
 | `legal_entities` | Юрлица-собственники |
 | `ownerships` | Владение: помещение, владелец (физлицо **или** юрлицо), доля `share_num/share_den`, период, основание |
-| `residencies` | Жители: прописан или фактически проживает, период, родство (`relation`, `related_owner_id`; родство необязательно) |
+| `kinships` | Справочник родства проживающего с собственником (migration `0034`, нужен для расчёта льгот): `code` (латиница, неизменяем, уникален и среди удалённых), `name` (уникально без учёта регистра среди действующих), `position`. Изначально 22 записи: `owner` (собственник), `spouse`/`husband`/`wife`, `child`/`son`/`daughter`, `parent`/`father`/`mother`, `grandson`, `granddaughter`, `grandfather`, `grandmother`, `brother`, `sister`, `guardian`, `relative`, `not_relative`, `tenant`, `temporary`, `other`. Запись нельзя удалить, пока ею пользуются действующие проживающие (`cannot delete: has active residencies`) |
+| `residencies` | Жители: прописан или фактически проживает, период, родство (`relation` — код действующей записи `kinships`, триггер БД, иначе 422 `cannot save: kinship is unknown or deleted`; `related_owner_id`; родство необязательно) |
 | `personal_accounts` | Лицевой счёт. Принадлежит **помещению**, у помещения может быть несколько счетов (`purpose`: `utilities` — ЖКУ или `capital_repair` — капремонт; migration `0029` убрала прежние `parking` и `other`) |
 | `account_holders` | Плательщики счёта по периодам (физлицо **или** юрлицо) |
 | `meters` | Счётчик воды (`cold_water`, `hot_water`) или электроэнергии (`electricity`). Индивидуальный привязан к **помещению** (`premises_id`), общедомовой — к **дому** (`building_id`), задано ровно одно. `tariffs` 1–3 (многотарифным бывает только электросчётчик; у воды всегда 1), `coefficient` (коэффициент трансформации, по умолчанию 1), номер (`serial_number`, уникален в паре с ресурсом: `meters_serial_number_key`), необязательное название `name` (например, «ИТП» — чтобы различать общедомовые счётчики; не уникально, участвует в поиске `q`, migration `0027`), ввод в эксплуатацию `installed_at` и окончание `removed_at` (после неё счётчик не активен: штатно вывод из работы делают датой, а не удалением), поверка `verified_at` / `next_verification_at`, начальные показания `initial_t1..t3` |
@@ -200,7 +201,7 @@ docker compose up -d --build
 - `GET /api/v1/users`, `POST /api/v1/users` `{"username","password","role"}`, `PUT /api/v1/users/{id}` `{"role","active","password"?}` (непустой `password` — сброс пароля, прежние сессии пользователя завершаются) — только `admin`. Пользователей не удаляют, а отключают (`active:false`). Отключить или понизить последнего действующего администратора нельзя (409 `cannot remove the last admin`). Ответ не содержит пароль и хеш, но содержит `last_login_at` и `last_seen_at`.
 - `GET /api/v1/users/logins?user_id=&limit=&offset=` — история входов (новые сверху), только `admin`. Пишутся и успешные, и неудачные попытки; записи не удаляются автоматически.
 
-Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`, `premises-kinds`, `bank-accounts`, `payment-categories`, `incoming-payments`, `outgoing-payments` (последние четыре работают так же, `payment-registries` только читаются и загружаются, см. ниже).
+Ресурсы: `organizations`, `buildings`, `premises`, `persons`, `legal-entities`, `ownerships`, `residencies`, `accounts` (лицевые счета), `account-holders`, `premises-kinds`, `kinships`, `bank-accounts`, `payment-categories`, `incoming-payments`, `outgoing-payments` (последние четыре работают так же, `payment-registries` только читаются и загружаются, см. ниже).
 
 | Метод и путь | Действие |
 |---|---|
@@ -219,7 +220,7 @@ docker compose up -d --build
 - `organizations`: `kind`
 - `buildings`: `organization_id`, `kind`
 - `premises`: `building_id`, `kind`, `number`
-- `premises-kinds`: только `deleted=only`; сортировка по `position`
+- `premises-kinds`, `kinships`: только `deleted=only`; сортировка по `position`
 - `persons`: `last_name`, `phone` (точное совпадение с одним из телефонов), `q` (подстрока в ФИО, любом телефоне или email, без учёта регистра; сортировка по фамилии)
 - `legal-entities`: `inn`, `q` (подстрока в названии или ИНН; сортировка по названию)
 - `ownerships`: `premises_id`, `person_id`, `legal_entity_id`

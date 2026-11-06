@@ -33,6 +33,7 @@ type Deps struct {
 	BankAccounts         crudStore[model.BankAccount, model.BankAccountFilter]
 	PaymentCategories    crudStore[model.PaymentCategory, model.PaymentCategoryFilter]
 	PremisesKinds        crudStore[model.PremisesKind, model.PremisesKindFilter]
+	Kinships             crudStore[model.Kinship, model.KinshipFilter]
 	IncomingPayments     crudStore[model.IncomingPayment, model.IncomingPaymentFilter]
 	OutgoingPayments     crudStore[model.OutgoingPayment, model.OutgoingPaymentFilter]
 	Meters               crudStore[model.Meter, model.MeterFilter]
@@ -90,6 +91,7 @@ func NewRouter(d Deps) http.Handler {
 	crudHandlers[model.BankAccount, model.BankAccountFilter]{path: "/api/v1/bank-accounts", store: d.BankAccounts, filter: bankAccountFilter, prepare: func(a *model.BankAccount) { a.SetDefaults() }}.register(api)
 	crudHandlers[model.PaymentCategory, model.PaymentCategoryFilter]{path: "/api/v1/payment-categories", store: d.PaymentCategories, filter: paymentCategoryFilter}.register(api)
 	crudHandlers[model.PremisesKind, model.PremisesKindFilter]{path: "/api/v1/premises-kinds", store: d.PremisesKinds, filter: premisesKindFilter}.register(api)
+	crudHandlers[model.Kinship, model.KinshipFilter]{path: "/api/v1/kinships", store: d.Kinships, filter: kinshipFilter}.register(api)
 	crudHandlers[model.Meter, model.MeterFilter]{path: "/api/v1/meters", store: d.Meters, filter: meterFilter, prepare: func(m *model.Meter) { m.SetDefaults() }}.register(api)
 	meterImportHandlers{d.MeterReadingImporter}.register(api)
 	accountServiceBulkHandlers{d.AccountServiceBulk}.register(api)

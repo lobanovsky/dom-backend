@@ -16,7 +16,7 @@ func TestPremisesKinds(t *testing.T) {
 	kinds := NewPremisesKinds(pool)
 
 	seeded, err := kinds.List(ctx, model.PremisesKindFilter{}, 50, 0)
-	if err != nil || len(seeded) < 5 || seeded[0].Code != "apartment" {
+	if err != nil || len(seeded) < 3 || seeded[0].Code != "apartment" {
 		t.Fatalf("seeded kinds: %+v, err = %v", seeded, err)
 	}
 

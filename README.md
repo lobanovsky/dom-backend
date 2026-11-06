@@ -250,7 +250,7 @@ docker compose up -d --build
 
 ### Импорт помещений из xlsx
 
-`POST /api/v1/buildings/{id}/import` — `multipart/form-data` с полями `kind` (вид помещений: `apartment`, `non_residential`, `commercial`, `parking_space`, `storage`) и `file` (xlsx, до 10 МБ). Дом `{id}` должен уже существовать; помещения всего файла получают один `kind`, поэтому квартиры, офисы и машиноместа загружаются отдельными файлами.
+`POST /api/v1/buildings/{id}/import` — `multipart/form-data` с полями `kind` (вид помещений из справочника: по умолчанию `apartment`, `commercial`, `parking_space`; `non_residential` и `storage` убраны migration `0037`) и `file` (xlsx, до 10 МБ). Дом `{id}` должен уже существовать; помещения всего файла получают один `kind`, поэтому квартиры, офисы и машиноместа загружаются отдельными файлами.
 
 Читается первый лист. Колонки строго по порядку, первая строка (заголовок) пропускается, пустые строки игнорируются:
 

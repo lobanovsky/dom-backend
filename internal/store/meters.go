@@ -45,7 +45,7 @@ func (s *Meters) List(ctx context.Context, f model.MeterFilter, limit, offset in
 		          CASE WHEN m.premises_id IS NULL THEN COALESCE(b.name, b.address) END,
 		          CASE WHEN m.premises_id IS NULL THEN array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource) END,
 		          CASE WHEN m.premises_id IS NULL THEN lower(m.name) END NULLS LAST,
-		          substring(p.number from '\d+')::numeric NULLS LAST, p.number, p.id, m.resource, m.serial_number, m.id LIMIT $9 OFFSET $10`,
+		          substring(p.number from '\d+')::numeric NULLS LAST, p.number, p.id, array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource), m.serial_number, m.id LIMIT $9 OFFSET $10`,
 		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), exactPattern(f.PremisesNumber), f.Deleted, limit, offset))
 }
 

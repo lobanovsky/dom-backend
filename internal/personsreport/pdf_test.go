@@ -53,6 +53,19 @@ func TestRenderPersonsReport(t *testing.T) {
 	}
 }
 
+func TestFormatPhone(t *testing.T) {
+	for _, raw := range []string{"+79636110726", "89636110726", "9636110726", "7 963 611-07-26", "+7 (963) 611-07-26", "8 (963) 611 07 26"} {
+		if got := formatPhone(raw); got != "+7 (963) 611-07-26" {
+			t.Errorf("formatPhone(%q) = %q", raw, got)
+		}
+	}
+	for _, raw := range []string{"+1 415 555 2671", "+442071838750", "+7 (495) 123-45-67 доб. 12", "12345", ""} {
+		if got := formatPhone(raw); got != raw {
+			t.Errorf("formatPhone(%q) = %q, want unchanged", raw, got)
+		}
+	}
+}
+
 func TestFormatNumber(t *testing.T) {
 	for in, want := range map[float64]string{97.2: "97,2", 97: "97", 13.25: "13,25"} {
 		if got := formatNumber(in); got != want {

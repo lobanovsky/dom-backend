@@ -4,6 +4,7 @@ package personsreport
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -126,6 +127,32 @@ func Render(rep model.PersonsReport) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+var (
+	nonPhoneChars = regexp.MustCompile(`[^\d\s()+\-.]`)
+	nonDigits     = regexp.MustCompile(`\D`)
+)
+
+// formatPhone приводит российский номер к виду «+7 (926) 793-63-63» (из «+79267936363», «89267936363», «9267936363»);
+// иностранные номера, «доб.» и короткие остаются как введены. В базе номер хранится как ввели.
+func formatPhone(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if nonPhoneChars.MatchString(raw) {
+		return raw
+	}
+	digits := nonDigits.ReplaceAllString(raw, "")
+	plus := strings.HasPrefix(raw, "+")
+	var d string
+	switch {
+	case len(digits) == 11 && (digits[0] == '7' || (digits[0] == '8' && !plus)):
+		d = "7" + digits[1:]
+	case len(digits) == 10 && !plus:
+		d = "7" + digits
+	default:
+		return raw
+	}
+	return fmt.Sprintf("+7 (%s) %s-%s-%s", d[1:4], d[4:7], d[7:9], d[9:11])
+}
+
 // contactLines — строки «Телефон: … Email: …» с переносом по ширине таблицы; пустые значения — прочерк.
 func contactLines(pdf *fpdf.Fpdf, p model.PersonsReportPerson) []string {
 	join := func(items []string) string {
@@ -135,7 +162,15 @@ func contactLines(pdf *fpdf.Fpdf, p model.PersonsReportPerson) []string {
 		return strings.Join(items, ", ")
 	}
 	pdf.SetFont(fontFamily, "", fontSize)
-	return pdf.SplitText("Телефон: "+join(p.Phones)+"     Email: "+join(p.Emails), 186)
+	return pdf.SplitText("Телефон: "+join(formatPhones(p.Phones))+"     Email: "+join(p.Emails), 186)
+}
+
+func formatPhones(items []string) []string {
+	out := make([]string, len(items))
+	for i, s := range items {
+		out[i] = formatPhone(s)
+	}
+	return out
 }
 
 func personContacts(pdf *fpdf.Fpdf, lines []string, h float64) {

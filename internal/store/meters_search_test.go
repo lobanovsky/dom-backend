@@ -79,6 +79,13 @@ func TestMetersSearchAndOrder(t *testing.T) {
 	if got := ids(model.MeterFilter{PremisesNumber: ptr("16")}); !equal(got, []int64{b16.ID}) {
 		t.Errorf("premises_number=16: %v", got)
 	}
+	// внутри помещения ресурсы идут как в списках: холодная, горячая, электроэнергия
+	flat16b := newMeter(flat16, "electricity", "ms-test-7102")
+	flat16c := newMeter(flat16, "hot_water", "ms-test-7103")
+	if got := ids(model.MeterFilter{PremisesNumber: ptr("16")}); !equal(got, []int64{b16.ID, flat16c.ID, flat16b.ID}) {
+		t.Errorf("resource order inside a premises: %v, want cold %d, hot %d, electricity %d", got, b16.ID, flat16c.ID, flat16b.ID)
+	}
+
 	// порядок: помещения по номеру (1, 1, 16), счётчики помещения подряд; внутри помещения — по ресурсу (cold < hot)
 	got := ids(model.MeterFilter{})
 	pos := map[int64]int{}

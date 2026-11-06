@@ -18,6 +18,8 @@ func NewPersonsReport(pool *pgxpool.Pool) *PersonsReport { return &PersonsReport
 type personsReportRow struct {
 	PersonID int64    `db:"person_id"`
 	Name     string   `db:"name"`
+	Phones   []string `db:"phones"`
+	Emails   []string `db:"emails"`
 	Kind     string   `db:"kind"`
 	KindName *string  `db:"kind_name"`
 	Number   string   `db:"number"`
@@ -30,7 +32,7 @@ type personsReportRow struct {
 
 func (s *PersonsReport) Build(ctx context.Context, day time.Time) (model.PersonsReport, error) {
 	rows, err := collect[personsReportRow](s.pool.Query(ctx,
-		`SELECT pe.id AS person_id, concat_ws(' ', pe.last_name, pe.first_name, pe.middle_name) AS name,
+		`SELECT pe.id AS person_id, concat_ws(' ', pe.last_name, pe.first_name, pe.middle_name) AS name, pe.phones, pe.emails,
 		        pr.kind, k.name AS kind_name, pr.number, pr.total_area, pr.cadastral_number, b.address, o.share_num, o.share_den
 		 FROM ownerships o
 		 JOIN persons pe ON pe.id = o.person_id AND pe.deleted_at IS NULL
@@ -65,7 +67,7 @@ func (s *PersonsReport) Build(ctx context.Context, day time.Time) (model.Persons
 		if !ok {
 			i = len(rep.Persons)
 			index[r.PersonID] = i
-			rep.Persons = append(rep.Persons, model.PersonsReportPerson{Name: r.Name})
+			rep.Persons = append(rep.Persons, model.PersonsReportPerson{Name: r.Name, Phones: r.Phones, Emails: r.Emails})
 		}
 		item := model.PersonsReportItem{Label: RegistryLabel(r.Kind, r.KindName, r.Number), Address: r.Address, Area: r.Area, ShareNum: r.ShareNum, ShareDen: r.ShareDen}
 		if r.Cadastr != nil {

@@ -8,8 +8,10 @@ type PersonsReport struct {
 }
 
 type PersonsReportPerson struct {
-	Name  string
-	Items []PersonsReportItem
+	Name   string
+	Phones []string
+	Emails []string
+	Items  []PersonsReportItem
 }
 
 type PersonsReportItem struct {

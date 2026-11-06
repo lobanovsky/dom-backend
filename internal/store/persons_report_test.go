@@ -53,6 +53,9 @@ func TestPersonsReportBuild(t *testing.T) {
 	}
 	flat2, flat10, shop, mm := newPremises("apartment", "2", 40), newPremises("apartment", "10", 60), newPremises("commercial", "3", 30), newPremises("parking_space", "1", 13.2)
 	a, bb, c, former := newPerson("Атестов"), newPerson("Бтестов"), newPerson("Втестов"), newPerson("Прежнев")
+	if _, err := pool.Exec(ctx, `UPDATE persons SET phones = ARRAY['+7 (903) 111-22-33'], emails = ARRAY['a@example.com'] WHERE id = $1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
 	own(mm, a, 1, 1, nil)                                    // у А машиноместо и квартира 10
 	own(flat10, a, 1, 2, nil)                                //
 	own(flat2, bb, 1, 1, nil)                                // у Б квартира 2: он первый
@@ -74,6 +77,9 @@ func TestPersonsReportBuild(t *testing.T) {
 	}
 	if len(mine) != 3 || mine[0].Name != "Бтестов Тест" || mine[1].Name != "Атестов Тест" || mine[2].Name != "Втестов Тест" {
 		t.Fatalf("order: %+v", mine)
+	}
+	if got := mine[1]; len(got.Phones) != 1 || got.Phones[0] != "+7 (903) 111-22-33" || len(got.Emails) != 1 || got.Emails[0] != "a@example.com" {
+		t.Errorf("contacts of А: %+v", got)
 	}
 	if got := mine[1].Items; len(got) != 2 || got[0].Label != "кв.010" || got[0].ShareDen != 2 || got[1].Label != "мм.001" {
 		t.Errorf("items of А: %+v", got)

@@ -83,9 +83,12 @@ func Render(rep model.PersonsReport) ([]byte, error) {
 			}
 			return float64(lines)*lineHeight + 1.6
 		}
-		// Заголовок человека не оставляем одного внизу страницы: вместе с ним первая строка.
-		ensure(7 + rowH(p.Items[0]))
+		// Заголовок человека не оставляем одного внизу страницы: вместе с ним контакты и первая строка.
+		contacts := contactLines(pdf, p)
+		contactsH := float64(len(contacts))*lineHeight + 1.6
+		ensure(7 + contactsH + rowH(p.Items[0]))
 		personTitle(n+1, p.Name, false)
+		personContacts(pdf, contacts, contactsH)
 		for _, it := range p.Items {
 			h := rowH(it)
 			if pdf.GetY()+h > pageLimit {
@@ -121,6 +124,29 @@ func Render(rep model.PersonsReport) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// contactLines — строки «Телефон: … Email: …» с переносом по ширине таблицы; пустые значения — прочерк.
+func contactLines(pdf *fpdf.Fpdf, p model.PersonsReportPerson) []string {
+	join := func(items []string) string {
+		if len(items) == 0 {
+			return "—"
+		}
+		return strings.Join(items, ", ")
+	}
+	pdf.SetFont(fontFamily, "", fontSize)
+	return pdf.SplitText("Телефон: "+join(p.Phones)+"     Email: "+join(p.Emails), 186)
+}
+
+func personContacts(pdf *fpdf.Fpdf, lines []string, h float64) {
+	x, y := pdf.GetXY()
+	pdf.Rect(x, y, 190, h, "D")
+	pdf.SetXY(x+1, y+0.8)
+	for _, l := range lines {
+		pdf.CellFormat(188, lineHeight, l, "", 2, "L", false, 0, "")
+		pdf.SetX(x + 1)
+	}
+	pdf.SetXY(x, y+h)
 }
 
 // formatNumber: 97.2 -> «97,2», 97 -> «97»; не больше двух знаков.

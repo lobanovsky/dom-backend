@@ -15,7 +15,10 @@ func area(v float64) *float64 { return &v }
 func sample(n int, multi bool) model.PersonsReport {
 	rep := model.PersonsReport{Day: "2026-11-07", MultipleBuildings: multi}
 	for i := 1; i <= n; i++ {
-		p := model.PersonsReportPerson{Name: fmt.Sprintf("Тестов Человек %d Отчествович", i)}
+		p := model.PersonsReportPerson{Name: fmt.Sprintf("Тестов Человек %d Отчествович", i), Phones: []string{"+7 (903) 111-22-33", "+7 (926) 444-55-66"}, Emails: []string{"test@example.com"}}
+		if i%3 == 0 {
+			p.Phones, p.Emails = nil, nil
+		}
 		p.Items = append(p.Items, model.PersonsReportItem{Label: fmt.Sprintf("кв.%03d", i), Address: "17-й проезд Марьиной Рощи, 1", Area: area(50.5), ShareNum: 1, ShareDen: 2, Cadastral: "77:09:0001001:1234"})
 		for j := 0; j < i%4; j++ {
 			p.Items = append(p.Items, model.PersonsReportItem{Label: fmt.Sprintf("мм.%03d", i*3+j), Address: "17-й проезд Марьиной Рощи, 1", Area: area(13.2), ShareNum: 1, ShareDen: 1})

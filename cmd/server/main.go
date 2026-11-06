@@ -135,6 +135,7 @@ func run(log *slog.Logger) error {
 			Organizations:        store.NewOrganizations(pool),
 			Buildings:            store.NewBuildings(pool),
 			OwnersRegistry:       store.NewOwnersRegistry(pool),
+			PersonsReport:        store.NewPersonsReport(pool),
 			Premises:             premises,
 			Persons:              store.NewPersons(pool),
 			LegalEntities:        store.NewLegalEntities(pool),

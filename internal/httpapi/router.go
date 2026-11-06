@@ -14,6 +14,7 @@ type Deps struct {
 	Organizations  OrganizationStore
 	Buildings      BuildingStore
 	OwnersRegistry OwnersRegistryStore
+	PersonsReport  PersonsReportStore
 	Premises       PremisesStore
 	Persons        PersonStore
 	LegalEntities  LegalEntityStore
@@ -77,6 +78,7 @@ func NewRouter(d Deps) http.Handler {
 	organizationHandlers{d.Organizations}.register(api)
 	buildingHandlers{d.Buildings}.register(api)
 	ownersRegistryHandlers{d.OwnersRegistry}.register(api)
+	personsReportHandlers{d.PersonsReport}.register(api)
 	premisesHandlers{d.Premises}.register(api)
 	premisesNestedHandlers{d.PremisesOwnerships, d.PremisesAccounts}.register(api)
 	importHandlers{d.Importer}.register(api)

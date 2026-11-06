@@ -91,8 +91,9 @@ func TestPremisesKindRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range seeded {
-		if k.Code == "parking_space" && (!k.NoResidents || !k.SingleOwner) {
-			t.Errorf("parking_space must forbid residents and allow one owner: %+v", k)
+		// у машиноместа нет жильцов, но собственников может быть несколько (migration 0036)
+		if k.Code == "parking_space" && (!k.NoResidents || k.SingleOwner) {
+			t.Errorf("parking_space must forbid residents and allow several owners: %+v", k)
 		}
 		if k.Code == "apartment" && (k.NoResidents || k.SingleOwner) {
 			t.Errorf("apartment must have no rules: %+v", k)
@@ -118,7 +119,13 @@ func TestPremisesKindRules(t *testing.T) {
 		cleanup(t, pool, "premises", p.ID)
 		return p
 	}
-	parking, flat := newPremises("parking_space", "1"), newPremises("apartment", "2")
+	// вид с обоими правилами заводим сам: у справочного «Машиноместа» правило единственного собственника снято
+	strict, err := kinds.Create(ctx, model.PremisesKind{Code: "kind_rules_strict", Name: "Строгий (тест)", Position: 998, NoResidents: true, SingleOwner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "premises_kinds", strict.ID)
+	parking, flat := newPremises(strict.Code, "1"), newPremises("apartment", "2")
 	newPerson := func(last string) model.Person {
 		p, err := NewPersons(pool).Create(ctx, model.Person{LastName: last, FirstName: "Тест", Phones: []string{}, Emails: []string{}})
 		if err != nil {
@@ -175,7 +182,7 @@ func TestPremisesKindRules(t *testing.T) {
 	cleanup(t, pool, "ownerships", a2.ID)
 
 	// смена вида помещения не должна обходить правила
-	flat.Kind = "parking_space"
+	flat.Kind = strict.Code
 	if _, err := premises.Update(ctx, flat.ID, flat); err == nil || !strings.Contains(err.Error(), "has residents") {
 		t.Errorf("apartment with residents to a parking space: err = %v", err)
 	}

@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"regexp"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dom-backend/internal/model"
 )
+
+var nonDigits = regexp.MustCompile(`\D`)
 
 type Persons struct{ pool *pgxpool.Pool }
 
@@ -20,9 +23,27 @@ func (s *Persons) List(ctx context.Context, f model.PersonFilter, limit, offset 
 		   AND ($3::text IS NULL
 		        OR concat_ws(' ', last_name, first_name, middle_name) ILIKE $3
 		        OR array_to_string(phones, ' ') ILIKE $3
+		        OR ($7::text IS NOT NULL AND array_to_string(phones, ' ') ILIKE $7)
 		        OR array_to_string(emails, ' ') ILIKE $3)
 		   AND (deleted_at IS NOT NULL) = $4
-		 ORDER BY last_name, first_name, id LIMIT $5 OFFSET $6`, f.LastName, f.Phone, likePattern(f.Q), f.Deleted, limit, offset))
+		 ORDER BY last_name, first_name, id LIMIT $5 OFFSET $6`, f.LastName, f.Phone, likePattern(f.Q), f.Deleted, limit, offset, phoneDigitsPattern(f.Q)))
+}
+
+// phoneDigitsPattern — шаблон ILIKE по цифрам запроса: «+7 (963) 611» находит 79636110726 (телефоны хранятся без форматирования).
+// Меньше трёх цифр — шаблона нет (иначе «1» нашёл бы половину базы); ведущая 8 читается как 7.
+func phoneDigitsPattern(q *string) *string {
+	if q == nil {
+		return nil
+	}
+	digits := nonDigits.ReplaceAllString(*q, "")
+	if len(digits) < 3 {
+		return nil
+	}
+	if digits[0] == '8' {
+		digits = "7" + digits[1:]
+	}
+	p := "%" + digits + "%"
+	return &p
 }
 
 func (s *Persons) Get(ctx context.Context, id int64) (model.Person, error) {

@@ -25,10 +25,14 @@ type Person struct {
 	Emails     []string `json:"emails" db:"emails"`
 }
 
-// Normalize приводит контакты к каноничному виду: обрезает пробелы, убирает
-// пустые и повторяющиеся значения (порядок сохраняется) и заменяет nil на пустой срез.
+// Normalize приводит контакты к каноничному виду: телефоны — только цифры (NormalizePhone), у обоих списков убирает
+// пробелы, пустые и повторяющиеся значения (порядок сохраняется) и заменяет nil на пустой срез.
 func (p *Person) Normalize() {
-	p.Phones = normalizeList(p.Phones)
+	phones := make([]string, len(p.Phones))
+	for i, s := range p.Phones {
+		phones[i] = NormalizePhone(s)
+	}
+	p.Phones = normalizeList(phones)
 	p.Emails = normalizeList(p.Emails)
 }
 
@@ -68,7 +72,7 @@ func validateList(field string, items []string, valid func(string) bool, reason 
 	return nil
 }
 
-// validPhone: формат не навязываем (+7, 8, скобки, «доб.»), но в номере должно быть
+// validPhone: вводить можно в любом виде (+7, 8, скобки, «доб.»; хранится только цифрами), но в номере должно быть
 // достаточно цифр, чтобы это был телефон, а не случайный текст.
 func validPhone(s string) bool {
 	digits := 0

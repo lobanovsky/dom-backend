@@ -59,6 +59,9 @@ func TestFormatPhone(t *testing.T) {
 			t.Errorf("formatPhone(%q) = %q", raw, got)
 		}
 	}
+	if got := formatPhone("14155552671"); got != "+14155552671" {
+		t.Errorf("foreign digits-only: %q", got)
+	}
 	for _, raw := range []string{"+1 415 555 2671", "+442071838750", "+7 (495) 123-45-67 доб. 12", "12345", ""} {
 		if got := formatPhone(raw); got != raw {
 			t.Errorf("formatPhone(%q) = %q, want unchanged", raw, got)

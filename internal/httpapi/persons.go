@@ -35,7 +35,7 @@ func (h personHandlers) list(w http.ResponseWriter, r *http.Request) {
 	items, err := h.s.List(r.Context(), model.PersonFilter{
 		Deleted:  p.Deleted,
 		LastName: p.Text("last_name"),
-		Phone:    p.Text("phone"),
+		Phone:    normalizedPhone(p.Text("phone")),
 		Q:        p.Text("q"),
 	}, p.Limit, p.Offset)
 	if err != nil {
@@ -121,4 +121,13 @@ func (h personHandlers) restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+// normalizedPhone — фильтр phone сравнивается с хранимым видом (только цифры), как бы номер ни ввели.
+func normalizedPhone(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	n := model.NormalizePhone(*p)
+	return &n
 }

@@ -133,7 +133,7 @@ var (
 )
 
 // formatPhone приводит российский номер к виду «+7 (926) 793-63-63» (из «+79267936363», «89267936363», «9267936363»);
-// иностранные номера, «доб.» и короткие остаются как введены. В базе номер хранится как ввели.
+// иностранные номера, записанные только цифрами, показываются с «+»; «доб.» и короткие остаются как есть. В базе номер хранится только цифрами.
 func formatPhone(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if nonPhoneChars.MatchString(raw) {
@@ -147,6 +147,8 @@ func formatPhone(raw string) string {
 		d = "7" + digits[1:]
 	case len(digits) == 10 && !plus:
 		d = "7" + digits
+	case !plus && len(digits) == len(raw) && len(digits) >= 11 && len(digits) <= 15:
+		return "+" + digits // хранится только цифрами: иностранный номер показываем с «+»
 	default:
 		return raw
 	}

@@ -69,8 +69,8 @@ func TestPersonNormalize(t *testing.T) {
 		Emails: nil,
 	}
 	p.Normalize()
-	if len(p.Phones) != 2 || p.Phones[0] != "+7 900 111 22 33" || p.Phones[1] != "8 495 000 00 00" {
-		t.Errorf("phones = %q, want trimmed, deduplicated, order kept", p.Phones)
+	if len(p.Phones) != 2 || p.Phones[0] != "79001112233" || p.Phones[1] != "74950000000" {
+		t.Errorf("phones = %q, want digits only, deduplicated, order kept", p.Phones)
 	}
 	if p.Emails == nil || len(p.Emails) != 0 {
 		t.Errorf("emails = %#v, want empty non-nil slice", p.Emails)
@@ -460,5 +460,23 @@ func TestAdjustmentRegistryRequestValidate(t *testing.T) {
 		if err := r.Validate(); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+func TestNormalizePhone(t *testing.T) {
+	for _, raw := range []string{"+79636110726", "89636110726", "9636110726", "7 963 611-07-26", "+7 (963) 611-07-26", "8 (963) 611 07 26", " 79636110726 "} {
+		if got := NormalizePhone(raw); got != "79636110726" {
+			t.Errorf("NormalizePhone(%q) = %q", raw, got)
+		}
+	}
+	for raw, want := range map[string]string{"+1 415 555 2671": "14155552671", "+44 20 7183 8750": "442071838750", "12345": "12345", "+7 (495) 123-45-67 доб. 12": "+7 (495) 123-45-67 доб. 12", "": ""} {
+		if got := NormalizePhone(raw); got != want {
+			t.Errorf("NormalizePhone(%q) = %q, want %q", raw, got, want)
+		}
+	}
+	p := Person{Phones: []string{"+7 (963) 611-07-26", "89636110726", " ", "+7 926 793-63-63"}}
+	p.Normalize()
+	if len(p.Phones) != 2 || p.Phones[0] != "79636110726" || p.Phones[1] != "79267936363" {
+		t.Errorf("Normalize phones: %v", p.Phones)
 	}
 }

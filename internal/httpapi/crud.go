@@ -253,7 +253,7 @@ func paymentRuleFilter(w http.ResponseWriter, r *http.Request) (model.PaymentRul
 }
 
 func meterFilter(w http.ResponseWriter, r *http.Request) (model.MeterFilter, listParams, bool) {
-	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"building_id", "premises_id"}, Texts: []string{"scope", "resource", "q"}, Bools: []string{"active"}})
+	p, ok := parseListSpec(w, r, listSpec{Ints: []string{"building_id", "premises_id"}, Texts: []string{"scope", "resource", "q", "premises_number"}, Bools: []string{"active"}})
 	if !ok {
 		return model.MeterFilter{}, p, false
 	}
@@ -266,7 +266,7 @@ func meterFilter(w http.ResponseWriter, r *http.Request) (model.MeterFilter, lis
 		return model.MeterFilter{}, p, false
 	}
 	return model.MeterFilter{Deleted: p.Deleted, Scope: p.Text("scope"), BuildingID: p.Int("building_id"), PremisesID: p.Int("premises_id"),
-		Resource: p.Text("resource"), Active: p.Bool("active"), Q: p.Text("q")}, p, true
+		Resource: p.Text("resource"), Active: p.Bool("active"), Q: p.Text("q"), PremisesNumber: p.Text("premises_number")}, p, true
 }
 
 func meterReadingFilter(w http.ResponseWriter, r *http.Request) (model.MeterReadingFilter, listParams, bool) {

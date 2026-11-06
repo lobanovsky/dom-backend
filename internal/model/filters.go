@@ -18,7 +18,7 @@ type PremisesFilter struct {
 	BuildingID *int64
 	Kind       *string
 	Number     *string
-	Q          *string // начало номера помещения (для поиска при вводе)
+	Q          *string // начало номера помещения или слова из ФИО/названия действующего собственника (для поиска при вводе)
 }
 
 type PersonFilter struct {

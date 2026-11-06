@@ -28,10 +28,16 @@ func (s *PremisesStore) List(ctx context.Context, f model.PremisesFilter, limit,
 		 WHERE ($1::bigint IS NULL OR pr.building_id = $1)
 		   AND ($2::text IS NULL OR pr.kind = $2)
 		   AND ($3::text IS NULL OR pr.number = $3)
-		   AND ($4::text IS NULL OR pr.number ILIKE $4)
+		   AND ($4::text IS NULL OR pr.number ILIKE $4 OR (cardinality($9::text[]) > 0 AND EXISTS ( -- или ФИО/название действующего собственника: все слова запроса
+		        SELECT 1 FROM ownerships o
+		        LEFT JOIN persons p ON p.id = o.person_id
+		        LEFT JOIN legal_entities le ON le.id = o.legal_entity_id
+		        WHERE o.premises_id = pr.id AND o.deleted_at IS NULL AND (o.valid_to IS NULL OR o.valid_to >= current_date)
+		          AND NOT EXISTS (SELECT 1 FROM unnest($9::text[]) w
+		                          WHERE replace(lower(COALESCE(concat_ws(' ', p.last_name, p.first_name, p.middle_name), le.name)), 'ё', 'е') NOT ILIKE replace(lower(w), 'ё', 'е')))))
 		   AND (pr.deleted_at IS NOT NULL) = $5
 		 ORDER BY (pr.number ILIKE $8) DESC NULLS LAST, pr.id LIMIT $6 OFFSET $7`, // при поиске по q точное совпадение номера идёт первым
-		f.BuildingID, f.Kind, f.Number, prefixPattern(f.Q), f.Deleted, limit, offset, exactPattern(f.Q)))
+		f.BuildingID, f.Kind, f.Number, prefixPattern(f.Q), f.Deleted, limit, offset, exactPattern(f.Q), wordPatterns(f.Q)))
 }
 
 func (s *PremisesStore) Get(ctx context.Context, id int64) (model.Premises, error) {

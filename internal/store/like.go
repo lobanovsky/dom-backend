@@ -31,3 +31,16 @@ func exactPattern(q *string) *string {
 	p := likeEscaper.Replace(strings.TrimSpace(*q))
 	return &p
 }
+
+// wordPatterns разбивает пользовательский текст на слова и делает из каждого шаблон ILIKE «содержит»;
+// пустой запрос — пустой список (не nil: параметр text[] в SQL не должен быть NULL).
+func wordPatterns(q *string) []string {
+	out := []string{}
+	if q == nil {
+		return out
+	}
+	for _, w := range strings.Fields(*q) {
+		out = append(out, "%"+likeEscaper.Replace(w)+"%")
+	}
+	return out
+}

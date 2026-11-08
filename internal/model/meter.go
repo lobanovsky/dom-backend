@@ -7,7 +7,7 @@ import (
 
 var (
 	MeterResources      = []string{"cold_water", "hot_water", "electricity"}
-	MeterReadingSources = []string{"manual", "import"}
+	MeterReadingSources = []string{"manual", "import", "resident"}
 )
 
 // Meter — счётчик воды или электроэнергии. Индивидуальный привязан к помещению (PremisesID),

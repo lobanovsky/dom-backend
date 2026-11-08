@@ -183,5 +183,5 @@ func allowed(u model.User, method, path string) bool {
 	if path == "/api/v1/auth/password" && method == http.MethodPut {
 		return true
 	}
-	return method == http.MethodGet || method == http.MethodHead
+	return u.Role == model.RoleViewer && (method == http.MethodGet || method == http.MethodHead)
 }

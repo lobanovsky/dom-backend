@@ -8,8 +8,10 @@ import (
 )
 
 type Deps struct {
-	Auth  *auth.Auth
-	Users UserStore
+	Residents       ResidentStore
+	ResidentOptions ResidentOptions
+	Auth            *auth.Auth
+	Users           UserStore
 
 	Organizations  OrganizationStore
 	Buildings      BuildingStore
@@ -74,6 +76,10 @@ func NewRouter(d Deps) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	api.HandleFunc("PUT /api/v1/auth/password", a.changePassword)
+	if d.Residents != nil {
+		h := &residentHandlers{store: d.Residents, options: d.ResidentOptions}
+		h.register(mux, api)
+	}
 	userHandlers{d.Users, a}.register(api)
 	organizationHandlers{d.Organizations}.register(api)
 	buildingHandlers{d.Buildings}.register(api)

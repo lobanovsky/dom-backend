@@ -23,6 +23,7 @@ import (
 	"dom-backend/internal/mailfetch"
 	"dom-backend/internal/mailsync"
 	"dom-backend/internal/registryimport"
+	"dom-backend/internal/residentmail"
 	"dom-backend/internal/sberapi"
 	"dom-backend/internal/sbersync"
 	"dom-backend/internal/store"
@@ -127,10 +128,35 @@ func run(log *slog.Logger) error {
 		log.Info("mail import is not configured (MAIL_USER is empty)")
 	}
 
+	residentConfig, err := residentmail.Load()
+	if err != nil {
+		return err
+	}
+	residents := store.NewResidents(pool)
+	if residentConfig.Enabled() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					work, cancel := context.WithTimeout(ctx, 20*time.Second)
+					if e := residents.FlushMail(work, residentConfig.Send); e != nil {
+						log.Error("resident mail delivery failed")
+					}
+					cancel()
+				}
+			}
+		}()
+	}
 	srv := &http.Server{
 		Addr: cfg.ListenAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Auth:                 a,
+			Residents:            residents,
+			ResidentOptions:      httpapi.ResidentOptions{BaseURL: residentConfig.BaseURL, MailEnabled: residentConfig.Enabled()},
 			Users:                users,
 			Organizations:        store.NewOrganizations(pool),
 			Buildings:            store.NewBuildings(pool),

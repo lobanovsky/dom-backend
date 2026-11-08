@@ -1,0 +1,11 @@
+DROP TABLE resident_mail_outbox;
+DROP TABLE resident_reading_audit;
+UPDATE meter_readings SET source='manual' WHERE source='resident';
+ALTER TABLE meter_readings DROP COLUMN resident_account_id;
+ALTER TABLE meter_readings DROP CONSTRAINT meter_readings_source_check;
+ALTER TABLE meter_readings ADD CONSTRAINT meter_readings_source_check CHECK(source IN ('manual','import'));
+DROP TABLE resident_reading_windows;
+DROP TABLE resident_sessions;
+DROP TABLE resident_tokens;
+DROP TABLE resident_accounts;
+DROP TABLE resident_access;

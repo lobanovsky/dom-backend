@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // ResidentAccount — отдельная от сотрудников учётная запись собственника.
 type ResidentAccount struct {
 	ID           int64  `json:"id" db:"id"`
@@ -28,4 +30,17 @@ type ResidentReading struct {
 	AuthorID *int64 `json:"-" db:"author_id"`
 	Revision int64  `json:"revision" db:"revision"`
 	Editable bool   `json:"editable" db:"editable"`
+}
+
+// ResidentAccess — сведения для списка физлиц и управления кабинетом, только для администратора.
+type ResidentAccess struct {
+	PersonID      int64      `json:"person_id" db:"person_id"`
+	Email         *string    `json:"email" db:"email"`
+	Configured    bool       `json:"configured" db:"configured"`
+	Enabled       bool       `json:"enabled" db:"enabled"`
+	Registered    bool       `json:"registered" db:"registered"`
+	RegisteredAt  *time.Time `json:"registered_at" db:"registered_at"`
+	LastLoginAt   *time.Time `json:"last_login_at" db:"last_login_at"`
+	AccountActive bool       `json:"account_active" db:"account_active"`
+	Eligible      bool       `json:"eligible" db:"eligible"`
 }

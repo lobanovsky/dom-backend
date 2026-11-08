@@ -145,3 +145,40 @@ func TestResidentLoginCookie(t *testing.T) {
 		}
 	}
 }
+
+func TestResidentStatusBatchValidation(t *testing.T) {
+	h := &residentHandlers{}
+	for _, q := range []string{"", "?person_ids=", "?person_ids=-1", "?person_ids=abc", "?person_ids=1&other=2", "?person_ids=1&person_ids=2", "?person_ids=" + strings.Repeat("1,", 200) + "1"} {
+		r := httptest.NewRequest("GET", "/api/v1/resident-access"+q, nil)
+		r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, model.User{ID: 1, Role: model.RoleAdmin}))
+		w := httptest.NewRecorder()
+		h.listAccess(w, r)
+		if w.Code != 400 {
+			t.Fatalf("%s returned %d", q, w.Code)
+		}
+	}
+	r := httptest.NewRequest("GET", "/api/v1/resident-access?person_ids=1", nil)
+	r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, model.User{ID: 1, Role: model.RoleViewer}))
+	w := httptest.NewRecorder()
+	h.listAccess(w, r)
+	if w.Code != 403 {
+		t.Fatal("viewer can read resident statuses")
+	}
+}
+
+func (f *residentFake) ListAccess(_ context.Context, ids []int64) ([]model.ResidentAccess, error) {
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		panic("batch ids were not deduplicated")
+	}
+	return []model.ResidentAccess{{PersonID: 1, Configured: true, Enabled: true, Eligible: true}}, nil
+}
+func TestResidentStatusBatch(t *testing.T) {
+	h := &residentHandlers{store: &residentFake{}}
+	r := httptest.NewRequest("GET", "/api/v1/resident-access?person_ids=1,2,1", nil)
+	r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, model.User{ID: 1, Role: model.RoleAdmin}))
+	w := httptest.NewRecorder()
+	h.listAccess(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"person_id":1`) {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}

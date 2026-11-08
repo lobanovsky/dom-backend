@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 )
 
 type ResidentStore interface {
+	ListAccess(context.Context, []int64) ([]model.ResidentAccess, error)
 	ByEmail(context.Context, string) (model.ResidentAccount, error)
 	Session(context.Context, string) (model.ResidentAccount, error)
 	NewSession(context.Context, int64, string) (string, error)
@@ -126,7 +128,9 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 		}
 		public.ServeHTTP(w, r)
 	}))
+	admin.HandleFunc("GET /api/v1/resident-access", h.listAccess)
 	admin.HandleFunc("GET /api/v1/resident-access/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if !residentAdmin(w, r) {
 			return
 		}
@@ -511,4 +515,39 @@ func (h *residentHandlers) setWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (h *residentHandlers) listAccess(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !residentAdmin(w, r) {
+		return
+	}
+	if len(r.URL.Query()) != 1 || len(r.URL.Query()["person_ids"]) != 1 {
+		writeError(w, 400, "person_ids: expected comma-separated ids")
+		return
+	}
+	parts := strings.Split(r.URL.Query().Get("person_ids"), ",")
+	if len(parts) > 200 {
+		writeError(w, 400, "person_ids: at most 200 ids")
+		return
+	}
+	ids := make([]int64, 0, len(parts))
+	seen := map[int64]bool{}
+	for _, part := range parts {
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || id < 1 {
+			writeError(w, 400, "person_ids: invalid id")
+			return
+		}
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	result, err := h.store.ListAccess(r.Context(), ids)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, result)
 }

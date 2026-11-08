@@ -75,6 +75,9 @@ func (s *Residents) NewSession(ctx context.Context, id int64, passwordHash strin
 	if tag.RowsAffected() != 1 {
 		return "", ErrNotFound
 	}
+	if _, err = tx.Exec(ctx, `UPDATE resident_accounts SET last_login_at=now() WHERE id=$1`, id); err != nil {
+		return "", err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return "", err
 	}
@@ -408,15 +411,32 @@ func (s *Residents) FlushMail(ctx context.Context, send func(context.Context, st
 	return tx.Commit(ctx)
 }
 
-func (s *Residents) Access(ctx context.Context, person int64) (map[string]any, error) {
-	var email *string
-	var enabled, registered bool
-	err := s.pool.QueryRow(ctx, `SELECT ra.email,COALESCE(ra.enabled,false),EXISTS(SELECT 1 FROM resident_accounts a WHERE a.person_id=p.id) FROM persons p LEFT JOIN resident_access ra ON ra.person_id=p.id WHERE p.id=$1 AND p.deleted_at IS NULL`, person).Scan(&email, &enabled, &registered)
-	if err != nil {
-		return nil, mapErr(err)
-	}
-	return map[string]any{"email": email, "enabled": enabled, "registered": registered}, nil
+const residentAccessSelect = `SELECT p.id AS person_id,ra.email,ra.person_id IS NOT NULL AS configured,
+ COALESCE(ra.enabled,false) AS enabled,a.id IS NOT NULL AS registered,a.created_at AS registered_at,a.last_login_at,
+ COALESCE(a.active,false) AS account_active,(p.deleted_at IS NULL AND EXISTS(
+ SELECT 1 FROM ownerships o JOIN premises rp ON rp.id=o.premises_id
+ JOIN buildings rb ON rb.id=rp.building_id JOIN organizations ro ON ro.id=rb.organization_id
+ WHERE o.person_id=p.id AND o.deleted_at IS NULL AND rp.deleted_at IS NULL
+ AND rb.deleted_at IS NULL AND ro.deleted_at IS NULL
+ AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date
+ AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date))) AS eligible
+ FROM persons p LEFT JOIN resident_access ra ON ra.person_id=p.id LEFT JOIN resident_accounts a ON a.person_id=p.id`
+
+func (s *Residents) ListAccess(ctx context.Context, ids []int64) ([]model.ResidentAccess, error) {
+	return collect[model.ResidentAccess](s.pool.Query(ctx, residentAccessSelect+` WHERE p.id=ANY($1::bigint[]) ORDER BY p.id`, ids))
 }
+func (s *Residents) Access(ctx context.Context, person int64) (map[string]any, error) {
+	states, err := s.ListAccess(ctx, []int64{person})
+	if err != nil {
+		return nil, err
+	}
+	if len(states) != 1 {
+		return nil, ErrNotFound
+	}
+	v := states[0]
+	return map[string]any{"person_id": v.PersonID, "email": v.Email, "configured": v.Configured, "enabled": v.Enabled, "registered": v.Registered, "registered_at": v.RegisteredAt, "last_login_at": v.LastLoginAt, "account_active": v.AccountActive, "eligible": v.Eligible}, nil
+}
+
 func (s *Residents) Window(ctx context.Context, building int64) (*model.ResidentWindow, error) {
 	w, err := one[model.ResidentWindow](s.pool.Query(ctx, `SELECT building_id,period,opens_on,closes_on FROM resident_reading_windows WHERE building_id=$1`, building))
 	if errors.Is(err, ErrNotFound) {

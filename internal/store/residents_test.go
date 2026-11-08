@@ -31,6 +31,12 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 		t.Fatal(e)
 	}
 	cleanup(t, pool, "premises", p.ID)
+	// ID человека не должен случайно совпадать с ID помещения в проверке статуса.
+	other, e := NewPersons(pool).Create(ctx, model.Person{LastName: "Без недвижимости", FirstName: "Тест", Phones: []string{}, Emails: []string{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	cleanup(t, pool, "persons", other.ID)
 	person, e := NewPersons(pool).Create(ctx, model.Person{LastName: "Тест", FirstName: "Житель", Phones: []string{}, Emails: []string{"resident@example.test"}})
 	if e != nil {
 		t.Fatal(e)
@@ -66,6 +72,26 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 		pool.Exec(ctx, `DELETE FROM resident_reading_windows WHERE building_id=$1`, b.ID)
 		pool.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE email='resident@example.test'`)
 	})
+	assertStatus := func(configured, enabled, registered, entered, eligible bool) {
+		t.Helper()
+		states, err := s.ListAccess(ctx, []int64{person.ID, -999})
+		if err != nil || len(states) != 1 {
+			t.Fatalf("status batch: %+v %v", states, err)
+		}
+		v := states[0]
+		if v.Configured != configured || v.Enabled != enabled || v.Registered != registered || (v.LastLoginAt != nil) != entered || v.Eligible != eligible {
+			t.Fatalf("unexpected status: %+v", v)
+		}
+		detail, err := s.Access(ctx, person.ID)
+		if err != nil || detail["enabled"] != enabled || detail["registered"] != registered {
+			t.Fatalf("status detail: %+v %v", detail, err)
+		}
+	}
+	foreign, e := s.ListAccess(ctx, []int64{other.ID})
+	if e != nil || len(foreign) != 1 || foreign[0].Eligible {
+		t.Fatalf("person without ownership: %+v %v", foreign, e)
+	}
+	assertStatus(false, false, false, false, true)
 	access, e := s.Access(ctx, person.ID)
 	if e != nil || access["enabled"] != false {
 		t.Fatalf("initial access: %v %v", access, e)
@@ -84,6 +110,7 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if e = s.Approve(ctx, person.ID, admin, "resident@example.test", true); e != nil {
 		t.Fatal(e)
 	}
+	assertStatus(true, true, false, false, true)
 	if e = s.RequestToken(ctx, "resident@example.test", "activate", "https://lk.example.test"); e != nil {
 		t.Fatal(e)
 	}
@@ -118,6 +145,7 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if e = s.RedeemToken(ctx, raw, "hash-two"); e == nil {
 		t.Fatal("token reused")
 	}
+	assertStatus(true, true, true, false, true)
 	a, e := s.ByEmail(ctx, "resident@example.test")
 	if e != nil {
 		t.Fatal(e)
@@ -126,6 +154,7 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	assertStatus(true, true, true, true, true)
 	if _, e = s.Session(ctx, session); e != nil {
 		t.Fatal(e)
 	}
@@ -265,9 +294,11 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if _, e = s.Session(ctx, session); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("former owner retains access: %v", e)
 	}
+	assertStatus(true, true, true, true, false)
 	if e = s.Approve(ctx, person.ID, admin, "resident@example.test", false); e != nil {
 		t.Fatal(e)
 	}
+	assertStatus(true, false, true, true, false)
 	if _, e = s.ByEmail(ctx, "resident@example.test"); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("disabled access: %v", e)
 	}

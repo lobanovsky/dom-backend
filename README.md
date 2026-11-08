@@ -414,7 +414,7 @@ Workflow `.github/workflows/build-and-deploy-backend.yml` запускается
 
 Фронтенд: `../dom-resident`. План, текущий этап и инструкция запуска: [README кабинета](../dom-resident/README.md). Миграция `0040` добавляет отдельные аккаунты, подтверждения доступа, одноразовые токены, сессии, SMTP-очередь, окна приёма и аудит изменений жителями. Административные `users` и cookie `dom_session` не используются для входа жителя.
 
-Настройки отправки: `RESIDENT_BASE_URL` (HTTPS origin кабинета), `RESIDENT_SMTP_ADDR`, `RESIDENT_SMTP_TLS` (`starttls` или `implicit`), `RESIDENT_SMTP_USERNAME`, `RESIDENT_SMTP_PASSWORD_FILE`, `RESIDENT_MAIL_FROM`. Пароль читается из файла; в контейнере используйте существующий mount `/secrets`. SMTP обязателен только для регистрации/восстановления: при пустом адресе отправка выключена. Worker раз в 5 секунд отправляет письмо из очереди, при сбое повторяет через минуту до истечения 30 минут. Ссылки и пароли не логируются.
+Настройки отправки: `RESIDENT_BASE_URL` (HTTPS origin кабинета), `RESIDENT_SMTP_ADDR`, `RESIDENT_SMTP_TLS` (`starttls` или `implicit`), `MAIL_USER`, `MAIL_PASSWORD_FILE`, `RESIDENT_MAIL_FROM`. IMAP и SMTP используют один ящик `MAIL_USER` и один файл пароля `MAIL_PASSWORD_FILE`; в контейнере это `/secrets/mail.pass`. Отдельные SMTP-секреты не нужны. SMTP обязателен только для регистрации/восстановления: при пустом адресе отправка выключена. Worker раз в 5 секунд отправляет письмо из очереди, при сбое повторяет через минуту до истечения 30 минут. Ссылки и пароли не логируются.
 
 ### API кабинета
 

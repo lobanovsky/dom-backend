@@ -108,8 +108,6 @@ jobs:
           RESIDENT_BASE_URL: ${{ vars.RESIDENT_BASE_URL }}
           RESIDENT_SMTP_ADDR: ${{ vars.RESIDENT_SMTP_ADDR }}
           RESIDENT_SMTP_TLS: ${{ vars.RESIDENT_SMTP_TLS }}
-          RESIDENT_SMTP_USERNAME: ${{ secrets.RESIDENT_SMTP_USERNAME }}
-          RESIDENT_SMTP_PASSWORD: ${{ secrets.RESIDENT_SMTP_PASSWORD }}
           RESIDENT_MAIL_FROM: ${{ vars.RESIDENT_MAIL_FROM }}
         run: |
           umask 077
@@ -163,18 +161,11 @@ jobs:
           fi
           if [ -n "$RESIDENT_SMTP_ADDR" ]; then
             test -n "$RESIDENT_BASE_URL" && test -n "$RESIDENT_MAIL_FROM" || { echo "Resident mail configuration is incomplete"; exit 1; }
-            if [ -n "$RESIDENT_SMTP_USERNAME" ]; then
-              test -n "$RESIDENT_SMTP_PASSWORD" || { echo "Resident SMTP password is missing"; exit 1; }
-              printf '%s' "$RESIDENT_SMTP_PASSWORD" > sber-secrets/resident-smtp.pass
-            fi
+            test -n "$MAIL_USER" && test -n "$MAIL_PASSWORD" || { echo "Shared mail credentials are missing"; exit 1; }
             {
               echo "RESIDENT_SMTP_ADDR=$RESIDENT_SMTP_ADDR"
               echo "RESIDENT_SMTP_TLS=${RESIDENT_SMTP_TLS:-starttls}"
               echo "RESIDENT_MAIL_FROM=$RESIDENT_MAIL_FROM"
-              if [ -n "$RESIDENT_SMTP_USERNAME" ]; then
-                echo "RESIDENT_SMTP_USERNAME=$RESIDENT_SMTP_USERNAME"
-                echo "RESIDENT_SMTP_PASSWORD_FILE=/secrets/resident-smtp.pass"
-              fi
             } >> .env.deploy
           fi
 

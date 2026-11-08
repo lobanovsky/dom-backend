@@ -20,7 +20,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	c := Config{BaseURL: strings.TrimRight(os.Getenv("RESIDENT_BASE_URL"), "/"), Addr: os.Getenv("RESIDENT_SMTP_ADDR"), Username: os.Getenv("RESIDENT_SMTP_USERNAME"), From: os.Getenv("RESIDENT_MAIL_FROM"), ImplicitTLS: os.Getenv("RESIDENT_SMTP_TLS") == "implicit"}
+	c := Config{BaseURL: strings.TrimRight(os.Getenv("RESIDENT_BASE_URL"), "/"), Addr: os.Getenv("RESIDENT_SMTP_ADDR"), Username: os.Getenv("MAIL_USER"), From: os.Getenv("RESIDENT_MAIL_FROM"), ImplicitTLS: os.Getenv("RESIDENT_SMTP_TLS") == "implicit"}
 	if c.Addr == "" {
 		return c, nil
 	}
@@ -34,15 +34,15 @@ func Load() (Config, error) {
 	if _, _, e = net.SplitHostPort(c.Addr); e != nil {
 		return c, fmt.Errorf("RESIDENT_SMTP_ADDR must be host:port")
 	}
-	if f := os.Getenv("RESIDENT_SMTP_PASSWORD_FILE"); f != "" {
+	if f := os.Getenv("MAIL_PASSWORD_FILE"); f != "" {
 		b, e := os.ReadFile(f)
 		if e != nil {
-			return c, fmt.Errorf("cannot read RESIDENT_SMTP_PASSWORD_FILE")
+			return c, fmt.Errorf("cannot read MAIL_PASSWORD_FILE")
 		}
 		c.Password = strings.TrimSpace(string(b))
 	}
 	if c.Username != "" && c.Password == "" {
-		return c, fmt.Errorf("RESIDENT_SMTP_PASSWORD_FILE is required with RESIDENT_SMTP_USERNAME")
+		return c, fmt.Errorf("MAIL_PASSWORD_FILE is required for SMTP with MAIL_USER")
 	}
 	return c, nil
 }

@@ -52,6 +52,11 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 		t.Fatal(e)
 	}
 	cleanup(t, pool, "meters", m.ID)
+	second, e := NewMeters(pool).Create(ctx, model.Meter{PremisesID: &p.ID, Resource: "hot_water", Tariffs: 1, SerialNumber: "resident-test-hot", Coefficient: 1, InstalledAt: date(2020, 1, 1), InitialT1: 2})
+	if e != nil {
+		t.Fatal(e)
+	}
+	cleanup(t, pool, "meters", second.ID)
 	var admin int64
 	e = pool.QueryRow(ctx, `INSERT INTO users(username,password_hash,role) VALUES('resident-test-admin','unused','admin') RETURNING id`).Scan(&admin)
 	if e != nil {
@@ -59,8 +64,8 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	}
 	cleanup(t, pool, "users", admin)
 	t.Cleanup(func() {
-		for _, q := range []string{`DELETE FROM resident_reading_audit WHERE reading_id IN(SELECT id FROM meter_readings WHERE meter_id=$1)`, `DELETE FROM meter_readings WHERE meter_id=$1`} {
-			if _, e := pool.Exec(ctx, q, m.ID); e != nil {
+		for _, q := range []string{`DELETE FROM resident_reading_audit WHERE reading_id IN(SELECT id FROM meter_readings WHERE meter_id IN($1,$2))`, `DELETE FROM meter_readings WHERE meter_id IN($1,$2)`} {
+			if _, e := pool.Exec(ctx, q, m.ID, second.ID); e != nil {
 				t.Error(e)
 			}
 		}
@@ -69,7 +74,8 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 				t.Error(e)
 			}
 		}
-		pool.Exec(ctx, `DELETE FROM resident_reading_windows WHERE building_id=$1`, b.ID)
+		pool.Exec(ctx, `DELETE FROM resident_reading_overrides WHERE building_id=$1`, b.ID)
+		pool.Exec(ctx, `DELETE FROM resident_reading_schedules WHERE building_id=$1`, b.ID)
 		pool.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE email='resident@example.test'`)
 	})
 	assertStatus := func(configured, enabled, registered, entered, eligible bool) {
@@ -163,13 +169,13 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("properties: %d %v", len(props), e)
 	}
 	meters, e := s.Meters(ctx, a.PersonID)
-	if e != nil || len(meters) != 1 {
+	if e != nil || len(meters) != 2 {
 		t.Fatalf("meters: %d %v", len(meters), e)
 	}
 	today := time.Now().UTC()
 	d := model.NewDate(today.Year(), today.Month(), today.Day())
 	period := d.FirstOfMonth()
-	if e = s.SetWindow(ctx, model.ResidentWindow{BuildingID: b.ID, Period: period, OpensOn: model.Date{Time: d.AddDate(0, 0, -1)}, ClosesOn: model.Date{Time: d.AddDate(0, 0, 1)}}); e != nil {
+	if e = s.SetWindow(ctx, model.ResidentWindow{Enabled: true, BuildingID: b.ID, Period: period, OpensOn: model.Date{Time: d.AddDate(0, 0, -1)}, ClosesOn: model.Date{Time: d.AddDate(0, 0, 1)}}); e != nil {
 		t.Fatal(e)
 	}
 	window, e := s.Window(ctx, b.ID)
@@ -187,12 +193,40 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if _, e = s.Readings(ctx, model.ResidentAccount{ID: a.ID, PersonID: -1}, m.ID, 50, 0); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("foreign read: %v", e)
 	}
-	saved, e := s.SubmitReading(ctx, a, reading, nil)
+	// Пакет атомарен: второй неверный счётчик откатывает первый вместе с аудитом.
+	bad := []model.ResidentReadingInput{{MeterID: m.ID, Period: period, T1: ptr(100.0)}, {MeterID: second.ID, Period: period, T1: ptr(1.0)}}
+	if _, e = s.SubmitReadings(ctx, a, p.ID, bad); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("bad batch: %v", e)
+	}
+	var remaining int
+	if e = pool.QueryRow(ctx, `SELECT count(*) FROM meter_readings WHERE meter_id IN($1,$2)`, m.ID, second.ID).Scan(&remaining); e != nil || remaining != 0 {
+		t.Fatalf("partial batch saved: %d %v", remaining, e)
+	}
+	if _, e = s.SubmitReadings(ctx, a, p.ID+999, bad); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("foreign premises batch: %v", e)
+	}
+	if _, e = s.SubmitReadings(ctx, a, p.ID, []model.ResidentReadingInput{bad[0], bad[0]}); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("duplicate meter: %v", e)
+	}
+	batch, e := s.SubmitReadings(ctx, a, p.ID, []model.ResidentReadingInput{{MeterID: m.ID, Period: period, T1: ptr(reading.T1), Comment: reading.Comment}, {MeterID: second.ID, Period: period, T1: ptr(2.0)}})
+	if e != nil || len(batch) != 2 {
+		t.Fatalf("valid batch: %d %v", len(batch), e)
+	}
+	saved := batch[0]
+
 	if e != nil {
 		t.Fatal(e)
 	}
 	if saved.DeltaT1 == nil || *saved.DeltaT1 != 0 {
 		t.Fatal("zero consumption failed")
+	}
+	settings, e := s.SetSchedule(ctx, model.ResidentSchedule{BuildingID: b.ID, Enabled: true, OpensDay: 17, ClosesDay: 22})
+	if e != nil || len(settings.Overrides) != 1 || !settings.CurrentWindow.IsOpen(settings.CurrentWindow.ServerDate) {
+		t.Fatalf("manual override of recurring schedule: %+v %v", settings, e)
+	}
+	futurePeriod := model.Date{Time: period.AddDate(0, 1, 0)}
+	if e = s.SetWindow(ctx, model.ResidentWindow{BuildingID: b.ID, Enabled: false, Period: futurePeriod, OpensOn: model.NewDate(futurePeriod.Year(), futurePeriod.Month(), 17), ClosesOn: model.NewDate(futurePeriod.Year(), futurePeriod.Month(), 22)}); e != nil {
+		t.Fatal(e)
 	}
 	readings, e := s.Readings(ctx, a, m.ID, 50, 0)
 	if e != nil || len(readings) != 1 || !readings[0].Editable {
@@ -220,6 +254,16 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("audit: %d %v", len(audit), e)
 	}
 
+	if e = s.DeleteWindow(ctx, b.ID, period); e != nil {
+		t.Fatal(e)
+	}
+	settings, e = s.Schedule(ctx, b.ID)
+	if e != nil || settings.CurrentWindow.OpensOn.Day() != 17 || settings.CurrentWindow.ClosesOn.Day() != 22 {
+		t.Fatalf("schedule reset: %+v %v", settings, e)
+	}
+	if e = s.SetWindow(ctx, model.ResidentWindow{BuildingID: b.ID, Enabled: true, Period: period, OpensOn: model.Date{Time: d.AddDate(0, 0, -1)}, ClosesOn: model.Date{Time: d.AddDate(0, 0, 1)}}); e != nil {
+		t.Fatal(e)
+	}
 	// Запрет закрытого периода и правки записи, которую принял сотрудник.
 	reading.T1 = 110
 	wrong := reading
@@ -233,7 +277,7 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if _, e = s.SubmitReading(ctx, a, reading, &rev); !errors.Is(e, ErrConflict) {
 		t.Fatalf("staff reading overwritten: %v", e)
 	}
-	if e = s.SetWindow(ctx, model.ResidentWindow{BuildingID: b.ID, Period: period, OpensOn: model.Date{Time: d.AddDate(0, 0, -2)}, ClosesOn: model.Date{Time: d.AddDate(0, 0, -1)}}); e != nil {
+	if e = s.SetWindow(ctx, model.ResidentWindow{Enabled: true, BuildingID: b.ID, Period: period, OpensOn: model.Date{Time: d.AddDate(0, 0, -2)}, ClosesOn: model.Date{Time: d.AddDate(0, 0, -1)}}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.SubmitReading(ctx, a, reading, &rev); !errors.Is(e, ErrInvalid) {

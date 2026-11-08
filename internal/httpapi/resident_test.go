@@ -182,3 +182,16 @@ func TestResidentStatusBatch(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestResidentBatchRejectsEmptyAndIncompleteInput(t *testing.T) {
+	handler := NewRouter(Deps{Residents: &residentFake{}})
+	for _, body := range []string{`{"readings":[]}`, `{"readings":[{"meter_id":1,"period":"2026-11-01"}]}`, `{"readings":[{"meter_id":1,"period":"2026-11-01","t1":1,"person_id":99}]}`} {
+		r := httptest.NewRequest("POST", "/api/v1/resident/properties/1/readings", strings.NewReader(body))
+		r.Header.Set("Cookie", "dom_resident_session=resident-valid")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 422 && w.Code != 400 {
+			t.Fatalf("%d %s", w.Code, w.Body.String())
+		}
+	}
+}

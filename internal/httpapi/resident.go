@@ -18,6 +18,10 @@ import (
 )
 
 type ResidentStore interface {
+	Schedule(context.Context, int64) (model.ResidentScheduleSettings, error)
+	SetSchedule(context.Context, model.ResidentSchedule) (model.ResidentScheduleSettings, error)
+	DeleteWindow(context.Context, int64, model.Date) error
+	SubmitReadings(context.Context, model.ResidentAccount, int64, []model.ResidentReadingInput) ([]model.MeterReading, error)
 	ListAccess(context.Context, []int64) ([]model.ResidentAccess, error)
 	ByEmail(context.Context, string) (model.ResidentAccount, error)
 	Session(context.Context, string) (model.ResidentAccount, error)
@@ -99,6 +103,7 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 	private.HandleFunc("GET /api/v1/resident/meters/{id}/readings", h.readings)
 	private.HandleFunc("GET /api/v1/resident/meters/{id}/history", h.audit)
 	private.HandleFunc("POST /api/v1/resident/meters/{id}/readings", h.submit)
+	private.HandleFunc("POST /api/v1/resident/properties/{id}/readings", h.submitBatch)
 	private.HandleFunc("POST /api/v1/resident/auth/logout", h.logout)
 	private.HandleFunc("PUT /api/v1/resident/auth/password", h.password)
 	public.Handle("/api/v1/resident/", h.require(private))
@@ -163,6 +168,9 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 	admin.HandleFunc("PUT /api/v1/resident-access/{id}", h.approve)
 	admin.HandleFunc("POST /api/v1/resident-access/{id}/invite", h.invite)
 	admin.HandleFunc("PUT /api/v1/resident-windows/{id}", h.setWindow)
+	admin.HandleFunc("DELETE /api/v1/resident-windows/{id}", h.deleteWindow)
+	admin.HandleFunc("GET /api/v1/resident-schedules/{id}", h.schedule)
+	admin.HandleFunc("PUT /api/v1/resident-schedules/{id}", h.setSchedule)
 }
 func residentAccount(r *http.Request) model.ResidentAccount {
 	a, _ := r.Context().Value(residentKey{}).(model.ResidentAccount)
@@ -498,6 +506,7 @@ func (h *residentHandlers) setWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
+		Enabled  *bool      `json:"enabled"`
 		Period   model.Date `json:"period"`
 		OpensOn  model.Date `json:"opens_on"`
 		ClosesOn model.Date `json:"closes_on"`
@@ -509,7 +518,11 @@ func (h *residentHandlers) setWindow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 422, "invalid reading window")
 		return
 	}
-	e := h.store.SetWindow(r.Context(), model.ResidentWindow{BuildingID: id, Period: in.Period, OpensOn: in.OpensOn, ClosesOn: in.ClosesOn})
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	e := h.store.SetWindow(r.Context(), model.ResidentWindow{BuildingID: id, Period: in.Period, OpensOn: in.OpensOn, ClosesOn: in.ClosesOn, Enabled: enabled})
 	if e != nil {
 		writeErr(w, e)
 		return
@@ -550,4 +563,111 @@ func (h *residentHandlers) listAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, result)
+}
+
+func (h *residentHandlers) schedule(w http.ResponseWriter, r *http.Request) {
+	if !residentAdmin(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	v, err := h.store.Schedule(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+func (h *residentHandlers) setSchedule(w http.ResponseWriter, r *http.Request) {
+	if !residentAdmin(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Enabled   *bool `json:"enabled"`
+		OpensDay  int   `json:"opens_day"`
+		ClosesDay int   `json:"closes_day"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Enabled == nil {
+		writeError(w, 422, "enabled: is required")
+		return
+	}
+	v, err := h.store.SetSchedule(r.Context(), model.ResidentSchedule{BuildingID: id, Enabled: *in.Enabled, OpensDay: in.OpensDay, ClosesDay: in.ClosesDay})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+func (h *residentHandlers) deleteWindow(w http.ResponseWriter, r *http.Request) {
+	if !residentAdmin(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	p, err := time.Parse("2006-01", r.URL.Query().Get("period"))
+	if err != nil {
+		writeError(w, 400, "period: expected YYYY-MM")
+		return
+	}
+	if err = h.store.DeleteWindow(r.Context(), id, model.Date{Time: p}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+func (h *residentHandlers) submitBatch(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Readings []model.ResidentReadingInput `json:"readings"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if len(in.Readings) == 0 || len(in.Readings) > 100 {
+		writeError(w, 422, "readings: expected 1 to 100 readings")
+		return
+	}
+	for _, entry := range in.Readings {
+		if _, err := entry.Reading(); err != nil {
+			writeJSON(w, 422, map[string]any{"error": err.Error(), "meter_id": entry.MeterID})
+			return
+		}
+	}
+	result, err := h.store.SubmitReadings(r.Context(), residentAccount(r), id, in.Readings)
+	if err != nil {
+		var readingErr *store.ResidentReadingError
+		if errors.As(err, &readingErr) {
+			status := 0
+			switch {
+			case errors.Is(err, store.ErrConflict):
+				status = 409
+			case errors.Is(err, store.ErrNotFound):
+				status = 404
+			case errors.Is(err, store.ErrInvalid):
+				status = 422
+			}
+			if status != 0 {
+				writeJSON(w, status, map[string]any{"error": readingErr.Err.Error(), "meter_id": readingErr.MeterID})
+				return
+			}
+		}
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"readings": result, "accepted_count": len(result)})
 }

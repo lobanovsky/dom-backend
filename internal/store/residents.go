@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"dom-backend/internal/model"
 	"github.com/jackc/pgx/v5"
@@ -225,48 +224,84 @@ func (s *Residents) Meters(ctx context.Context, person int64) ([]model.Meter, er
 	return meters, err
 }
 func (s *Residents) Windows(ctx context.Context, person int64) ([]model.ResidentWindow, error) {
-	return collect[model.ResidentWindow](s.pool.Query(ctx, `SELECT w.building_id,w.period,w.opens_on,w.closes_on FROM resident_reading_windows w WHERE EXISTS(SELECT 1 FROM premises p WHERE p.building_id=w.building_id AND `+residentOwns+`)`, person))
-}
-func (s *Residents) Readings(ctx context.Context, a model.ResidentAccount, meter int64, limit, offset int) ([]model.ResidentReading, error) {
-	var allowed bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND m.deleted_at IS NULL AND `+residentOwns+`)`, a.PersonID, meter).Scan(&allowed)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT p.building_id FROM premises p WHERE `+residentOwns+` ORDER BY p.building_id`, person)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	settings, err := loadResidentSettings(ctx, s.pool, ids)
 	if err != nil {
 		return nil, err
 	}
-	if !allowed {
-		return nil, ErrNotFound
+	out := []model.ResidentWindow{}
+	for _, id := range ids {
+		if v, ok := settings[id]; ok {
+			out = append(out, v.CurrentWindow)
+		}
 	}
-	q := `SELECT rr.*, r.resident_account_id AS author_id,COALESCE((SELECT max(id) FROM resident_reading_audit WHERE reading_id=r.id),0) AS revision,COALESCE(r.source='resident' AND r.resident_account_id=$3 AND w.period=r.period AND (now() AT TIME ZONE 'Europe/Moscow')::date BETWEEN w.opens_on AND w.closes_on AND ` + residentMeterActive + `,false) AS editable FROM (` + readingSelect + `) rr JOIN meter_readings r ON r.id=rr.id JOIN meters m ON m.id=r.meter_id JOIN premises p ON p.id=m.premises_id LEFT JOIN resident_reading_windows w ON w.building_id=p.building_id WHERE r.meter_id=$2 AND r.deleted_at IS NULL AND ` + residentOwns + ` ORDER BY r.reading_date DESC,r.id DESC LIMIT $4 OFFSET $5`
-	return collect[model.ResidentReading](s.pool.Query(ctx, q, a.PersonID, meter, a.ID, limit, offset))
+	return out, nil
 }
+
+func (s *Residents) Readings(ctx context.Context, a model.ResidentAccount, meter int64, limit, offset int) ([]model.ResidentReading, error) {
+	var building int64
+	err := s.pool.QueryRow(ctx, `SELECT p.building_id FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND m.deleted_at IS NULL AND `+residentOwns, a.PersonID, meter).Scan(&building)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	settings, err := s.Schedule(ctx, building)
+	if err != nil {
+		return nil, err
+	}
+	w := settings.CurrentWindow
+	q := `SELECT rr.*,r.resident_account_id AS author_id,COALESCE((SELECT max(id) FROM resident_reading_audit WHERE reading_id=r.id),0) AS revision,
+ COALESCE(r.source='resident' AND r.resident_account_id=$3 AND r.period=$6 AND $7::bool AND ` + residentMeterActive + `,false) AS editable
+ FROM (` + readingSelect + `) rr JOIN meter_readings r ON r.id=rr.id JOIN meters m ON m.id=r.meter_id JOIN premises p ON p.id=m.premises_id
+ WHERE r.meter_id=$2 AND r.deleted_at IS NULL AND ` + residentOwns + ` ORDER BY r.reading_date DESC,r.id DESC LIMIT $4 OFFSET $5`
+	return collect[model.ResidentReading](s.pool.Query(ctx, q, a.PersonID, meter, a.ID, limit, offset, w.Period, w.IsOpen(w.ServerDate)))
+}
+
 func (s *Residents) SubmitReading(ctx context.Context, a model.ResidentAccount, in model.MeterReading, expected *int64) (model.MeterReading, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.MeterReading{}, err
 	}
 	defer rollback(ctx, tx)
-	// Сначала счётчик, как в административном хранилище: единый порядок блокировок.
-	var meter int64
-	err = tx.QueryRow(ctx, `SELECT m.id FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND m.deleted_at IS NULL AND `+meterActive+` AND `+residentOwns+` FOR UPDATE OF m`, a.PersonID, in.MeterID).Scan(&meter)
+	id, err := writeResidentReading(ctx, tx, a, in, expected, nil, nil)
 	if err != nil {
+		return model.MeterReading{}, err
+	}
+	result, err := one[model.MeterReading](tx.Query(ctx, readingSelect+` WHERE r.id=$1`, id))
+	if err != nil {
+		return result, err
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return model.MeterReading{}, mapErr(err)
 	}
-	var window model.ResidentWindow
-	err = tx.QueryRow(ctx, `SELECT w.building_id,w.period,w.opens_on,w.closes_on FROM resident_reading_windows w JOIN premises p ON p.building_id=w.building_id JOIN meters m ON m.premises_id=p.id WHERE m.id=$1 AND (now() AT TIME ZONE 'Europe/Moscow')::date BETWEEN w.opens_on AND w.closes_on FOR SHARE OF w`, meter).Scan(&window.BuildingID, &window.Period, &window.OpensOn, &window.ClosesOn)
+	return result, nil
+}
+func writeResidentReading(ctx context.Context, tx pgx.Tx, a model.ResidentAccount, in model.MeterReading, expected *int64, premises *int64, shared *model.ResidentWindow) (int64, error) {
+	// Сначала счётчик, как в административном хранилище: единый порядок блокировок.
+	var meter, building int64
+	err := tx.QueryRow(ctx, `SELECT m.id,p.building_id FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND ($3::bigint IS NULL OR p.id=$3) AND m.deleted_at IS NULL AND `+residentMeterActive+` AND `+residentOwns+` FOR UPDATE OF m`, a.PersonID, in.MeterID, premises).Scan(&meter, &building)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return model.MeterReading{}, invalid("reading window is closed")
+		return 0, mapErr(err)
+	}
+	var window model.ResidentWindow
+	if shared != nil {
+		window = *shared
+	} else {
+		window, err = lockResidentWindow(ctx, tx, building)
+		if err != nil {
+			return 0, err
 		}
-		return model.MeterReading{}, err
 	}
 	if !in.Period.Equal(window.Period.Time) {
-		return model.MeterReading{}, invalid("period: only the open period is allowed")
+		return 0, invalid("period: only the open period is allowed")
 	}
-	var today time.Time
-	if err = tx.QueryRow(ctx, `SELECT (now() AT TIME ZONE 'Europe/Moscow')::date`).Scan(&today); err != nil {
-		return model.MeterReading{}, err
-	}
-	in.ReadingDate = model.Date{Time: today}
+	in.ReadingDate = window.ServerDate
 	in.Source = "resident"
 	var id int64
 	var author *int64
@@ -275,19 +310,19 @@ func (s *Residents) SubmitReading(ctx context.Context, a model.ResidentAccount, 
 	var version int64
 	err = tx.QueryRow(ctx, `SELECT id,resident_account_id,source,to_jsonb(r),COALESCE((SELECT max(id) FROM resident_reading_audit WHERE reading_id=r.id),0) FROM meter_readings r WHERE meter_id=$1 AND period=$2 AND deleted_at IS NULL FOR UPDATE`, meter, in.Period).Scan(&id, &author, &source, &before, &version)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return model.MeterReading{}, err
+		return 0, err
 	}
 	if id != 0 && (source != "resident" || author == nil || *author != a.ID) {
-		return model.MeterReading{}, &Error{ErrConflict, "reading already submitted; contact management"}
+		return 0, &Error{ErrConflict, "reading already submitted; contact management"}
 	}
 	if id != 0 && (expected == nil || *expected != version) {
-		return model.MeterReading{}, &Error{ErrConflict, "reading changed; refresh and try again"}
+		return 0, &Error{ErrConflict, "reading changed; refresh and try again"}
 	}
 	if id == 0 && expected != nil {
-		return model.MeterReading{}, &Error{ErrConflict, "reading changed; refresh and try again"}
+		return 0, &Error{ErrConflict, "reading changed; refresh and try again"}
 	}
 	if err = checkReading(ctx, tx, in, id); err != nil {
-		return model.MeterReading{}, err
+		return 0, err
 	}
 	if id == 0 {
 		err = tx.QueryRow(ctx, `INSERT INTO meter_readings(meter_id,reading_date,period,t1,t2,t3,source,comment,resident_account_id) VALUES($1,$2,$3,$4,$5,$6,'resident',$7,$8) RETURNING id`, meter, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Comment, a.ID).Scan(&id)
@@ -295,16 +330,14 @@ func (s *Residents) SubmitReading(ctx context.Context, a model.ResidentAccount, 
 		_, err = tx.Exec(ctx, `UPDATE meter_readings SET reading_date=$2,t1=$3,t2=$4,t3=$5,comment=$6,updated_at=now() WHERE id=$1`, id, in.ReadingDate, in.T1, in.T2, in.T3, in.Comment)
 	}
 	if err != nil {
-		return model.MeterReading{}, mapErr(err)
+		return 0, mapErr(err)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO resident_reading_audit(reading_id,account_id,before_values,after_values) SELECT id,$2,$3::jsonb,to_jsonb(r) FROM meter_readings r WHERE id=$1`, id, a.ID, json.RawMessage(before))
 	if err != nil {
-		return model.MeterReading{}, err
+		return 0, err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return model.MeterReading{}, mapErr(err)
-	}
-	return NewMeterReadings(s.pool).Get(ctx, id)
+
+	return id, nil
 }
 
 // Audit не раскрывает идентификаторы/профили совладельцев и административные поля.
@@ -365,13 +398,6 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 		return err
 	}
 	return tx.Commit(ctx)
-}
-func (s *Residents) SetWindow(ctx context.Context, w model.ResidentWindow) error {
-	tag, err := s.pool.Exec(ctx, `INSERT INTO resident_reading_windows(building_id,period,opens_on,closes_on) SELECT id,$2,$3,$4 FROM buildings WHERE id=$1 AND deleted_at IS NULL ON CONFLICT(building_id) DO UPDATE SET period=excluded.period,opens_on=excluded.opens_on,closes_on=excluded.closes_on,updated_at=now()`, w.BuildingID, w.Period, w.OpensOn, w.ClosesOn)
-	if err == nil && tag.RowsAffected() != 1 {
-		return ErrNotFound
-	}
-	return mapErr(err)
 }
 
 // FlushMail отправляет не более одного письма; блокировка защищает от второго worker.
@@ -435,15 +461,4 @@ func (s *Residents) Access(ctx context.Context, person int64) (map[string]any, e
 	}
 	v := states[0]
 	return map[string]any{"person_id": v.PersonID, "email": v.Email, "configured": v.Configured, "enabled": v.Enabled, "registered": v.Registered, "registered_at": v.RegisteredAt, "last_login_at": v.LastLoginAt, "account_active": v.AccountActive, "eligible": v.Eligible}, nil
-}
-
-func (s *Residents) Window(ctx context.Context, building int64) (*model.ResidentWindow, error) {
-	w, err := one[model.ResidentWindow](s.pool.Query(ctx, `SELECT building_id,period,opens_on,closes_on FROM resident_reading_windows WHERE building_id=$1`, building))
-	if errors.Is(err, ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &w, nil
 }

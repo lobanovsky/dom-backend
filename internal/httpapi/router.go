@@ -51,6 +51,7 @@ type Deps struct {
 	TariffPrices         crudStore[model.TariffPrice, model.TariffPriceFilter]
 	Calculator           CalculationStore
 	MeterReadingImporter MeterReadingImportStore
+	MeterReadingExport   MeterReadingExportStore
 	Properties           PropertiesStore
 	Sber                 SberStore
 	SberSyncer           SberSyncer
@@ -74,6 +75,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
 
 	api := http.NewServeMux()
+	if d.MeterReadingExport != nil {
+		api.HandleFunc("GET /api/v1/meter-readings/export", meterExportHandlers{d.MeterReadingExport}.export)
+	}
 	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	api.HandleFunc("PUT /api/v1/auth/password", a.changePassword)
 	if d.Residents != nil {

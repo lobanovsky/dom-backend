@@ -105,7 +105,7 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 	if greeting == "" {
 		greeting = "собственник"
 	}
-	msg := "From: " + c.From + "\r\nTo: " + to + "\r\nSubject: =?UTF-8?B?" + subject + "?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nЗдравствуйте, " + greeting + "!\r\n\r\nДля вас открыт доступ в личный кабинет собственника ТСН «МР17дом1». В кабинете можно просматривать свои объекты недвижимости и передавать показания индивидуальных счётчиков.\r\n\r\nЧтобы активировать доступ и задать пароль, перейдите по ссылке:\r\n" + link + "\r\n\r\nСсылка действует 30 минут и используется один раз. Если вы не запрашивали доступ, проигнорируйте письмо.\r\n\r\nС уважением,\r\nПравление ТСН «МР17ДОМ1»\r\nНаш сайт http://mr17dom1.ru\r\n"
+	msg := "From: " + c.From + "\r\nTo: " + to + "\r\nSubject: =?UTF-8?B?" + subject + "?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nЗдравствуйте, " + greeting + "!\r\n\r\nДля вас открыт доступ в личный кабинет собственника ТСН «МР17дом1». В кабинете можно просматривать свои объекты недвижимости и передавать показания индивидуальных счётчиков.\r\n\r\nЧтобы активировать доступ и задать пароль, перейдите по ссылке:\r\n" + link + "\r\n\r\nСсылка действует 48 часов и используется один раз. Если вы не запрашивали доступ, проигнорируйте письмо.\r\n\r\nС уважением,\r\nПравление ТСН «МР17ДОМ1»\r\nНаш сайт http://mr17dom1.ru\r\n"
 	if _, err = w.Write([]byte(msg)); err != nil {
 		return err
 	}

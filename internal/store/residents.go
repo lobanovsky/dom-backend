@@ -112,11 +112,11 @@ func (s *Residents) RequestToken(ctx context.Context, email, purpose, baseURL st
 		return err
 	}
 	// Не отзываем прежнюю ссылку по публичному запросу: это позволило бы мешать активации.
-	_, err = tx.Exec(ctx, `INSERT INTO resident_tokens(token_hash,person_id,email,purpose,expires_at) VALUES($1,$2,$3,$4,now()+interval '30 minutes')`, ResidentTokenHash(raw), person, email, purpose)
+	_, err = tx.Exec(ctx, `INSERT INTO resident_tokens(token_hash,person_id,email,purpose,expires_at) VALUES($1,$2,$3,$4,now()+interval '48 hours')`, ResidentTokenHash(raw), person, email, purpose)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO resident_mail_outbox(email,link,expires_at) VALUES($1,$2,now()+interval '30 minutes')`, email, baseURL+"/#set-password?token="+raw)
+	_, err = tx.Exec(ctx, `INSERT INTO resident_mail_outbox(email,link,expires_at) VALUES($1,$2,now()+interval '48 hours')`, email, baseURL+"/#set-password?token="+raw)
 	if err != nil {
 		return err
 	}

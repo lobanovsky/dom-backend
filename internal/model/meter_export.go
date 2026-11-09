@@ -2,6 +2,7 @@ package model
 
 // MeterReadingExport — последнее действующее показание счётчика за расчётный месяц.
 type MeterReadingExport struct {
+	Resource       string   `db:"resource"`
 	PremisesKind   string   `db:"premises_kind"`
 	PremisesNumber string   `db:"premises_number"`
 	SerialNumber   string   `db:"serial_number"`

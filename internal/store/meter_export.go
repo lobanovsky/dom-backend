@@ -6,7 +6,7 @@ import (
 )
 
 func (s *MeterReadings) Export(ctx context.Context, period model.Date) ([]model.MeterReadingExport, error) {
-	return collect[model.MeterReadingExport](s.pool.Query(ctx, `SELECT COALESCE(k.name,p.kind) AS premises_kind,p.number AS premises_number,m.serial_number,r.t1,r.t2,r.t3
+	return collect[model.MeterReadingExport](s.pool.Query(ctx, `SELECT m.resource,COALESCE(k.name,p.kind) AS premises_kind,p.number AS premises_number,m.serial_number,r.t1,r.t2,r.t3
  FROM meters m JOIN premises p ON p.id=m.premises_id
  JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
  LEFT JOIN premises_kinds k ON k.code=p.kind

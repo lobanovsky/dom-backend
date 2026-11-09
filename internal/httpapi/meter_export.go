@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -29,22 +28,31 @@ func (h meterExportHandlers) export(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	rows := make([][]any, 0, len(items))
+	cols := []xlsxexport.Column{{Title: "Тип помещения", Width: 24}, {Title: "Номер помещения", Width: 20}, {Title: "Номер счётчика", Width: 26}, {Title: "Показания", Width: 20}}
+	sheets := make([]xlsxexport.Sheet, 5)
+	for i, name := range []string{"ХВС", "ГВС", "Т1", "Т2", "Т3"} {
+		sheets[i] = xlsxexport.Sheet{Name: name, Columns: cols}
+	}
+	appendReading := func(index int, item model.MeterReadingExport, value float64) {
+		sheets[index].Rows = append(sheets[index].Rows, []any{item.PremisesKind, item.PremisesNumber, item.SerialNumber, value})
+	}
 	for _, item := range items {
-		var reading any = item.T1
-		if item.T2 != nil || item.T3 != nil {
-			parts := []string{"Т1: " + strconv.FormatFloat(item.T1, 'f', -1, 64)}
+		switch item.Resource {
+		case "cold_water":
+			appendReading(0, item, item.T1)
+		case "hot_water":
+			appendReading(1, item, item.T1)
+		case "electricity":
+			appendReading(2, item, item.T1)
 			if item.T2 != nil {
-				parts = append(parts, "Т2: "+strconv.FormatFloat(*item.T2, 'f', -1, 64))
+				appendReading(3, item, *item.T2)
 			}
 			if item.T3 != nil {
-				parts = append(parts, "Т3: "+strconv.FormatFloat(*item.T3, 'f', -1, 64))
+				appendReading(4, item, *item.T3)
 			}
-			reading = strings.Join(parts, "; ")
 		}
-		rows = append(rows, []any{item.PremisesKind, item.PremisesNumber, item.SerialNumber, reading})
 	}
-	data, err := xlsxexport.Build("Показания", []xlsxexport.Column{{Title: "Тип помещения", Width: 24}, {Title: "Номер помещения", Width: 20}, {Title: "Номер счётчика", Width: 26}, {Title: "Показания", Width: 45}}, rows)
+	data, err := xlsxexport.BuildSheets(sheets)
 	if err != nil {
 		writeErr(w, err)
 		return

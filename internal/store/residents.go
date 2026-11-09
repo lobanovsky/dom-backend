@@ -401,7 +401,7 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 }
 
 // FlushMail отправляет не более одного письма; блокировка защищает от второго worker.
-func (s *Residents) FlushMail(ctx context.Context, send func(context.Context, string, string) error) error {
+func (s *Residents) FlushMail(ctx context.Context, send func(context.Context, string, string, string, string) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -412,15 +412,17 @@ func (s *Residents) FlushMail(ctx context.Context, send func(context.Context, st
 		return err
 	}
 	var id int64
-	var email, link string
-	err = tx.QueryRow(ctx, `SELECT id,email,link FROM resident_mail_outbox WHERE next_attempt_at<=now() ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&id, &email, &link)
+	var email, link, firstName, middleName string
+	err = tx.QueryRow(ctx, `SELECT o.id,o.email,o.link,COALESCE(p.first_name,''),COALESCE(p.middle_name,'') FROM resident_mail_outbox o
+ LEFT JOIN resident_access ra ON ra.email=o.email LEFT JOIN persons p ON p.id=ra.person_id
+ WHERE o.next_attempt_at<=now() ORDER BY o.id LIMIT 1 FOR UPDATE OF o SKIP LOCKED`).Scan(&id, &email, &link, &firstName, &middleName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tx.Commit(ctx)
 	}
 	if err != nil {
 		return err
 	}
-	if err = send(ctx, email, link); err != nil {
+	if err = send(ctx, email, link, firstName, middleName); err != nil {
 		_, e := tx.Exec(ctx, `UPDATE resident_mail_outbox SET attempts=attempts+1,next_attempt_at=now()+interval '1 minute' WHERE id=$1`, id)
 		if e != nil {
 			return e

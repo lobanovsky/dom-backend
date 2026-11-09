@@ -4,6 +4,7 @@ package residentmail
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/mail"
@@ -47,7 +48,7 @@ func Load() (Config, error) {
 	return c, nil
 }
 func (c Config) Enabled() bool { return c.Addr != "" }
-func (c Config) Send(ctx context.Context, to, link string) error {
+func (c Config) Send(ctx context.Context, to, link, firstName, middleName string) error {
 	host, _, err := net.SplitHostPort(c.Addr)
 	if err != nil {
 		return err
@@ -99,7 +100,12 @@ func (c Config) Send(ctx context.Context, to, link string) error {
 	if err != nil {
 		return err
 	}
-	msg := "From: " + c.From + "\r\nTo: " + to + "\r\nSubject: =?UTF-8?B?0JvQuNGH0L3Ri9C5INC60LDQsdC40L3QtdGC?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nДля установки пароля откройте ссылку:\r\n" + link + "\r\n\r\nСсылка действует 30 минут и используется один раз. Если вы не запрашивали доступ, проигнорируйте письмо.\r\n"
+	subject := base64.StdEncoding.EncodeToString([]byte(`Личный кабинет ТСН "МР17дом1"`))
+	greeting := strings.TrimSpace(firstName + " " + middleName)
+	if greeting == "" {
+		greeting = "собственник"
+	}
+	msg := "From: " + c.From + "\r\nTo: " + to + "\r\nSubject: =?UTF-8?B?" + subject + "?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nЗдравствуйте, " + greeting + "!\r\n\r\nДля вас открыт доступ в личный кабинет собственника ТСН «МР17дом1». В кабинете можно просматривать свои объекты недвижимости и передавать показания индивидуальных счётчиков.\r\n\r\nЧтобы активировать доступ и задать пароль, перейдите по ссылке:\r\n" + link + "\r\n\r\nСсылка действует 30 минут и используется один раз. Если вы не запрашивали доступ, проигнорируйте письмо.\r\n\r\nС уважением,\r\nПравление ТСН «МР17ДОМ1»\r\nНаш сайт http://mr17dom1.ru\r\n"
 	if _, err = w.Write([]byte(msg)); err != nil {
 		return err
 	}

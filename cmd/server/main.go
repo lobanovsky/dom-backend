@@ -144,7 +144,7 @@ func run(log *slog.Logger) error {
 				case <-ticker.C:
 					work, cancel := context.WithTimeout(ctx, 20*time.Second)
 					if e := residents.FlushMail(work, residentConfig.Send); e != nil {
-						log.Error("resident mail delivery failed")
+						log.Error("resident mail delivery failed", "err", e)
 					}
 					cancel()
 				}

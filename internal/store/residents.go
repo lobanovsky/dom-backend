@@ -372,6 +372,13 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, person); err != nil {
 		return err
 	}
+	var profileHasEmail bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons p, unnest(p.emails) e WHERE p.id=$1 AND p.deleted_at IS NULL AND lower(e)=lower($2))`, person, email).Scan(&profileHasEmail); err != nil {
+		return err
+	}
+	if !profileHasEmail {
+		return invalid("resident email must be listed in the person's profile")
+	}
 	var existing string
 	lookup := tx.QueryRow(ctx, `SELECT email FROM resident_accounts WHERE person_id=$1 FOR UPDATE`, person).Scan(&existing)
 	if lookup != nil && !errors.Is(lookup, pgx.ErrNoRows) {

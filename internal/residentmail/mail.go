@@ -64,7 +64,7 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 		conn, err = dial.DialContext(ctx, "tcp", c.Addr)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("SMTP connect: %w", err)
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(15 * time.Second)
@@ -72,39 +72,39 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 		deadline = d
 	}
 	if err = conn.SetDeadline(deadline); err != nil {
-		return err
+		return fmt.Errorf("SMTP set deadline: %w", err)
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return err
+		return fmt.Errorf("SMTP greeting: %w", err)
 	}
 	defer client.Close()
 	if !c.ImplicitTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
-			return fmt.Errorf("SMTP requires STARTTLS")
+			return fmt.Errorf("SMTP STARTTLS negotiation: server does not advertise STARTTLS")
 		}
 		if err = client.StartTLS(tlsConfig); err != nil {
-			return err
+			return fmt.Errorf("SMTP STARTTLS: %w", err)
 		}
 	}
 	if c.Username != "" {
 		if err = client.Auth(smtp.PlainAuth("", c.Username, c.Password, host)); err != nil {
-			return err
+			return fmt.Errorf("SMTP authentication: %w", err)
 		}
 	}
 	if err = client.Mail(c.From); err != nil {
-		return err
+		return fmt.Errorf("SMTP envelope sender: %w", err)
 	}
 	if err = client.Rcpt(to); err != nil {
-		return err
+		return fmt.Errorf("SMTP resident recipient: %w", err)
 	}
 	// Скрытая копия передаётся SMTP-серверу отдельным получателем; Bcc-заголовка в письме нет.
 	if err = client.Rcpt(auditBCC); err != nil {
-		return err
+		return fmt.Errorf("SMTP audit BCC recipient: %w", err)
 	}
 	w, err := client.Data()
 	if err != nil {
-		return err
+		return fmt.Errorf("SMTP begin message: %w", err)
 	}
 	subject := base64.StdEncoding.EncodeToString([]byte(`Личный кабинет ТСН "МР17дом1"`))
 	greeting := strings.TrimSpace(firstName + " " + middleName)
@@ -135,10 +135,13 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 	}
 	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + strings.Join(body, "\r\n") + "\r\n"
 	if _, err = w.Write([]byte(msg)); err != nil {
-		return err
+		return fmt.Errorf("SMTP write message: %w", err)
 	}
 	if err = w.Close(); err != nil {
-		return err
+		return fmt.Errorf("SMTP server rejected message data: %w", err)
 	}
-	return client.Quit()
+	if err = client.Quit(); err != nil {
+		return fmt.Errorf("SMTP close session: %w", err)
+	}
+	return nil
 }

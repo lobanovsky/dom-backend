@@ -431,7 +431,7 @@ func (s *Residents) FlushMail(ctx context.Context, send func(context.Context, st
 		if e = tx.Commit(ctx); e != nil {
 			return e
 		}
-		return fmt.Errorf("resident mail delivery failed: %w", err)
+		return fmt.Errorf("resident mail outbox id=%d delivery failed: %w", id, err)
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE id=$1`, id)
 	if err != nil {

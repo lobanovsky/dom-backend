@@ -17,7 +17,7 @@ func NewPersons(pool *pgxpool.Pool) *Persons { return &Persons{pool} }
 
 func (s *Persons) List(ctx context.Context, f model.PersonFilter, limit, offset int) ([]model.Person, error) {
 	return collect[model.Person](s.pool.Query(ctx,
-		`SELECT id, last_name, first_name, middle_name, birth_date, phones, emails, created_at, updated_at, deleted_at FROM persons
+		`SELECT persons.id, last_name, first_name, middle_name, birth_date, phones, emails, persons.created_at, persons.updated_at, persons.deleted_at FROM persons LEFT JOIN resident_access ra ON ra.person_id=persons.id LEFT JOIN resident_accounts a ON a.person_id=persons.id
 		 WHERE ($1::text IS NULL OR last_name = $1)
 		   AND ($2::text IS NULL OR $2 = ANY(phones))
 		   AND ($3::text IS NULL
@@ -25,8 +25,15 @@ func (s *Persons) List(ctx context.Context, f model.PersonFilter, limit, offset 
 		        OR array_to_string(phones, ' ') ILIKE $3
 		        OR ($7::text IS NOT NULL AND array_to_string(phones, ' ') ILIKE $7)
 		        OR array_to_string(emails, ' ') ILIKE $3)
-		   AND (deleted_at IS NOT NULL) = $4
-		 ORDER BY last_name, first_name, id LIMIT $5 OFFSET $6`, f.LastName, f.Phone, likePattern(f.Q), f.Deleted, limit, offset, phoneDigitsPattern(f.Q)))
+		   AND (persons.deleted_at IS NOT NULL) = $4
+		   AND ($8::text IS NULL OR CASE
+		     WHEN ra.person_id IS NULL THEN 'unissued'
+		     WHEN NOT ra.enabled OR (a.id IS NOT NULL AND NOT a.active) THEN 'disabled'
+		     WHEN NOT EXISTS(SELECT 1 FROM ownerships o JOIN premises rp ON rp.id=o.premises_id JOIN buildings b ON b.id=rp.building_id JOIN organizations org ON org.id=b.organization_id WHERE o.person_id=persons.id AND o.deleted_at IS NULL AND rp.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL AND o.valid_from <= (now() AT TIME ZONE 'Europe/Moscow')::date AND (o.valid_to IS NULL OR o.valid_to >= (now() AT TIME ZONE 'Europe/Moscow')::date)) THEN 'unavailable'
+		     WHEN a.id IS NULL THEN 'approved'
+		     WHEN a.last_login_at IS NULL THEN 'registered'
+		     ELSE 'used' END = $8)
+		 ORDER BY last_name, first_name, id LIMIT $5 OFFSET $6`, f.LastName, f.Phone, likePattern(f.Q), f.Deleted, limit, offset, phoneDigitsPattern(f.Q), f.ResidentStatus))
 }
 
 // phoneDigitsPattern — шаблон ILIKE по цифрам запроса: «+7 (963) 611» находит 79636110726 (телефоны хранятся без форматирования).
@@ -48,7 +55,7 @@ func phoneDigitsPattern(q *string) *string {
 
 func (s *Persons) Get(ctx context.Context, id int64) (model.Person, error) {
 	return one[model.Person](s.pool.Query(ctx,
-		`SELECT id, last_name, first_name, middle_name, birth_date, phones, emails, created_at, updated_at, deleted_at FROM persons WHERE id = $1`, id))
+		`SELECT persons.id, last_name, first_name, middle_name, birth_date, phones, emails, persons.created_at, persons.updated_at, persons.deleted_at FROM persons WHERE id = $1`, id))
 }
 
 func (s *Persons) Create(ctx context.Context, in model.Person) (model.Person, error) {

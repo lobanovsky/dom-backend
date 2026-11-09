@@ -28,15 +28,20 @@ func (h personHandlers) register(mux *http.ServeMux) {
 }
 
 func (h personHandlers) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseList(w, r, nil, []string{"last_name", "phone", "q"})
+	allowed := []string{"last_name", "phone", "q"}
+	if currentUser(r).IsAdmin() {
+		allowed = append(allowed, "resident_status")
+	}
+	p, ok := parseList(w, r, nil, allowed)
 	if !ok {
 		return
 	}
 	items, err := h.s.List(r.Context(), model.PersonFilter{
-		Deleted:  p.Deleted,
-		LastName: p.Text("last_name"),
-		Phone:    normalizedPhone(p.Text("phone")),
-		Q:        p.Text("q"),
+		Deleted:        p.Deleted,
+		LastName:       p.Text("last_name"),
+		Phone:          normalizedPhone(p.Text("phone")),
+		Q:              p.Text("q"),
+		ResidentStatus: p.Text("resident_status"),
 	}, p.Limit, p.Offset)
 	if err != nil {
 		writeErr(w, err)

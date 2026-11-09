@@ -22,10 +22,11 @@ type PremisesFilter struct {
 }
 
 type PersonFilter struct {
-	Deleted  bool // true — только удалённые (корзина), false — только действующие
-	LastName *string
-	Phone    *string
-	Q        *string // подстрока в ФИО или телефоне
+	Deleted        bool // true — только удалённые (корзина), false — только действующие
+	LastName       *string
+	Phone          *string
+	Q              *string // подстрока в ФИО или телефоне
+	ResidentStatus *string
 }
 
 type LegalEntityFilter struct {

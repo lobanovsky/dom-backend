@@ -373,7 +373,7 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 		return err
 	}
 	var profileHasEmail bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons p, unnest(p.emails) e WHERE p.id=$1 AND p.deleted_at IS NULL AND lower(e)=lower($2))`, person, email).Scan(&profileHasEmail); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons p WHERE p.id=$1 AND p.deleted_at IS NULL AND lower(p.emails[1])=lower($2))`, person, email).Scan(&profileHasEmail); err != nil {
 		return err
 	}
 	if !profileHasEmail {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -15,7 +16,7 @@ type Electricity struct{ pool *pgxpool.Pool }
 func NewElectricity(pool *pgxpool.Pool) *Electricity { return &Electricity{pool} }
 
 func (s *Electricity) ListElectricityContracts(ctx context.Context) ([]model.ElectricityContract, error) {
-	contracts, err := collect[model.ElectricityContract](s.pool.Query(ctx, `SELECT id, name FROM electricity_contracts ORDER BY id`))
+	contracts, err := collect[model.ElectricityContract](s.pool.Query(ctx, `SELECT id, name, number, archived_at FROM electricity_contracts ORDER BY id`))
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,29 @@ func collectIDs(ctx context.Context, pool *pgxpool.Pool, query string, args ...a
 	return ids, mapErr(rows.Err())
 }
 
+func (s *Electricity) CreateElectricityContract(ctx context.Context, in model.ElectricityContractUpdate) error {
+	return s.writeElectricityContract(ctx, 0, in)
+}
+func (s *Electricity) ArchiveElectricityContract(ctx context.Context, id int64) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE electricity_contracts SET archived_at=(now() AT TIME ZONE 'Europe/Moscow')::date, updated_at=now() WHERE id=$1 AND archived_at IS NULL`, id)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 func (s *Electricity) UpdateElectricityContract(ctx context.Context, id int64, in model.ElectricityContractUpdate) error {
+	return s.writeElectricityContract(ctx, id, in)
+}
+func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in model.ElectricityContractUpdate) error {
+	if in.Name != nil && strings.TrimSpace(*in.Name) == "" {
+		return invalid("name: is required")
+	}
+	if id == 0 && in.Name == nil {
+		return invalid("name: is required")
+	}
 	if len(in.MeterIDs) > 200 || len(in.Prices) > 200 {
 		return invalid("settings: too many rows")
 	}
@@ -58,8 +81,13 @@ func (s *Electricity) UpdateElectricityContract(ctx context.Context, id int64, i
 		return mapErr(err)
 	}
 	defer rollback(ctx, tx)
+	if id == 0 {
+		if err := tx.QueryRow(ctx, `INSERT INTO electricity_contracts(name,number) VALUES($1,$2) RETURNING id`, strings.TrimSpace(*in.Name), in.Number).Scan(&id); err != nil {
+			return mapErr(err)
+		}
+	}
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM electricity_contracts WHERE id=$1)`, id).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM electricity_contracts WHERE id=$1 AND archived_at IS NULL)`, id).Scan(&exists); err != nil {
 		return mapErr(err)
 	}
 	if !exists {
@@ -72,7 +100,7 @@ func (s *Electricity) UpdateElectricityContract(ctx context.Context, id int64, i
 		}
 		seen[meterID] = true
 		var ok bool
-		err := tx.QueryRow(ctx, `SELECT resource='electricity' AND building_id IS NOT NULL AND premises_id IS NULL AND removed_at IS NULL FROM meters WHERE id=$1`, meterID).Scan(&ok)
+		err := tx.QueryRow(ctx, `SELECT resource='electricity' AND building_id IS NOT NULL AND premises_id IS NULL AND deleted_at IS NULL FROM meters WHERE id=$1`, meterID).Scan(&ok)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -97,6 +125,9 @@ func (s *Electricity) UpdateElectricityContract(ctx context.Context, id int64, i
 		if p.T3 != nil && !validElectricityPrice(*p.T3) {
 			return invalid(fmt.Sprintf("prices[%d].t3: must be nonnegative with at most four decimals", i))
 		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE electricity_contracts SET name=COALESCE($2,name), number=$3, updated_at=now() WHERE id=$1`, id, in.Name, in.Number); err != nil {
+		return mapErr(err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM electricity_contract_meters WHERE contract_id=$1`, id); err != nil {
 		return mapErr(err)
@@ -152,6 +183,7 @@ LEFT JOIN meters m ON m.id=cm.meter_id AND m.installed_at<=($1::date+interval '1
 LEFT JOIN meter_readings r ON r.meter_id=m.id AND r.period=$1 AND r.deleted_at IS NULL
 LEFT JOIN LATERAL (SELECT x.t1,x.t2,x.t3 FROM meter_readings x WHERE x.meter_id=m.id AND x.deleted_at IS NULL AND x.reading_date<r.reading_date ORDER BY x.reading_date DESC LIMIT 1) prev ON true
 LEFT JOIN LATERAL (SELECT x.t1,x.t2,x.t3 FROM electricity_contract_prices x WHERE x.contract_id=c.id AND x.valid_from<=$1 AND (x.valid_to IS NULL OR x.valid_to>=$1) LIMIT 1) p ON true
+WHERE c.archived_at IS NULL OR (c.archived_at >= $1 AND EXISTS(SELECT 1 FROM electricity_contract_meters historical WHERE historical.contract_id=c.id))
 ORDER BY c.id,m.id`, period))
 	if err != nil {
 		return result, err

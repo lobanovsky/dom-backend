@@ -50,3 +50,8 @@ func TestElectricityHandlers(t *testing.T) {
 		t.Fatalf("list: %d", w.Code)
 	}
 }
+
+func (f *fakeElectricity) CreateElectricityContract(context.Context, model.ElectricityContractUpdate) error {
+	return nil
+}
+func (f *fakeElectricity) ArchiveElectricityContract(context.Context, int64) error { return nil }

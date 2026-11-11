@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"dom-backend/internal/model"
 	"testing"
 )
 
@@ -73,4 +74,40 @@ func TestCalculateElectricityMeter(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+}
+
+func TestElectricityContractManagement(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	s := NewElectricity(pool)
+	name := "electricity-management-test"
+	if err := s.CreateElectricityContract(ctx, model.ElectricityContractUpdate{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM electricity_contracts WHERE name=$1`, name).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM electricity_contracts WHERE id=$1`, id) })
+	renamed := name + "-renamed"
+	number := "123"
+	if err := s.UpdateElectricityContract(ctx, id, model.ElectricityContractUpdate{Name: &renamed, Number: &number}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveElectricityContract(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	contracts, err := s.ListElectricityContracts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range contracts {
+		if c.ID == id {
+			if c.Name != renamed || c.Number == nil || *c.Number != number || c.ArchivedAt == nil {
+				t.Fatalf("unexpected contract: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("archived contract missing")
 }

@@ -10,6 +10,8 @@ import (
 )
 
 type ElectricityStore interface {
+	CreateElectricityContract(context.Context, model.ElectricityContractUpdate) error
+	ArchiveElectricityContract(context.Context, int64) error
 	ListElectricityContracts(ctx context.Context) ([]model.ElectricityContract, error)
 	UpdateElectricityContract(ctx context.Context, id int64, in model.ElectricityContractUpdate) error
 	CalculateElectricity(ctx context.Context, period model.Date) (model.ElectricityCalculation, error)
@@ -19,6 +21,8 @@ type electricityHandlers struct{ s ElectricityStore }
 
 func (h electricityHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/electricity-contracts", h.list)
+	mux.HandleFunc("POST /api/v1/electricity-contracts", h.create)
+	mux.HandleFunc("DELETE /api/v1/electricity-contracts/{id}", h.archive)
 	mux.HandleFunc("PUT /api/v1/electricity-contracts/{id}", h.update)
 	mux.HandleFunc("GET /api/v1/electricity-contracts/calculation", h.calculate)
 }
@@ -71,4 +75,27 @@ func (h electricityHandlers) calculate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (h electricityHandlers) create(w http.ResponseWriter, r *http.Request) {
+	var in model.ElectricityContractUpdate
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := h.s.CreateElectricityContract(r.Context(), in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 201, map[string]bool{"ok": true})
+}
+func (h electricityHandlers) archive(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.s.ArchiveElectricityContract(r.Context(), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(204)
 }

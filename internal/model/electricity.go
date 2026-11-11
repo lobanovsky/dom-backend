@@ -2,6 +2,9 @@ package model
 
 // ElectricityContract — контракт Мосэнергосбыта и общедомовые счётчики, которые в него входят.
 type ElectricityContract struct {
+	TariffT1ID *int64                     `json:"tariff_t1_id" db:"tariff_t1_id"`
+	TariffT2ID *int64                     `json:"tariff_t2_id" db:"tariff_t2_id"`
+	TariffT3ID *int64                     `json:"tariff_t3_id" db:"tariff_t3_id"`
 	ID         int64                      `json:"id" db:"id"`
 	Name       string                     `json:"name" db:"name"`
 	Number     *string                    `json:"number" db:"number"`
@@ -21,10 +24,13 @@ type ElectricityContractPrice struct {
 }
 
 type ElectricityContractUpdate struct {
-	Name     *string                    `json:"name"`
-	Number   *string                    `json:"number"`
-	MeterIDs []int64                    `json:"meter_ids"`
-	Prices   []ElectricityContractPrice `json:"prices"`
+	TariffT1ID *int64                     `json:"tariff_t1_id"`
+	TariffT2ID *int64                     `json:"tariff_t2_id"`
+	TariffT3ID *int64                     `json:"tariff_t3_id"`
+	Name       *string                    `json:"name"`
+	Number     *string                    `json:"number"`
+	MeterIDs   []int64                    `json:"meter_ids"`
+	Prices     []ElectricityContractPrice `json:"prices"`
 }
 
 type ElectricityCalculation struct {

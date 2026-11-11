@@ -48,9 +48,6 @@ func (h electricityHandlers) update(w http.ResponseWriter, r *http.Request) {
 	if in.MeterIDs == nil {
 		in.MeterIDs = []int64{}
 	}
-	if in.Prices == nil {
-		in.Prices = []model.ElectricityContractPrice{}
-	}
 	if err := h.s.UpdateElectricityContract(r.Context(), id, in); err != nil {
 		writeErr(w, err)
 		return

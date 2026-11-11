@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dom-backend/internal/model"
@@ -16,7 +17,7 @@ type Electricity struct{ pool *pgxpool.Pool }
 func NewElectricity(pool *pgxpool.Pool) *Electricity { return &Electricity{pool} }
 
 func (s *Electricity) ListElectricityContracts(ctx context.Context) ([]model.ElectricityContract, error) {
-	contracts, err := collect[model.ElectricityContract](s.pool.Query(ctx, `SELECT id, name, number, archived_at FROM electricity_contracts ORDER BY id`))
+	contracts, err := collect[model.ElectricityContract](s.pool.Query(ctx, `SELECT id, name, number, archived_at, tariff_t1_id, tariff_t2_id, tariff_t3_id FROM electricity_contracts ORDER BY id`))
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +94,7 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 	if !exists {
 		return &Error{ErrNotFound, "not found"}
 	}
+	maxTariffs := 1
 	seen := map[int64]bool{}
 	for _, meterID := range in.MeterIDs {
 		if meterID <= 0 || seen[meterID] {
@@ -100,12 +102,16 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 		}
 		seen[meterID] = true
 		var ok bool
-		err := tx.QueryRow(ctx, `SELECT resource='electricity' AND building_id IS NOT NULL AND premises_id IS NULL AND deleted_at IS NULL FROM meters WHERE id=$1`, meterID).Scan(&ok)
+		var meterTariffs int
+		err := tx.QueryRow(ctx, `SELECT resource='electricity' AND building_id IS NOT NULL AND premises_id IS NULL AND deleted_at IS NULL, tariffs FROM meters WHERE id=$1`, meterID).Scan(&ok, &meterTariffs)
 		if err != nil {
 			return mapErr(err)
 		}
 		if !ok {
 			return invalid("meter_ids: must be active common electricity meters")
+		}
+		if meterTariffs > maxTariffs {
+			maxTariffs = meterTariffs
 		}
 		var assigned bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM electricity_contract_meters WHERE meter_id=$1 AND contract_id<>$2)`, meterID, id).Scan(&assigned); err != nil {
@@ -113,6 +119,30 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 		}
 		if assigned {
 			return invalid("meter_ids: meter already belongs to another contract")
+		}
+	}
+
+	selectedTariffs := []*int64{in.TariffT1ID, in.TariffT2ID, in.TariffT3ID}
+	usesCatalog := in.TariffT1ID != nil || in.TariffT2ID != nil || in.TariffT3ID != nil
+	for zone, tariffID := range selectedTariffs {
+		if tariffID == nil {
+			if usesCatalog && zone < maxTariffs {
+				return invalid(fmt.Sprintf("tariff_t%d_id: is required for selected meters", zone+1))
+			}
+			continue
+		}
+		var valid bool
+		err := tx.QueryRow(ctx, `SELECT t.unit='kwh' AND t.deleted_at IS NULL AND NOT EXISTS(
+      SELECT 1 FROM meters m JOIN buildings b ON b.id=m.building_id WHERE m.id=ANY($2::bigint[]) AND b.organization_id<>t.organization_id
+   ) FROM tariffs t WHERE t.id=$1 FOR SHARE OF t`, *tariffID, in.MeterIDs).Scan(&valid)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return invalid("tariff_ids: tariff not found")
+			}
+			return mapErr(err)
+		}
+		if !valid {
+			return invalid("tariff_ids: must be active kwh tariffs of the meters organization")
 		}
 	}
 	for i, p := range in.Prices {
@@ -126,7 +156,7 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 			return invalid(fmt.Sprintf("prices[%d].t3: must be nonnegative with at most four decimals", i))
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE electricity_contracts SET name=COALESCE($2,name), number=$3, updated_at=now() WHERE id=$1`, id, in.Name, in.Number); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE electricity_contracts SET name=COALESCE($2,name), number=$3, tariff_t1_id=$4, tariff_t2_id=$5, tariff_t3_id=$6, updated_at=now() WHERE id=$1`, id, in.Name, in.Number, in.TariffT1ID, in.TariffT2ID, in.TariffT3ID); err != nil {
 		return mapErr(err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM electricity_contract_meters WHERE contract_id=$1`, id); err != nil {
@@ -137,12 +167,14 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 			return mapErr(err)
 		}
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM electricity_contract_prices WHERE contract_id=$1`, id); err != nil {
-		return mapErr(err)
-	}
-	for _, p := range in.Prices {
-		if _, err := tx.Exec(ctx, `INSERT INTO electricity_contract_prices(contract_id,valid_from,valid_to,t1,t2,t3) VALUES($1,$2,$3,$4,$5,$6)`, id, p.ValidFrom, p.ValidTo, p.T1, p.T2, p.T3); err != nil {
+	if in.Prices != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM electricity_contract_prices WHERE contract_id=$1`, id); err != nil {
 			return mapErr(err)
+		}
+		for _, p := range in.Prices {
+			if _, err := tx.Exec(ctx, `INSERT INTO electricity_contract_prices(contract_id,valid_from,valid_to,t1,t2,t3) VALUES($1,$2,$3,$4,$5,$6)`, id, p.ValidFrom, p.ValidTo, p.T1, p.T2, p.T3); err != nil {
+				return mapErr(err)
+			}
 		}
 	}
 	return mapErr(tx.Commit(ctx))
@@ -176,7 +208,13 @@ SELECT c.id AS contract_id, c.name AS contract_name, COALESCE(m.id,0) AS meter_i
        CASE WHEN r.id IS NULL THEN NULL ELSE (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient END AS delta_t1,
        CASE WHEN r.id IS NULL OR r.t2 IS NULL THEN NULL ELSE (r.t2-COALESCE(prev.t2,m.initial_t2))*m.coefficient END AS delta_t2,
        CASE WHEN r.id IS NULL OR r.t3 IS NULL THEN NULL ELSE (r.t3-COALESCE(prev.t3,m.initial_t3))*m.coefficient END AS delta_t3,
-       p.t1 AS price_t1, p.t2 AS price_t2, p.t3 AS price_t3
+       CASE WHEN c.tariff_t1_id IS NOT NULL THEN
+ (SELECT price FROM tariff_prices tp WHERE tp.tariff_id=c.tariff_t1_id AND tp.deleted_at IS NULL AND tp.valid_from<=$1 AND (tp.valid_to IS NULL OR tp.valid_to>=$1))
+ ELSE p.t1 END AS price_t1, CASE WHEN c.tariff_t2_id IS NOT NULL THEN
+ (SELECT price FROM tariff_prices tp WHERE tp.tariff_id=c.tariff_t2_id AND tp.deleted_at IS NULL AND tp.valid_from<=$1 AND (tp.valid_to IS NULL OR tp.valid_to>=$1))
+ ELSE p.t2 END AS price_t2, CASE WHEN c.tariff_t3_id IS NOT NULL THEN
+ (SELECT price FROM tariff_prices tp WHERE tp.tariff_id=c.tariff_t3_id AND tp.deleted_at IS NULL AND tp.valid_from<=$1 AND (tp.valid_to IS NULL OR tp.valid_to>=$1))
+ ELSE p.t3 END AS price_t3
 FROM electricity_contracts c
 LEFT JOIN electricity_contract_meters cm ON cm.contract_id=c.id
 LEFT JOIN meters m ON m.id=cm.meter_id AND m.installed_at<=($1::date+interval '1 month'-interval '1 day')::date AND (m.removed_at IS NULL OR m.removed_at>=$1)

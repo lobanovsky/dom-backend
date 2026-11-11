@@ -52,6 +52,7 @@ type Deps struct {
 	Calculator           CalculationStore
 	MeterReadingImporter MeterReadingImportStore
 	MeterReadingExport   MeterReadingExportStore
+	Electricity          ElectricityStore
 	Properties           PropertiesStore
 	Sber                 SberStore
 	SberSyncer           SberSyncer
@@ -77,6 +78,9 @@ func NewRouter(d Deps) http.Handler {
 	api := http.NewServeMux()
 	if d.MeterReadingExport != nil {
 		api.HandleFunc("GET /api/v1/meter-readings/export", meterExportHandlers{d.MeterReadingExport}.export)
+	}
+	if d.Electricity != nil {
+		electricityHandlers{d.Electricity}.register(api)
 	}
 	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	api.HandleFunc("PUT /api/v1/auth/password", a.changePassword)

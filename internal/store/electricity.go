@@ -140,8 +140,8 @@ type electricityCalcRow struct {
 func (s *Electricity) CalculateElectricity(ctx context.Context, period model.Date) (model.ElectricityCalculation, error) {
 	result := model.ElectricityCalculation{Period: period.Format("2006-01"), Complete: true, Contracts: []model.ElectricityContractResult{}}
 	rows, err := collect[electricityCalcRow](s.pool.Query(ctx, `
-SELECT c.id AS contract_id, c.name AS contract_name, m.id AS meter_id,
-       COALESCE(m.name, m.serial_number) AS meter_name, m.serial_number, m.coefficient, m.tariffs,
+SELECT c.id AS contract_id, c.name AS contract_name, COALESCE(m.id,0) AS meter_id,
+       COALESCE(m.name, m.serial_number,'') AS meter_name, COALESCE(m.serial_number,'') AS serial_number, COALESCE(m.coefficient,1) AS coefficient, COALESCE(m.tariffs,1) AS tariffs,
        CASE WHEN r.id IS NULL THEN NULL ELSE (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient END AS delta_t1,
        CASE WHEN r.id IS NULL OR r.t2 IS NULL THEN NULL ELSE (r.t2-COALESCE(prev.t2,m.initial_t2))*m.coefficient END AS delta_t2,
        CASE WHEN r.id IS NULL OR r.t3 IS NULL THEN NULL ELSE (r.t3-COALESCE(prev.t3,m.initial_t3))*m.coefficient END AS delta_t3,

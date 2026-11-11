@@ -1,8 +1,49 @@
 package store
 
 import (
+	"context"
 	"testing"
 )
+
+func TestElectricityEmptyContractQueries(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	var id int64
+	if err := pool.QueryRow(ctx, `INSERT INTO electricity_contracts(name) VALUES('electricity-empty-query-test') RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM electricity_contracts WHERE id=$1`, id) })
+	s := NewElectricity(pool)
+	contracts, err := s.ListElectricityContracts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range contracts {
+		if c.ID == id {
+			found = true
+			if c.MeterIDs == nil || c.Prices == nil {
+				t.Fatal("empty collections must be arrays")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("contract missing")
+	}
+	result, err := s.CalculateElectricity(ctx, date(2026, 11, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range result.Contracts {
+		if c.ID == id {
+			if c.Complete || len(c.Meters) != 0 {
+				t.Fatalf("unexpected empty contract: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("calculation contract missing")
+}
 
 func float(v float64) *float64 { return &v }
 

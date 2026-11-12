@@ -275,3 +275,98 @@ func TestElectricityCatalogTariffs(t *testing.T) {
 	}
 	t.Fatal("single tariff contract missing")
 }
+
+// Замена приборов не должна оставлять пустые строки и портить статус исторического расчёта.
+func TestElectricityMeterWorkingPeriod(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	org, err := NewOrganizations(pool).Create(ctx, model.Organization{Kind: "tsn", Name: "electricity-working-period"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "organizations", org.ID)
+	building, err := NewBuildings(pool).Create(ctx, model.Building{OrganizationID: org.ID, Kind: "apartment_building", Address: "electricity-working-period"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "buildings", building.ID)
+	meters, readings := NewMeters(pool), NewMeterReadings(pool)
+	mkMeter := func(serial string, installed model.Date, removed *model.Date) model.Meter {
+		m, err := meters.Create(ctx, model.Meter{BuildingID: &building.ID, Resource: "electricity", Tariffs: 1, Coefficient: 1, SerialNumber: serial, InstalledAt: installed, RemovedAt: removed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup(t, pool, "meters", m.ID)
+		return m
+	}
+	old := mkMeter("working-old", date(2025, 1, 1), ptr(date(2026, 10, 13)))
+	replacement := mkMeter("working-new", date(2026, 10, 13), nil)
+	missing := mkMeter("working-missing", date(2025, 1, 1), nil)
+	add := func(meter model.Meter, day model.Date, value float64) {
+		r, err := readings.Create(ctx, model.MeterReading{MeterID: meter.ID, Period: day.FirstOfMonth(), ReadingDate: day, T1: value, Source: "manual"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup(t, pool, "meter_readings", r.ID)
+	}
+	add(old, date(2025, 11, 30), 100)
+	add(old, date(2025, 12, 31), 110)
+	add(replacement, date(2026, 10, 20), 0)
+	add(replacement, date(2026, 11, 20), 5)
+	catalog, err := NewTariffs(pool).Create(ctx, model.Tariff{OrganizationID: org.ID, Name: "working-period-price", Unit: "kwh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "tariffs", catalog.ID)
+	price, err := NewTariffPrices(pool).Create(ctx, model.TariffPrice{TariffID: catalog.ID, Price: 2, ValidFrom: date(2025, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "tariff_prices", price.ID)
+	name := "working-period-contract"
+	in := model.ElectricityContractUpdate{Name: &name, MeterIDs: []int64{old.ID, replacement.ID}, TariffT1ID: &catalog.ID}
+	store := NewElectricity(pool)
+	if err := store.CreateElectricityContract(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM electricity_contracts WHERE name=$1`, name).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "electricity_contracts", id)
+	check := func(period model.Date, meterID int64, want float64) {
+		t.Helper()
+		result, err := store.CalculateElectricity(ctx, period)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range result.Contracts {
+			if c.ID == id {
+				if !c.Complete || c.Total != want || len(c.Meters) != 1 || c.Meters[0].MeterID != meterID {
+					t.Fatalf("%s: %+v", period, c)
+				}
+				return
+			}
+		}
+		t.Fatal("contract missing")
+	}
+	check(date(2025, 12, 1), old.ID, 20)
+	check(date(2026, 11, 1), replacement.ID, 10)
+	in.MeterIDs = append(in.MeterIDs, missing.ID)
+	if err := store.UpdateElectricityContract(ctx, id, in); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.CalculateElectricity(ctx, date(2025, 12, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range result.Contracts {
+		if c.ID == id {
+			if c.Complete || c.Total != 20 || len(c.Meters) != 2 {
+				t.Fatalf("missing active meter should make result incomplete: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("contract missing")
+}

@@ -216,8 +216,12 @@ SELECT c.id AS contract_id, c.name AS contract_name, COALESCE(m.id,0) AS meter_i
  (SELECT price FROM tariff_prices tp WHERE tp.tariff_id=c.tariff_t3_id AND tp.deleted_at IS NULL AND tp.valid_from<=$1 AND (tp.valid_to IS NULL OR tp.valid_to>=$1))
  ELSE p.t3 END AS price_t3
 FROM electricity_contracts c
-LEFT JOIN electricity_contract_meters cm ON cm.contract_id=c.id
-LEFT JOIN meters m ON m.id=cm.meter_id AND m.installed_at<=($1::date+interval '1 month'-interval '1 day')::date AND (m.removed_at IS NULL OR m.removed_at>=$1)
+LEFT JOIN (
+ electricity_contract_meters cm
+ JOIN meters m ON m.id=cm.meter_id AND m.deleted_at IS NULL
+   AND m.installed_at<=($1::date+interval '1 month'-interval '1 day')::date
+   AND (m.removed_at IS NULL OR m.removed_at>=$1)
+) ON cm.contract_id=c.id
 LEFT JOIN meter_readings r ON r.meter_id=m.id AND r.period=$1 AND r.deleted_at IS NULL
 LEFT JOIN LATERAL (SELECT x.t1,x.t2,x.t3 FROM meter_readings x WHERE x.meter_id=m.id AND x.deleted_at IS NULL AND x.reading_date<r.reading_date ORDER BY x.reading_date DESC LIMIT 1) prev ON true
 LEFT JOIN LATERAL (SELECT x.t1,x.t2,x.t3 FROM electricity_contract_prices x WHERE x.contract_id=c.id AND x.valid_from<=$1 AND (x.valid_to IS NULL OR x.valid_to>=$1) LIMIT 1) p ON true

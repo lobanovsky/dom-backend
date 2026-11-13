@@ -52,6 +52,7 @@ const residentCookie = "dom_resident_session"
 
 type residentHandlers struct {
 	store   ResidentStore
+	gate    GateStore
 	options ResidentOptions
 	mu      sync.Mutex
 	limits  map[string]residentLimit
@@ -96,6 +97,9 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 	public.HandleFunc("POST /api/v1/resident/auth/set-password", h.redeem)
 	public.HandleFunc("POST /api/v1/resident/auth/login", h.login)
 	private := http.NewServeMux()
+	if h.gate != nil {
+		gateHandlers{h.gate}.registerResident(private)
+	}
 	private.HandleFunc("GET /api/v1/resident/me", h.me)
 	private.HandleFunc("GET /api/v1/resident/properties", h.properties)
 	private.HandleFunc("GET /api/v1/resident/meters", h.meters)

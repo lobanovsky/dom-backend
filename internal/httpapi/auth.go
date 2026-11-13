@@ -177,6 +177,12 @@ func allowed(u model.User, method, path string) bool {
 	if u.IsAdmin() {
 		return true
 	}
+	if u.Role == model.RoleGuard {
+		return gateGuardAllowed(method, path)
+	}
+	if path == "/api/v1/gate-access" || strings.HasPrefix(path, "/api/v1/gate-access/") {
+		return false
+	}
 	if path == "/api/v1/users" || strings.HasPrefix(path, "/api/v1/users/") {
 		return false
 	}

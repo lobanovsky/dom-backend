@@ -9,6 +9,7 @@ import (
 
 type Deps struct {
 	Residents       ResidentStore
+	Gate            GateStore
 	ResidentOptions ResidentOptions
 	Auth            *auth.Auth
 	Users           UserStore
@@ -77,6 +78,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
 
 	api := http.NewServeMux()
+	if d.Gate != nil {
+		gateHandlers{d.Gate}.registerAdmin(api)
+	}
 	if d.MeterReadingExport != nil {
 		api.HandleFunc("GET /api/v1/meter-readings/export", meterExportHandlers{d.MeterReadingExport}.export)
 	}
@@ -89,7 +93,7 @@ func NewRouter(d Deps) http.Handler {
 	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	api.HandleFunc("PUT /api/v1/auth/password", a.changePassword)
 	if d.Residents != nil {
-		h := &residentHandlers{store: d.Residents, options: d.ResidentOptions}
+		h := &residentHandlers{store: d.Residents, options: d.ResidentOptions, gate: d.Gate}
 		h.register(mux, api)
 	}
 	userHandlers{d.Users, a}.register(api)

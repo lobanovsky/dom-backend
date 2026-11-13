@@ -8,10 +8,11 @@ import (
 
 const (
 	RoleAdmin  = "admin"  // полный доступ и управление пользователями
+	RoleGuard  = "guard"  // только заявки на въезд
 	RoleViewer = "viewer" // только просмотр
 )
 
-var userRoles = []string{RoleAdmin, RoleViewer}
+var userRoles = []string{RoleAdmin, RoleViewer, RoleGuard}
 
 const (
 	minPasswordLen = 8

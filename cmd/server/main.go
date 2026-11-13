@@ -156,6 +156,7 @@ func run(log *slog.Logger) error {
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Auth:                 a,
 			Residents:            residents,
+			Gate:                 store.NewGate(pool),
 			ResidentOptions:      httpapi.ResidentOptions{BaseURL: residentConfig.BaseURL, MailEnabled: residentConfig.Enabled()},
 			Users:                users,
 			Organizations:        store.NewOrganizations(pool),

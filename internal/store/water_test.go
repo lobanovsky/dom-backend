@@ -93,7 +93,7 @@ func TestWaterContractsAndCalculation(t *testing.T) {
 		{9, 10, 20, 30, true, 1},
 		{10, 20, 80, 60, true, 1}, // Новая цена берётся из истории справочника.
 		{11, 0, 0, 0, false, 1},
-		{12, 0, 0, 0, false, 1}, // Пропущен предыдущий месяц; расход за два месяца не начисляется за один.
+		{12, 25, 0, 75, false, 1}, // Разность с октябрём учтена; расчёт неполный только из-за отсутствия цены воды.
 	} {
 		r, err := s.CalculateWater(ctx, date(2026, time.Month(tc.month), 1))
 		if err != nil {
@@ -103,6 +103,40 @@ func TestWaterContractsAndCalculation(t *testing.T) {
 		if c.Volume != tc.volume || c.WaterAmount != tc.water || c.SewerAmount != tc.sewer || c.Total != tc.water+tc.sewer || c.Complete != tc.complete || len(c.Meters) != tc.meters {
 			t.Fatalf("month %d: %+v", tc.month, c)
 		}
+	}
+	// Пропуск месяца не блокирует расчёт; используются цена выбранного месяца и даты исходных замеров.
+	gapMeter := makeMeter("water-gap", date(2025, 1, 1), nil, 0)
+	add(gapMeter, date(2025, 12, 2), 200612)
+	add(gapMeter, date(2026, 2, 28), 205641)
+	gapSettings := in
+	gapSettings.MeterIDs = []int64{gapMeter.ID}
+	if err := s.UpdateWaterContract(ctx, id, gapSettings); err != nil {
+		t.Fatal(err)
+	}
+	gapResult, err := s.CalculateWater(ctx, date(2026, 2, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gap := gapResult.Contracts[0].Meters[0]
+	if !gapResult.Complete || gapResult.Total != 25145 || gap.Volume == nil || *gap.Volume != 5029 || !gap.ReadingGap || gap.PreviousDate == nil || gap.PreviousDate.Format("2006-01-02") != "2025-12-02" || gap.CurrentDate == nil || gap.CurrentDate.Format("2006-01-02") != "2026-02-28" {
+		t.Fatalf("gap calculation: %+v %+v", gapResult, gap)
+	}
+	noReading, err := s.CalculateWater(ctx, date(2026, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noReading.Complete || noReading.Total != 0 || noReading.Contracts[0].Meters[0].ReadingGap {
+		t.Fatalf("missing current: %+v", noReading)
+	}
+	if err := s.UpdateWaterContract(ctx, id, in); err != nil {
+		t.Fatal(err)
+	}
+	normal, err := s.CalculateWater(ctx, date(2026, 9, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normal.Contracts[0].Meters[0].ReadingGap {
+		t.Fatal("consecutive readings must not warn")
 	}
 	// Первый расчёт после установки в конце предыдущего месяца — от начального значения.
 	late := makeMeter("water-late-install", date(2026, 8, 29), nil, 7)

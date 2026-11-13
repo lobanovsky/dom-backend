@@ -65,16 +65,19 @@ type WaterContractResult struct {
 }
 
 type WaterMeterResult struct {
-	MeterID     int64    `json:"meter_id" db:"meter_id"`
-	Name        string   `json:"name" db:"meter_name"`
-	Serial      string   `json:"serial_number" db:"serial_number"`
-	Previous    *float64 `json:"previous" db:"previous"`
-	Current     *float64 `json:"current" db:"current"`
-	Volume      *float64 `json:"volume" db:"volume"`
-	WaterPrice  *float64 `json:"water_price" db:"water_price"`
-	SewerPrice  *float64 `json:"sewer_price" db:"sewer_price"`
-	WaterAmount float64  `json:"water_amount" db:"water_amount"`
-	SewerAmount float64  `json:"sewer_amount" db:"sewer_amount"`
-	Amount      float64  `json:"amount" db:"amount"`
-	Status      string   `json:"status" db:"status"`
+	PreviousDate *Date    `json:"previous_date" db:"previous_date"`
+	CurrentDate  *Date    `json:"current_date" db:"current_date"`
+	ReadingGap   bool     `json:"reading_gap" db:"reading_gap"`
+	MeterID      int64    `json:"meter_id" db:"meter_id"`
+	Name         string   `json:"name" db:"meter_name"`
+	Serial       string   `json:"serial_number" db:"serial_number"`
+	Previous     *float64 `json:"previous" db:"previous"`
+	Current      *float64 `json:"current" db:"current"`
+	Volume       *float64 `json:"volume" db:"volume"`
+	WaterPrice   *float64 `json:"water_price" db:"water_price"`
+	SewerPrice   *float64 `json:"sewer_price" db:"sewer_price"`
+	WaterAmount  float64  `json:"water_amount" db:"water_amount"`
+	SewerAmount  float64  `json:"sewer_amount" db:"sewer_amount"`
+	Amount       float64  `json:"amount" db:"amount"`
+	Status       string   `json:"status" db:"status"`
 }

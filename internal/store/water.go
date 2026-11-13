@@ -124,9 +124,11 @@ func (s *Water) CalculateWater(ctx context.Context, period model.Date) (model.Wa
 WITH readings AS (
  SELECT c.id contract_id,c.name contract_name,COALESCE(m.id,0) meter_id,
  COALESCE(m.name,m.serial_number,'') meter_name,COALESCE(m.serial_number,'') serial_number,
- r.t1 AS current,
+ r.t1 AS current,r.reading_date AS current_date,
+ CASE WHEN prev.id IS NOT NULL THEN prev.reading_date WHEN m.installed_at>=($1::date-interval '1 month')::date THEN m.installed_at END AS previous_date,
+ COALESCE(r.id IS NOT NULL AND prev.period<($1::date-interval '1 month')::date,false) AS reading_gap,
  CASE WHEN prev.id IS NOT NULL THEN prev.t1 WHEN m.installed_at>=($1::date-interval '1 month')::date THEN m.initial_t1 END AS previous,
- CASE WHEN r.id IS NOT NULL AND (prev.period=($1::date-interval '1 month')::date
+ CASE WHEN r.id IS NOT NULL AND (prev.id IS NOT NULL
   OR (prev.id IS NULL AND m.installed_at>=($1::date-interval '1 month')::date))
  THEN (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient END AS volume,
  (SELECT price FROM tariff_prices p WHERE p.tariff_id=c.water_tariff_id AND p.deleted_at IS NULL AND p.valid_from<=$1 AND (p.valid_to IS NULL OR p.valid_to>=$1)) water_price,
@@ -135,7 +137,7 @@ WITH readings AS (
  LEFT JOIN (water_contract_meters cm JOIN meters m ON m.id=cm.meter_id AND m.deleted_at IS NULL
   AND m.installed_at<=($1::date+interval '1 month'-interval '1 day')::date AND (m.removed_at IS NULL OR m.removed_at>=$1)) ON cm.contract_id=c.id
  LEFT JOIN meter_readings r ON r.meter_id=m.id AND r.period=$1 AND r.deleted_at IS NULL
- LEFT JOIN LATERAL (SELECT x.id,x.period,x.t1 FROM meter_readings x WHERE x.meter_id=m.id AND x.deleted_at IS NULL AND x.period<$1 ORDER BY x.period DESC LIMIT 1) prev ON true
+ LEFT JOIN LATERAL (SELECT x.id,x.period,x.reading_date,x.t1 FROM meter_readings x WHERE x.meter_id=m.id AND x.deleted_at IS NULL AND x.period<$1 ORDER BY x.period DESC LIMIT 1) prev ON true
  WHERE c.archived_at IS NULL OR c.archived_at>=$1
 ), amounts AS (
  SELECT *,CASE WHEN volume>=0 THEN COALESCE(round(volume*water_price,2),0) ELSE 0 END water_amount,

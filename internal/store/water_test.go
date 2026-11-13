@@ -104,6 +104,25 @@ func TestWaterContractsAndCalculation(t *testing.T) {
 			t.Fatalf("month %d: %+v", tc.month, c)
 		}
 	}
+	// Первый расчёт после установки в конце предыдущего месяца — от начального значения.
+	late := makeMeter("water-late-install", date(2026, 8, 29), nil, 7)
+	add(late, date(2026, 9, 30), 17)
+	saved := in
+	in.MeterIDs = append(in.MeterIDs, late.ID)
+	if err := s.UpdateWaterContract(ctx, id, in); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.CalculateWater(ctx, date(2026, 9, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Complete || first.Total != 100 {
+		t.Fatalf("first billing after installation: %+v", first)
+	}
+	in = saved
+	if err := s.UpdateWaterContract(ctx, id, in); err != nil {
+		t.Fatal(err)
+	}
 	// Цена стоков остаётся видимой, даже если для воды цены нет.
 	add(replacement, date(2027, 1, 31), 70)
 	r, err := s.CalculateWater(ctx, date(2027, 1, 1))

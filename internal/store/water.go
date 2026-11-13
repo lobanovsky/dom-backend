@@ -125,9 +125,9 @@ WITH readings AS (
  SELECT c.id contract_id,c.name contract_name,COALESCE(m.id,0) meter_id,
  COALESCE(m.name,m.serial_number,'') meter_name,COALESCE(m.serial_number,'') serial_number,
  r.t1 AS current,
- CASE WHEN prev.id IS NOT NULL THEN prev.t1 WHEN m.installed_at>=$1 THEN m.initial_t1 END AS previous,
+ CASE WHEN prev.id IS NOT NULL THEN prev.t1 WHEN m.installed_at>=($1::date-interval '1 month')::date THEN m.initial_t1 END AS previous,
  CASE WHEN r.id IS NOT NULL AND (prev.period=($1::date-interval '1 month')::date
-  OR (prev.id IS NULL AND m.installed_at>=$1))
+  OR (prev.id IS NULL AND m.installed_at>=($1::date-interval '1 month')::date))
  THEN (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient END AS volume,
  (SELECT price FROM tariff_prices p WHERE p.tariff_id=c.water_tariff_id AND p.deleted_at IS NULL AND p.valid_from<=$1 AND (p.valid_to IS NULL OR p.valid_to>=$1)) water_price,
  (SELECT price FROM tariff_prices p WHERE p.tariff_id=c.sewer_tariff_id AND p.deleted_at IS NULL AND p.valid_from<=$1 AND (p.valid_to IS NULL OR p.valid_to>=$1)) sewer_price

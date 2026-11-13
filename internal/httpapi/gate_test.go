@@ -98,3 +98,31 @@ func TestGateResidentIdentity(t *testing.T) {
 		t.Fatalf("invalid zone: %d", w.Code)
 	}
 }
+
+func (f *fakeGate) CreateBatch(_ context.Context, p int64, in model.GateBatchInput) ([]model.GateRequest, error) {
+	f.person = p
+	return []model.GateRequest{}, nil
+}
+
+func TestGateResidentBatch(t *testing.T) {
+	f := &fakeGate{}
+	mux := http.NewServeMux()
+	gateHandlers{f}.registerResident(mux)
+	call := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/v1/resident/gate-access/batch", strings.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), residentKey{}, model.ResidentAccount{PersonID: 17}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	body := `{"premises_ids":[1,2],"phone":"+7 926 793 63 63","recipient_name":"Анна","relation":"guest","no_personal_vehicle":true}`
+	if w := call(body); w.Code != 201 || f.person != 17 {
+		t.Fatalf("batch identity: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(strings.Replace(body, `[1,2]`, `[]`, 1)); w.Code != 422 {
+		t.Fatalf("empty selection: %d", w.Code)
+	}
+	if w := call(strings.TrimSuffix(body, "}") + `,"zone":"parking"}`); w.Code != 400 {
+		t.Fatalf("client-supplied zone: %d", w.Code)
+	}
+}

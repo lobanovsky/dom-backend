@@ -9,6 +9,7 @@ import (
 )
 
 type GateStore interface {
+	CreateBatch(context.Context, int64, model.GateBatchInput) ([]model.GateRequest, error)
 	Properties(context.Context, int64) ([]model.GateProperty, error)
 	List(context.Context, int64, model.GateFilter, int, int) ([]model.GateRequest, error)
 	Create(context.Context, int64, model.GateInput) (model.GateRequest, error)
@@ -49,6 +50,7 @@ func (h gateHandlers) registerResident(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/resident/gate-access", h.list(true))
 	mux.HandleFunc("GET /api/v1/resident/gate-access/properties", h.properties)
 	mux.HandleFunc("POST /api/v1/resident/gate-access", h.create)
+	mux.HandleFunc("POST /api/v1/resident/gate-access/batch", h.createBatch)
 	mux.HandleFunc("POST /api/v1/resident/gate-access/{id}/action", h.action(true))
 	mux.HandleFunc("GET /api/v1/resident/gate-access/{id}/events", h.events(true))
 }
@@ -161,4 +163,25 @@ func (h gateHandlers) events(resident bool) http.HandlerFunc {
 		}
 		writeJSON(w, 200, map[string]any{"items": items})
 	}
+}
+
+func (h gateHandlers) createBatch(w http.ResponseWriter, r *http.Request) {
+	person, ok := gatePerson(w, r, true)
+	if !ok {
+		return
+	}
+	var in model.GateBatchInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := in.Validate(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	items, err := h.s.CreateBatch(r.Context(), person, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{"items": items})
 }

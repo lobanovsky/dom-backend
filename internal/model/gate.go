@@ -15,6 +15,7 @@ type GateInput struct {
 	Relation          string `json:"relation"`
 	VehiclePlate      string `json:"vehicle_plate"`
 	VehicleBrand      string `json:"vehicle_brand"`
+	NoPersonalVehicle bool   `json:"no_personal_vehicle"`
 	OccasionalVehicle bool   `json:"occasional_vehicle"`
 	ValidUntil        *Date  `json:"valid_until"`
 	Comment           string `json:"comment"`
@@ -28,6 +29,9 @@ func (v *GateInput) Normalize() {
 	v.Comment = strings.TrimSpace(v.Comment)
 }
 func (v GateInput) Validate() error {
+	if v.NoPersonalVehicle && (v.VehiclePlate != "" || v.VehicleBrand != "") {
+		return invalid("vehicle", "car must be empty without a personal vehicle")
+	}
 	if v.PremisesID <= 0 {
 		return invalid("premises_id", "must be positive")
 	}
@@ -55,6 +59,8 @@ func (v GateInput) Validate() error {
 }
 
 type GateRequest struct {
+	GroupID           int64     `json:"group_id" db:"group_id"`
+	NoPersonalVehicle bool      `json:"no_personal_vehicle" db:"no_personal_vehicle"`
 	ID                int64     `json:"id" db:"id"`
 	PersonID          int64     `json:"person_id" db:"person_id"`
 	PremisesID        int64     `json:"premises_id" db:"premises_id"`
@@ -96,3 +102,39 @@ type GateEvent struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 type GateFilter struct{ Status, Zone, Q string }
+
+// GateBatchInput — одна заявка на несколько собственных объектов. Зоны определяет сервер.
+type GateBatchInput struct {
+	PremisesIDs       []int64 `json:"premises_ids"`
+	Phone             string  `json:"phone"`
+	RecipientName     string  `json:"recipient_name"`
+	Relation          string  `json:"relation"`
+	VehiclePlate      string  `json:"vehicle_plate"`
+	VehicleBrand      string  `json:"vehicle_brand"`
+	NoPersonalVehicle bool    `json:"no_personal_vehicle"`
+	Comment           string  `json:"comment"`
+}
+
+func (v GateBatchInput) Contact() GateInput {
+	return GateInput{Phone: v.Phone, RecipientName: v.RecipientName, Relation: v.Relation, VehiclePlate: v.VehiclePlate, VehicleBrand: v.VehicleBrand, NoPersonalVehicle: v.NoPersonalVehicle, Comment: v.Comment}
+}
+func (v GateBatchInput) Validate() error {
+	if len(v.PremisesIDs) == 0 || len(v.PremisesIDs) > 50 {
+		return invalid("premises_ids", "select 1 to 50 properties")
+	}
+	seen := map[int64]bool{}
+	for _, id := range v.PremisesIDs {
+		if id <= 0 || seen[id] {
+			return invalid("premises_ids", "must be unique positive IDs")
+		}
+		seen[id] = true
+	}
+	if v.Relation == "service" {
+		return invalid("relation", "select owner, tenant, relative or guest")
+	}
+	contact := v.Contact()
+	contact.PremisesID = v.PremisesIDs[0]
+	contact.Zone = "courtyard"
+	contact.Normalize()
+	return contact.Validate()
+}

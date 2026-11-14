@@ -94,6 +94,8 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           TAG: ${{ needs.publish.outputs.tag }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ELDES_API_URL: ${{ secrets.ELDES_API_URL }}
+          GATE_ACCESS_INTEGRATION_TOKEN: ${{ secrets.GATE_ACCESS_INTEGRATION_TOKEN }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
@@ -120,6 +122,8 @@ jobs:
             echo "DOCKER_USERNAME=$DOCKER_USERNAME"
             echo "TAG=$TAG"
             echo "DATABASE_URL=$DATABASE_URL"
+            echo "ELDES_API_URL=${ELDES_API_URL:-https://gate-backend.housekpr.ru/api/integration/gate-access}"
+            echo "GATE_ACCESS_INTEGRATION_TOKEN=$GATE_ACCESS_INTEGRATION_TOKEN"
             echo "ADMIN_USERNAME=$ADMIN_USERNAME"
             echo "ADMIN_PASSWORD_HASH=$admin_password_hash_escaped"
             echo "ADMIN_SESSION_SECRET=$ADMIN_SESSION_SECRET"

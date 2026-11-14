@@ -11,9 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Gate struct{ pool *pgxpool.Pool }
+type Gate struct {
+	pool   *pgxpool.Pool
+	syncer GateAccessSyncer
+}
 
-func NewGate(p *pgxpool.Pool) *Gate { return &Gate{p} }
+type GateAccessSyncer interface {
+	Sync(context.Context, string, string, string, bool) error
+}
+
+func NewGate(p *pgxpool.Pool, syncers ...GateAccessSyncer) *Gate {
+	g := &Gate{pool: p}
+	if len(syncers) > 0 {
+		g.syncer = syncers[0]
+	}
+	return g
+}
 
 const gateToday = `(now() AT TIME ZONE 'Europe/Moscow')::date`
 const gateKindZone = `((p.kind IN('apartment','commercial') AND g.zone='courtyard') OR (p.kind='parking_space' AND g.zone='parking'))`
@@ -113,6 +126,11 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 	if valid {
 		return zero, &Error{ErrConflict, "gate: duplicate request"}
 	}
+	if s.syncer != nil {
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, zone+":"+in.Phone); err != nil {
+			return zero, mapErr(err)
+		}
+	}
 	var id int64
 	if err = tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('gate_requests','id'))`).Scan(&id); err != nil {
 		return zero, mapErr(err)
@@ -124,6 +142,11 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_user_id,note) VALUES($1,'created','admin',$2,'Доступ добавлен администратором без заявки')`, id, user.ID); err != nil {
 		return zero, mapErr(err)
+	}
+	if s.syncer != nil {
+		if err = s.syncer.Sync(ctx, zone, in.Phone, in.RecipientName, true); err != nil {
+			return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return zero, mapErr(err)
@@ -368,8 +391,11 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		ID          int64  `db:"id"`
 		Status      string `db:"status"`
 		OwnershipID int64  `db:"ownership_id"`
+		Zone        string `db:"zone"`
+		Phone       string `db:"phone"`
+		Name        string `db:"recipient_name"`
 	}
-	states, err := collect[state](tx.Query(ctx, `SELECT id,status,ownership_id FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	states, err := collect[state](tx.Query(ctx, `SELECT id,status,ownership_id,zone,phone,recipient_name FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
 	if err != nil {
 		return zero, err
 	}
@@ -388,6 +414,26 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		}
 		if !eligible {
 			return zero, invalid("gate: property or expiry is no longer eligible")
+		}
+	}
+	if s.syncer != nil && (action == "approve" || action == "revoke") {
+		for _, row := range states {
+			if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, row.Zone+":"+row.Phone); err != nil {
+				return zero, mapErr(err)
+			}
+		}
+		for _, row := range states {
+			enabled := action == "approve"
+			if !enabled {
+				var remains bool
+				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active)`, groupID, row.Zone, row.Phone).Scan(&remains); err != nil {
+					return zero, mapErr(err)
+				}
+				enabled = remains
+			}
+			if err = s.syncer.Sync(ctx, row.Zone, row.Phone, row.Name, enabled); err != nil {
+				return zero, &Error{ErrIntegration, "не удалось обновить доступ на устройствах"}
+			}
 		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE gate_requests SET status=$2,review_note=$3,updated_at=now() WHERE group_id=$1`, groupID, target, note); err != nil {

@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict")
-	ErrInvalid  = errors.New("invalid")
+	ErrNotFound    = errors.New("not found")
+	ErrConflict    = errors.New("conflict")
+	ErrInvalid     = errors.New("invalid")
+	ErrIntegration = errors.New("integration")
 )
 
 // Error — ошибка с понятным клиенту сообщением; Kind — одна из Err*.

@@ -210,6 +210,8 @@ func writeErr(w http.ResponseWriter, err error) {
 			writeError(w, http.StatusNotFound, se.Msg)
 		case errors.Is(se.Kind, store.ErrConflict):
 			writeError(w, http.StatusConflict, se.Msg)
+		case errors.Is(se.Kind, store.ErrIntegration):
+			writeError(w, http.StatusBadGateway, se.Msg)
 		default:
 			writeError(w, http.StatusUnprocessableEntity, se.Msg)
 		}

@@ -39,15 +39,18 @@ func (s *Gate) Properties(ctx context.Context, person int64) ([]model.GateProper
  FROM premises p JOIN buildings b ON b.id=p.building_id WHERE p.kind IN('apartment','parking_space') AND `+residentOwns+` ORDER BY p.building_id,p.kind,p.number`, person))
 }
 func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit, offset int) ([]model.GateRequest, error) {
-	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`, matched AS (
- SELECT DISTINCT group_id FROM gate_view WHERE ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
+	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`, presentation AS (
+ SELECT group_id,CASE WHEN bool_or(active) THEN 'approved' WHEN bool_and(status='pending') THEN 'pending' ELSE 'rejected' END display_status
+ FROM gate_view GROUP BY group_id
+ ), matched AS (
+ SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,vehicle_plate,vehicle_brand,premises_number,address) ILIKE '%'||$4||'%'
  OR ($5<>'' AND phone LIKE '%'||$5||'%'))
  ), selected_groups AS (
  SELECT g.group_id FROM gate_view g JOIN matched m USING(group_id) GROUP BY g.group_id
  ORDER BY max(g.created_at) DESC,g.group_id DESC LIMIT $6 OFFSET $7
  ) SELECT * FROM gate_view WHERE group_id IN(SELECT group_id FROM selected_groups)
- ORDER BY created_at DESC,group_id DESC,id`, person, f.Status, f.Zone, strings.TrimSpace(f.Q), model.NormalizePhone(f.Q), limit, offset))
+ ORDER BY created_at DESC,group_id DESC,id`, person, f.Status, f.Zone, strings.TrimSpace(f.Q), model.NormalizePhone(f.Q), limit, offset, f.DisplayStatus))
 }
 func (s *Gate) get(ctx context.Context, person, id int64) (model.GateRequest, error) {
 	return one[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE id=$1 AND ($2::bigint=0 OR person_id=$2)`, id, person))

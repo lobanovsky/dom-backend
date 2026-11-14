@@ -83,6 +83,10 @@ func TestGateBatch(t *testing.T) {
 			t.Fatalf("batch approval: %+v %v", v, e)
 		}
 	}
+	approved, err := s.List(ctx, owner.ID, model.GateFilter{DisplayStatus: "approved"}, 50, 0)
+	if err != nil || len(approved) != 2 {
+		t.Fatalf("approved presentation: %+v %v", approved, err)
+	}
 	events, err := s.Events(ctx, owner.ID, rows[1].ID)
 	if err != nil || len(events) != 2 {
 		t.Fatalf("group history must not duplicate events: %+v %v", events, err)
@@ -95,6 +99,10 @@ func TestGateBatch(t *testing.T) {
 		if e != nil || v.Active || v.Status != "revoked" {
 			t.Fatalf("batch revocation: %+v %v", v, e)
 		}
+	}
+	rejected, err := s.List(ctx, owner.ID, model.GateFilter{DisplayStatus: "rejected"}, 50, 0)
+	if err != nil || len(rejected) != 2 {
+		t.Fatalf("revoked must be in rejected filter: %+v %v", rejected, err)
 	}
 	// Создаём конфликт на последнем объекте: первый объект и его событие должны откатиться.
 	single, err := s.Create(ctx, owner.ID, model.GateInput{PremisesID: parking, Zone: "parking", Phone: in.Phone, RecipientName: "Guest", Relation: "guest"})
@@ -189,6 +197,20 @@ func TestGateBatch(t *testing.T) {
 		if e != nil || v.Status != "pending" || v.Active {
 			t.Fatalf("partial approval committed: %+v %v", v, e)
 		}
+	}
+
+	pendingGroups, err := s.List(ctx, owner.ID, model.GateFilter{DisplayStatus: "pending"}, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	countWaiting := 0
+	for _, r := range pendingGroups {
+		if r.GroupID == waitingID {
+			countWaiting++
+		}
+	}
+	if countWaiting != 2 {
+		t.Fatalf("pending group keeps its review status until a decision: %d", countWaiting)
 	}
 
 }

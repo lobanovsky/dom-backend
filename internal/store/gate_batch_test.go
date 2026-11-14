@@ -56,52 +56,59 @@ func TestGateBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	groupID := rows[0].GroupID
+	if len(rows) != 2 {
+		t.Fatalf("batch rows: %+v", rows)
+	}
+	groupIDs := []int64{rows[0].GroupID, rows[1].GroupID}
 	t.Cleanup(func() {
-		if _, e := pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=$1`, groupID); e != nil {
+		if _, e := pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=ANY($1::bigint[])`, groupIDs); e != nil {
 			t.Error(e)
 		}
 	})
-	if len(rows) != 2 || rows[1].GroupID != groupID || rows[0].Zone != "courtyard" || rows[1].Zone != "parking" || !rows[0].NoPersonalVehicle {
+	if rows[0].GroupID == rows[1].GroupID || rows[0].Zone != "courtyard" || rows[1].Zone != "parking" || !rows[0].NoPersonalVehicle {
 		t.Fatalf("batch rows: %+v", rows)
 	}
 	listed, err := s.List(ctx, owner.ID, model.GateFilter{Zone: "parking"}, 1, 0)
-	if err != nil || len(listed) != 2 {
-		t.Fatalf("filtered group must include both objects: %+v %v", listed, err)
+	if err != nil || len(listed) != 1 || listed[0].Zone != "parking" {
+		t.Fatalf("parking filter must include only its zone group: %+v %v", listed, err)
 	}
 	next, err := s.List(ctx, owner.ID, model.GateFilter{}, 1, 1)
-	if err != nil || len(next) != 0 {
+	if err != nil || len(next) != 1 {
 		t.Fatalf("pagination must count groups: %+v %v", next, err)
 	}
-	// Решение по любому объекту заявки применяется к группе.
+	// Одобрение паркинга не меняет заявку на двор.
 	if _, err = s.Act(ctx, 0, guard, rows[1].ID, "approve", "Проверено"); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range rows {
-		v, e := s.get(ctx, owner.ID, r.ID)
-		if e != nil || !v.Active {
-			t.Fatalf("batch approval: %+v %v", v, e)
-		}
+	parkingApproved, e := s.get(ctx, owner.ID, rows[1].ID)
+	if e != nil || !parkingApproved.Active {
+		t.Fatalf("parking approval: %+v %v", parkingApproved, e)
+	}
+	courtyardPending, e := s.get(ctx, owner.ID, rows[0].ID)
+	if e != nil || courtyardPending.Active || courtyardPending.Status != "pending" {
+		t.Fatalf("courtyard request changed with parking decision: %+v %v", courtyardPending, e)
 	}
 	approved, err := s.List(ctx, owner.ID, model.GateFilter{DisplayStatus: "approved"}, 50, 0)
-	if err != nil || len(approved) != 2 {
+	if err != nil || len(approved) != 1 {
 		t.Fatalf("approved presentation: %+v %v", approved, err)
 	}
 	events, err := s.Events(ctx, owner.ID, rows[1].ID)
 	if err != nil || len(events) != 2 {
 		t.Fatalf("group history must not duplicate events: %+v %v", events, err)
 	}
-	if _, err = s.Act(ctx, owner.ID, model.User{}, groupID, "revoke", ""); err != nil {
+	if _, err = s.Act(ctx, owner.ID, model.User{}, rows[1].GroupID, "revoke", ""); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range rows {
-		v, e := s.get(ctx, owner.ID, r.ID)
-		if e != nil || v.Active || v.Status != "revoked" {
-			t.Fatalf("batch revocation: %+v %v", v, e)
-		}
+	parkingRevoked, e := s.get(ctx, owner.ID, rows[1].ID)
+	if e != nil || parkingRevoked.Active || parkingRevoked.Status != "revoked" {
+		t.Fatalf("parking revocation: %+v %v", parkingRevoked, e)
+	}
+	courtyardPending, e = s.get(ctx, owner.ID, rows[0].ID)
+	if e != nil || courtyardPending.Status != "pending" {
+		t.Fatalf("parking revocation changed courtyard request: %+v %v", courtyardPending, e)
 	}
 	rejected, err := s.List(ctx, owner.ID, model.GateFilter{DisplayStatus: "rejected"}, 50, 0)
-	if err != nil || len(rejected) != 2 {
+	if err != nil || len(rejected) != 1 {
 		t.Fatalf("revoked must be in rejected filter: %+v %v", rejected, err)
 	}
 	// Создаём конфликт на последнем объекте: первый объект и его событие должны откатиться.
@@ -166,8 +173,8 @@ func TestGateBatch(t *testing.T) {
 	for v := range out {
 		if v.err == nil {
 			success++
-			gid := v.rows[0].GroupID
-			t.Cleanup(func() { pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=$1`, gid) })
+			gids := []int64{v.rows[0].GroupID, v.rows[1].GroupID}
+			t.Cleanup(func() { pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=ANY($1::bigint[])`, gids) })
 		} else if errors.Is(v.err, ErrConflict) {
 			conflict++
 		} else {
@@ -177,15 +184,16 @@ func TestGateBatch(t *testing.T) {
 	if success != 1 || conflict != 1 {
 		t.Fatalf("concurrent groups: %d/%d", success, conflict)
 	}
-	// Утрата права на один объект запрещает одобрение всей ожидающей заявки.
+	// Утрата права запрещает одобрение соответствующей заявки.
 	lost := in
 	lost.Phone = "79991234572"
 	waiting, err := s.CreateBatch(ctx, owner.ID, lost)
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitingIDs := []int64{waiting[0].GroupID, waiting[1].GroupID}
 	waitingID := waiting[0].GroupID
-	t.Cleanup(func() { pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=$1`, waitingID) })
+	t.Cleanup(func() { pool.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=ANY($1::bigint[])`, waitingIDs) })
 	if _, err = pool.Exec(ctx, `UPDATE ownerships SET valid_to='2020-02-01' WHERE premises_id=$1`, apartment); err != nil {
 		t.Fatal(err)
 	}
@@ -209,8 +217,8 @@ func TestGateBatch(t *testing.T) {
 			countWaiting++
 		}
 	}
-	if countWaiting != 2 {
-		t.Fatalf("pending group keeps its review status until a decision: %d", countWaiting)
+	if countWaiting != 1 {
+		t.Fatalf("courtyard group keeps its review status independently: %d", countWaiting)
 	}
 
 }

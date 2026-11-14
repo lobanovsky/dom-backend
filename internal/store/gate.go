@@ -318,7 +318,7 @@ func (s *Gate) CreateBatch(ctx context.Context, person int64, in model.GateBatch
 	if count != len(ids) {
 		return nil, invalid("gate: property is not eligible")
 	}
-	var groupID int64
+	groupIDsByZone := make(map[string]int64, 2)
 	for _, premise := range ids {
 		contact := in.Contact()
 		contact.PremisesID = premise
@@ -333,17 +333,24 @@ func (s *Gate) CreateBatch(ctx context.Context, person int64, in model.GateBatch
 		if err = tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('gate_requests','id'))`).Scan(&id); err != nil {
 			return nil, mapErr(err)
 		}
+		groupID := groupIDsByZone[contact.Zone]
 		if groupID == 0 {
 			groupID = id
+			groupIDsByZone[contact.Zone] = groupID
 		}
 		if _, err = s.createRow(ctx, tx, person, contact, id, groupID); err != nil {
 			return nil, err
 		}
 	}
+	groupIDs := make([]int64, 0, len(groupIDsByZone))
+	for _, groupID := range groupIDsByZone {
+		groupIDs = append(groupIDs, groupID)
+	}
+	slices.Sort(groupIDs)
 	if err = tx.Commit(ctx); err != nil {
 		return nil, mapErr(err)
 	}
-	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE group_id=$1 ORDER BY id`, groupID))
+	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE group_id=ANY($1::bigint[]) ORDER BY id`, groupIDs))
 }
 
 // Act фиксирует только допустимый переход; выдача в устройство выполняется отдельным этапом.

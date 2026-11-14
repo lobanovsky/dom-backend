@@ -16,6 +16,7 @@ type fakeGate struct {
 	user   model.User
 	in     model.GateInput
 	filter model.GateFilter
+	rows   []model.GateRequest
 }
 
 func (f *fakeGate) Properties(_ context.Context, p int64) ([]model.GateProperty, error) {
@@ -25,7 +26,7 @@ func (f *fakeGate) Properties(_ context.Context, p int64) ([]model.GateProperty,
 func (f *fakeGate) List(_ context.Context, p int64, filter model.GateFilter, _, _ int) ([]model.GateRequest, error) {
 	f.person = p
 	f.filter = filter
-	return []model.GateRequest{}, nil
+	return f.rows, nil
 }
 
 func TestGateResidentRejectedFilter(t *testing.T) {
@@ -49,10 +50,33 @@ func TestGateResidentRejectedFilter(t *testing.T) {
 		t.Fatalf("invalid rejected filter: %d", w.Code)
 	}
 }
+
+func TestGateResidentCannotReadCommentsOrHistory(t *testing.T) {
+	f := &fakeGate{rows: []model.GateRequest{{ID: 1, Comment: "private comment", ReviewNote: "private decision"}}}
+	mux := http.NewServeMux()
+	gateHandlers{f}.registerResident(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), residentKey{}, model.ResidentAccount{PersonID: 17}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("GET", "/api/v1/resident/gate-access", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"comment":""`) || !strings.Contains(w.Body.String(), `"review_note":""`) {
+		t.Fatalf("resident list leaked internal text: %d %s", w.Code, w.Body.String())
+	}
+	body := `{"premises_id":4,"zone":"courtyard","phone":"8 999 123 45 67","recipient_name":"Анна","relation":"guest","comment":"private comment"}`
+	if w := call("POST", "/api/v1/resident/gate-access", body); w.Code != 201 || !strings.Contains(w.Body.String(), `"comment":""`) || !strings.Contains(w.Body.String(), `"review_note":""`) {
+		t.Fatalf("resident create leaked internal text: %d %s", w.Code, w.Body.String())
+	}
+	if w := call("GET", "/api/v1/resident/gate-access/1/events", ""); w.Code != 404 {
+		t.Fatalf("resident event history should be admin-only: %d", w.Code)
+	}
+}
 func (f *fakeGate) Create(_ context.Context, p int64, in model.GateInput) (model.GateRequest, error) {
 	f.person = p
 	f.in = in
-	return model.GateRequest{ID: 1, PersonID: p}, nil
+	return model.GateRequest{ID: 1, PersonID: p, Comment: in.Comment, ReviewNote: "internal note"}, nil
 }
 func (f *fakeGate) Act(_ context.Context, p int64, u model.User, _ int64, _, _ string) (model.GateRequest, error) {
 	f.person = p

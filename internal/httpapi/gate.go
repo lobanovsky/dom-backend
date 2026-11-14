@@ -52,7 +52,6 @@ func (h gateHandlers) registerResident(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/resident/gate-access", h.create)
 	mux.HandleFunc("POST /api/v1/resident/gate-access/batch", h.createBatch)
 	mux.HandleFunc("POST /api/v1/resident/gate-access/{id}/action", h.action(true))
-	mux.HandleFunc("GET /api/v1/resident/gate-access/{id}/events", h.events(true))
 }
 func gatePerson(w http.ResponseWriter, r *http.Request, resident bool) (int64, bool) {
 	if !resident {
@@ -85,6 +84,12 @@ func (h gateHandlers) list(resident bool) http.HandlerFunc {
 		if err != nil {
 			writeErr(w, err)
 			return
+		}
+		if resident {
+			for i := range items {
+				items[i].Comment = ""
+				items[i].ReviewNote = ""
+			}
 		}
 		writeList(w, items, p)
 	}
@@ -120,6 +125,8 @@ func (h gateHandlers) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	item.Comment = ""
+	item.ReviewNote = ""
 	writeJSON(w, 201, item)
 }
 func (h gateHandlers) action(resident bool) http.HandlerFunc {
@@ -143,6 +150,10 @@ func (h gateHandlers) action(resident bool) http.HandlerFunc {
 		if err != nil {
 			writeErr(w, err)
 			return
+		}
+		if resident {
+			item.Comment = ""
+			item.ReviewNote = ""
 		}
 		writeJSON(w, 200, item)
 	}
@@ -183,6 +194,10 @@ func (h gateHandlers) createBatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	for i := range items {
+		items[i].Comment = ""
+		items[i].ReviewNote = ""
 	}
 	writeJSON(w, 201, map[string]any{"items": items})
 }

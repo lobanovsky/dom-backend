@@ -511,7 +511,7 @@ Workflow `.github/workflows/build-and-deploy-backend.yml` запускается
 - `GET /api/v1/resident/gate-access?status=&zone=&q=&include_rejected=false&limit=50&offset=0` — только заявки текущего физлица. По умолчанию отклонённые группы скрыты; `include_rejected=true` добавляет их.
 - `POST /api/v1/resident/gate-access` → заявка, 201. Обязательные поля: `premises_id`, `zone`, `phone`, `recipient_name` (1–120 символов), `relation` (`owner|relative|tenant|guest|service`). Необязательные: `vehicle_plate` (до 24), `vehicle_brand` (до 80), `occasional_vehicle`, `valid_until` (`YYYY-MM-DD`, включительно по Москве), `comment` (до 500). Телефон нормализуется, хранится цифрами с кодом страны (11–15 цифр).
 - `POST /api/v1/resident/gate-access/{id}/action` с `{action: "cancel"|"revoke", note: ""}` — отмена ожидающей заявки или отзыв одобренной.
-- `GET /api/v1/resident/gate-access/{id}/events` → `{items: [{id, action, actor_role, note, created_at}]}` — история собственной заявки.
+- Комментарии и история решений доступны только в админке; ответы resident API не содержат `comment`/`review_note`, маршрут истории для жителя закрыт.
 
 Админка, cookie `dom_session`, только `admin` и `guard`:
 

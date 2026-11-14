@@ -423,7 +423,7 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 			return zero, invalid("gate: property or expiry is no longer eligible")
 		}
 	}
-	if s.syncer != nil && (action == "approve" || action == "revoke") {
+	if s.syncer != nil && person == 0 && (action == "approve" || action == "revoke") {
 		groups := make(map[string][]string)
 		for _, row := range states {
 			key := row.Zone + ":" + row.Phone

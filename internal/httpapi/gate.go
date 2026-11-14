@@ -13,6 +13,7 @@ type GateStore interface {
 	Properties(context.Context, int64) ([]model.GateProperty, error)
 	List(context.Context, int64, model.GateFilter, int, int) ([]model.GateRequest, error)
 	Create(context.Context, int64, model.GateInput) (model.GateRequest, error)
+	Edit(context.Context, int64, model.User, int64, model.GateEditInput) (model.GateRequest, error)
 	Act(context.Context, int64, model.User, int64, string, string) (model.GateRequest, error)
 	Events(context.Context, int64, int64) ([]model.GateEvent, error)
 }
@@ -43,6 +44,7 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 		}
 	}
 	mux.HandleFunc("GET /api/v1/gate-access", wrap(h.list(false)))
+	mux.HandleFunc("PUT /api/v1/gate-access/{id}", wrap(h.edit(false)))
 	mux.HandleFunc("GET /api/v1/gate-access/{id}/events", wrap(h.events(false)))
 	mux.HandleFunc("POST /api/v1/gate-access/{id}/decision", wrap(h.action(false)))
 }
@@ -51,6 +53,7 @@ func (h gateHandlers) registerResident(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/resident/gate-access/properties", h.properties)
 	mux.HandleFunc("POST /api/v1/resident/gate-access", h.create)
 	mux.HandleFunc("POST /api/v1/resident/gate-access/batch", h.createBatch)
+	mux.HandleFunc("PUT /api/v1/resident/gate-access/{id}", h.edit(true))
 	mux.HandleFunc("POST /api/v1/resident/gate-access/{id}/action", h.action(true))
 }
 func gatePerson(w http.ResponseWriter, r *http.Request, resident bool) (int64, bool) {
@@ -158,6 +161,39 @@ func (h gateHandlers) action(resident bool) http.HandlerFunc {
 		writeJSON(w, 200, item)
 	}
 }
+
+func (h gateHandlers) edit(resident bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		person, ok := gatePerson(w, r, resident)
+		if !ok {
+			return
+		}
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		var in model.GateEditInput
+		if !decodeJSON(w, r, &in) {
+			return
+		}
+		in.Normalize()
+		if err := in.Validate(); err != nil {
+			writeErr(w, err)
+			return
+		}
+		item, err := h.s.Edit(r.Context(), person, currentUser(r), id, in)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if resident {
+			item.Comment = ""
+			item.ReviewNote = ""
+		}
+		writeJSON(w, 200, item)
+	}
+}
+
 func (h gateHandlers) events(resident bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		person, ok := gatePerson(w, r, resident)

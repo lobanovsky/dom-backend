@@ -1,0 +1,8 @@
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM gate_events WHERE action='updated') THEN
+  RAISE EXCEPTION 'cannot roll back gate request edits while update history exists';
+ END IF;
+END $$;
+ALTER TABLE gate_events DROP CONSTRAINT gate_events_action_check;
+ALTER TABLE gate_events ADD CONSTRAINT gate_events_action_check
+ CHECK(action IN('submitted','approved','rejected','cancelled','revoked'));

@@ -35,6 +35,71 @@ type GateInput struct {
 	Comment           string             `json:"comment"`
 }
 
+// GateEditInput — редактируемые сведения заявки; телефон и объект доступа неизменны.
+type GateEditInput struct {
+	Vehicles          []GateVehicleInput `json:"vehicles"`
+	RecipientName     string             `json:"recipient_name"`
+	Relation          string             `json:"relation"`
+	NoPersonalVehicle bool               `json:"no_personal_vehicle"`
+}
+
+func (v *GateEditInput) Normalize() {
+	v.RecipientName = strings.TrimSpace(v.RecipientName)
+	v.Vehicles = append([]GateVehicleInput{}, v.Vehicles...)
+	for i := range v.Vehicles {
+		v.Vehicles[i].PlateNumber = strings.ToUpper(strings.TrimSpace(v.Vehicles[i].PlateNumber))
+		v.Vehicles[i].Brand = strings.TrimSpace(v.Vehicles[i].Brand)
+	}
+}
+
+func (v GateEditInput) Validate() error {
+	if err := oneOf("relation", v.Relation, []string{"owner", "relative", "tenant", "guest"}); err != nil {
+		return err
+	}
+	if v.RecipientName == "" {
+		return invalid("recipient_name", "is required")
+	}
+	if len([]rune(v.RecipientName)) > 120 || strings.IndexFunc(v.RecipientName, unicode.IsControl) >= 0 {
+		return invalid("recipient_name", "gate text is too long or contains control characters")
+	}
+	if len(v.Vehicles) > 10 {
+		return invalid("vehicles", "at most 10 cars are allowed")
+	}
+	if v.NoPersonalVehicle && len(v.Vehicles) > 0 {
+		return invalid("vehicle", "car must be empty without a personal vehicle")
+	}
+	seenCars := map[string]bool{}
+	for _, car := range v.Vehicles {
+		if car.PlateNumber == "" && car.Brand == "" {
+			return invalid("vehicles", "car number or brand is required")
+		}
+		if len([]rune(car.PlateNumber)) > 24 || len([]rune(car.Brand)) > 80 || strings.IndexFunc(car.PlateNumber+car.Brand, unicode.IsControl) >= 0 {
+			return invalid("vehicles", "invalid car number or brand")
+		}
+		key := strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) || r == '-' {
+				return -1
+			}
+			return unicode.ToUpper(r)
+		}, car.PlateNumber)
+		if key != "" && seenCars[key] {
+			return invalid("vehicles", "duplicate car number")
+		}
+		if key != "" {
+			seenCars[key] = true
+		}
+	}
+	return nil
+}
+
+func (v GateEditInput) StoredVehicles() []GateVehicle {
+	out := make([]GateVehicle, 0, len(v.Vehicles))
+	for _, car := range v.Vehicles {
+		out = append(out, GateVehicle{PlateNumber: car.PlateNumber, Brand: car.Brand, Active: true})
+	}
+	return out
+}
+
 func (v *GateInput) Normalize() {
 	v.Phone = NormalizePhone(v.Phone)
 	v.RecipientName = strings.TrimSpace(v.RecipientName)

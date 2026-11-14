@@ -70,6 +70,77 @@ func (s *Gate) Events(ctx context.Context, person, id int64) ([]model.GateEvent,
 	}
 	return collect[model.GateEvent](s.pool.Query(ctx, `SELECT id,action,actor_role,note,created_at FROM gate_events WHERE request_id=(SELECT group_id FROM gate_requests WHERE id=$1) ORDER BY id`, id))
 }
+
+// Edit меняет только имя, отношение и автомобили, атомарно для всей заявки.
+func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64, in model.GateEditInput) (model.GateRequest, error) {
+	var zero model.GateRequest
+	in.Normalize()
+	if err := in.Validate(); err != nil {
+		return zero, err
+	}
+	if person == 0 && user.Role != model.RoleAdmin {
+		return zero, invalid("gate: invalid action")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return zero, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	var groupID int64
+	if err = tx.QueryRow(ctx, `SELECT group_id FROM gate_requests WHERE id=$1 AND ($2::bigint=0 OR person_id=$2)`, id, person).Scan(&groupID); err != nil {
+		return zero, mapErr(err)
+	}
+	type editState struct {
+		ID           int64               `db:"id"`
+		Status       string              `db:"status"`
+		Vehicles     []model.GateVehicle `db:"vehicles"`
+		VehiclePlate string              `db:"vehicle_plate"`
+		VehicleBrand string              `db:"vehicle_brand"`
+	}
+	states, err := collect[editState](tx.Query(ctx, `SELECT id,status,vehicles,vehicle_plate,vehicle_brand FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	if err != nil {
+		return zero, err
+	}
+	for _, row := range states {
+		if row.Status != "pending" && row.Status != "approved" {
+			return zero, &Error{ErrConflict, "gate: request status changed"}
+		}
+	}
+	oldVehicles := states[0].Vehicles
+	if len(oldVehicles) == 0 && (states[0].VehiclePlate != "" || states[0].VehicleBrand != "") {
+		oldVehicles = []model.GateVehicle{{PlateNumber: states[0].VehiclePlate, Brand: states[0].VehicleBrand, Active: true}}
+	}
+	updatedVehicles := make([]model.GateVehicle, 0, len(oldVehicles)+len(in.Vehicles))
+	for _, old := range oldVehicles {
+		if !old.Active {
+			updatedVehicles = append(updatedVehicles, old)
+		}
+	}
+	updatedVehicles = append(updatedVehicles, in.StoredVehicles()...)
+	plate, brand := "", ""
+	if len(in.Vehicles) > 0 {
+		plate, brand = in.Vehicles[0].PlateNumber, in.Vehicles[0].Brand
+	}
+	if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate=$5,vehicle_brand=$6,no_personal_vehicle=$7,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, updatedVehicles, plate, brand, in.NoPersonalVehicle); err != nil {
+		return zero, mapErr(err)
+	}
+	var actorPerson, actorUser *int64
+	role := "resident"
+	if person > 0 {
+		actorPerson = &person
+	} else {
+		actorUser = &user.ID
+		role = user.Role
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_person_id,actor_user_id,note) VALUES($1,'updated',$2,$3,$4,'Данные заявки изменены')`, groupID, role, actorPerson, actorUser); err != nil {
+		return zero, mapErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return zero, mapErr(err)
+	}
+	return s.get(ctx, person, id)
+}
+
 func (s *Gate) Create(ctx context.Context, person int64, in model.GateInput) (model.GateRequest, error) {
 	var zero model.GateRequest
 	in.Normalize()

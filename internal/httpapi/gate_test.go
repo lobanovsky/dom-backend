@@ -73,10 +73,27 @@ func TestGateResidentCannotReadCommentsOrHistory(t *testing.T) {
 		t.Fatalf("resident event history should be admin-only: %d", w.Code)
 	}
 }
+
+func TestGateResidentEdit(t *testing.T) {
+	f := &fakeGate{}
+	mux := http.NewServeMux()
+	gateHandlers{f}.registerResident(mux)
+	r := httptest.NewRequest("PUT", "/api/v1/resident/gate-access/9", strings.NewReader(`{"recipient_name":"Анна","relation":"relative","vehicles":[{"plate_number":"А123АА77","brand":"Toyota"}]}`))
+	r = r.WithContext(context.WithValue(r.Context(), residentKey{}, model.ResidentAccount{PersonID: 17}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 || f.person != 17 || !strings.Contains(w.Body.String(), `"recipient_name":"Анна"`) {
+		t.Fatalf("resident edit: %d %s person=%d", w.Code, w.Body.String(), f.person)
+	}
+}
 func (f *fakeGate) Create(_ context.Context, p int64, in model.GateInput) (model.GateRequest, error) {
 	f.person = p
 	f.in = in
 	return model.GateRequest{ID: 1, PersonID: p, Comment: in.Comment, ReviewNote: "internal note"}, nil
+}
+func (f *fakeGate) Edit(_ context.Context, p int64, _ model.User, id int64, in model.GateEditInput) (model.GateRequest, error) {
+	f.person = p
+	return model.GateRequest{ID: id, PersonID: p, RecipientName: in.RecipientName, Relation: in.Relation}, nil
 }
 func (f *fakeGate) Act(_ context.Context, p int64, u model.User, _ int64, _, _ string) (model.GateRequest, error) {
 	f.person = p
@@ -105,7 +122,7 @@ func TestGateGuardAuthorization(t *testing.T) {
 		{"GET", "/api/v1/organizations", 403}, {"GET", "/api/v1/persons", 403}, {"GET", "/api/v1/users", 403},
 		{"GET", "/api/v1/resident-access", 403}, {"GET", "/api/v1/accounts", 403}, {"GET", "/api/v1/meter-readings", 403},
 		{"POST", "/api/v1/gate-access", 403}, {"DELETE", "/api/v1/gate-access/1", 403},
-		{"POST", "/api/v1/gate-access/1/decision/extra", 403}, {"POST", "/api/v1/users", 403},
+		{"POST", "/api/v1/gate-access/1/decision/extra", 403}, {"PUT", "/api/v1/gate-access/1", 403}, {"POST", "/api/v1/users", 403},
 	} {
 		rec := do(h, tc.method, tc.path, `{"action":"approve","note":""}`, guard)
 		if rec.Code != tc.status {

@@ -15,15 +15,39 @@ type fakeGate struct {
 	person int64
 	user   model.User
 	in     model.GateInput
+	filter model.GateFilter
 }
 
 func (f *fakeGate) Properties(_ context.Context, p int64) ([]model.GateProperty, error) {
 	f.person = p
 	return []model.GateProperty{}, nil
 }
-func (f *fakeGate) List(_ context.Context, p int64, _ model.GateFilter, _, _ int) ([]model.GateRequest, error) {
+func (f *fakeGate) List(_ context.Context, p int64, filter model.GateFilter, _, _ int) ([]model.GateRequest, error) {
 	f.person = p
+	f.filter = filter
 	return []model.GateRequest{}, nil
+}
+
+func TestGateResidentRejectedFilter(t *testing.T) {
+	f := &fakeGate{}
+	mux := http.NewServeMux()
+	gateHandlers{f}.registerResident(mux)
+	call := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r = r.WithContext(context.WithValue(r.Context(), residentKey{}, model.ResidentAccount{PersonID: 17}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("/api/v1/resident/gate-access"); w.Code != 200 || f.filter.IncludeRejected {
+		t.Fatalf("default rejected filter: %d %+v", w.Code, f.filter)
+	}
+	if w := call("/api/v1/resident/gate-access?include_rejected=true"); w.Code != 200 || !f.filter.IncludeRejected {
+		t.Fatalf("include rejected filter: %d %+v", w.Code, f.filter)
+	}
+	if w := call("/api/v1/resident/gate-access?include_rejected=yes"); w.Code != 400 {
+		t.Fatalf("invalid rejected filter: %d", w.Code)
+	}
 }
 func (f *fakeGate) Create(_ context.Context, p int64, in model.GateInput) (model.GateRequest, error) {
 	f.person = p

@@ -508,7 +508,7 @@ Workflow `.github/workflows/build-and-deploy-backend.yml` запускается
 Кабинет жителя, под cookie `dom_resident_session`:
 
 - `GET /api/v1/resident/gate-access/properties` → `{items: [{id, building_id, kind, number, address, zone}]}` — доступные объекты и зоны.
-- `GET /api/v1/resident/gate-access?status=&zone=&q=&limit=50&offset=0` — только заявки текущего физлица.
+- `GET /api/v1/resident/gate-access?status=&zone=&q=&include_rejected=false&limit=50&offset=0` — только заявки текущего физлица. По умолчанию отклонённые группы скрыты; `include_rejected=true` добавляет их.
 - `POST /api/v1/resident/gate-access` → заявка, 201. Обязательные поля: `premises_id`, `zone`, `phone`, `recipient_name` (1–120 символов), `relation` (`owner|relative|tenant|guest|service`). Необязательные: `vehicle_plate` (до 24), `vehicle_brand` (до 80), `occasional_vehicle`, `valid_until` (`YYYY-MM-DD`, включительно по Москве), `comment` (до 500). Телефон нормализуется, хранится цифрами с кодом страны (11–15 цифр).
 - `POST /api/v1/resident/gate-access/{id}/action` с `{action: "cancel"|"revoke", note: ""}` — отмена ожидающей заявки или отзыв одобренной.
 - `GET /api/v1/resident/gate-access/{id}/events` → `{items: [{id, action, actor_role, note, created_at}]}` — история собственной заявки.
@@ -516,6 +516,7 @@ Workflow `.github/workflows/build-and-deploy-backend.yml` запускается
 Админка, cookie `dom_session`, только `admin` и `guard`:
 
 - `GET /api/v1/gate-access` — список заявок с фильтрами `status`, `display_status`, `zone`; поиск можно разделить по полям `recipient`, `phone`, `vehicle`, `premises`. Совместный поиск `q` сохранён. Фильтр `premises_id` ограничивает выдачу группами, содержащими указанное помещение; ответ группы по-прежнему включает все её объекты.
+- Импортные комментарии «Перенесено из Housekeeper. Доступ был действующим.» и «…Доступ был отключен.» скрываются в ответе заявок; история отдельно читается из `gate_events` и не меняется.
 - `GET /api/v1/gate-access/{id}/events` — история решений.
 - `POST /api/v1/gate-access/{id}/decision` с `{action: "approve"|"reject"|"revoke", note: "..."}`. Причина обязательна для отказа/отзыва. `guard` также может читать `/auth/me`, менять собственный пароль и выходить; остальные API закрыты. `viewer` не видит заявки на въезд. Учётную запись охранника создаёт администратор через `/users`.
 

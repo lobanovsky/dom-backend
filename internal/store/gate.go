@@ -23,7 +23,9 @@ const gateEligibility = `o.person_id=g.person_id AND o.premises_id=g.premises_id
 const gateView = `WITH base AS (
  SELECT g.id,g.group_id,g.vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
  concat_ws(' ',pe.last_name,pe.first_name,pe.middle_name) applicant_name,b.address,p.number premises_number,p.kind premises_kind,
- g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,g.comment,g.status,g.review_note,g.created_at,g.updated_at,
+ g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,
+ CASE WHEN lower(trim(g.comment)) IN ('перенесено из housekeeper. доступ был действующим.','перенесено из housekeeper. доступ был отключен.','перенесено из housekeeper. доступ был отключён.') THEN '' ELSE g.comment END comment,
+ g.status,g.review_note,g.created_at,g.updated_at,
  COALESCE((` + gateEligibility + `),false) eligible
  FROM gate_requests g JOIN ownerships o ON o.id=g.ownership_id JOIN persons pe ON pe.id=g.person_id
  JOIN premises p ON p.id=g.premises_id JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
@@ -44,6 +46,7 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  FROM gate_view GROUP BY group_id
  ), matched AS (
  SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
+ AND ($14::boolean OR $1::bigint=0 OR display_status<>'rejected')
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,vehicle_plate,vehicle_brand,premises_number,address) ILIKE '%'||$4||'%'
  OR ($5<>'' AND phone LIKE '%'||$5||'%')
  OR EXISTS(SELECT 1 FROM jsonb_array_elements(vehicles) car WHERE COALESCE((car->>'active')::boolean,true) AND concat_ws(' ',car->>'plate_number',car->>'brand') ILIKE '%'||$4||'%'))
@@ -56,7 +59,7 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  SELECT g.group_id FROM gate_view g JOIN matched m USING(group_id) GROUP BY g.group_id
  ORDER BY max(g.created_at) DESC,g.group_id DESC LIMIT $6 OFFSET $7
  ) SELECT * FROM gate_view WHERE group_id IN(SELECT group_id FROM selected_groups)
- ORDER BY created_at DESC,group_id DESC,id`, person, f.Status, f.Zone, strings.TrimSpace(f.Q), model.NormalizePhone(f.Q), limit, offset, f.DisplayStatus, strings.TrimSpace(f.Recipient), strings.TrimSpace(f.Phone), strings.TrimSpace(f.Vehicle), strings.TrimSpace(f.Premises), f.PremisesID))
+ ORDER BY created_at DESC,group_id DESC,id`, person, f.Status, f.Zone, strings.TrimSpace(f.Q), model.NormalizePhone(f.Q), limit, offset, f.DisplayStatus, strings.TrimSpace(f.Recipient), strings.TrimSpace(f.Phone), strings.TrimSpace(f.Vehicle), strings.TrimSpace(f.Premises), f.PremisesID, f.IncludeRejected))
 }
 func (s *Gate) get(ctx context.Context, person, id int64) (model.GateRequest, error) {
 	return one[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE id=$1 AND ($2::bigint=0 OR person_id=$2)`, id, person))

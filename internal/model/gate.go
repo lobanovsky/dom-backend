@@ -165,6 +165,7 @@ type GateEvent struct {
 type GateFilter struct {
 	Status, DisplayStatus, Zone, Q, Recipient, Phone, Vehicle, Premises string
 	PremisesID                                                          int64
+	IncludeRejected                                                     bool
 }
 
 // GateBatchInput — одна заявка на несколько собственных объектов. Зоны определяет сервер.

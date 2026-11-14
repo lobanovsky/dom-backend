@@ -71,11 +71,11 @@ func (h gateHandlers) list(resident bool) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		p, ok := parseList(w, r, nil, []string{"status", "display_status", "zone", "q"})
+		p, ok := parseList(w, r, []string{"premises_id"}, []string{"status", "display_status", "zone", "q", "recipient", "phone", "vehicle", "premises"})
 		if !ok {
 			return
 		}
-		f := model.GateFilter{Status: p.texts["status"], DisplayStatus: p.texts["display_status"], Zone: p.texts["zone"], Q: p.texts["q"]}
+		f := model.GateFilter{Status: p.texts["status"], DisplayStatus: p.texts["display_status"], Zone: p.texts["zone"], Q: p.texts["q"], Recipient: p.texts["recipient"], Phone: p.texts["phone"], Vehicle: p.texts["vehicle"], Premises: p.texts["premises"], PremisesID: p.ints["premises_id"]}
 		if !slices.Contains([]string{"", "pending", "approved", "rejected"}, f.DisplayStatus) || p.Deleted || !slices.Contains([]string{"", "pending", "approved", "rejected", "cancelled", "revoked", "expired", "ineligible"}, f.Status) || !slices.Contains([]string{"", "courtyard", "parking"}, f.Zone) || len([]rune(f.Q)) > 120 {
 			writeError(w, 422, "gate: invalid filters")
 			return

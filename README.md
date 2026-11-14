@@ -515,7 +515,7 @@ Workflow `.github/workflows/build-and-deploy-backend.yml` запускается
 
 Админка, cookie `dom_session`, только `admin` и `guard`:
 
-- `GET /api/v1/gate-access` — список с теми же фильтрами; поиск по телефону, имени получателя/заявителя, авто и помещению.
+- `GET /api/v1/gate-access` — список заявок с фильтрами `status`, `display_status`, `zone`; поиск можно разделить по полям `recipient`, `phone`, `vehicle`, `premises`. Совместный поиск `q` сохранён. Фильтр `premises_id` ограничивает выдачу группами, содержащими указанное помещение; ответ группы по-прежнему включает все её объекты.
 - `GET /api/v1/gate-access/{id}/events` — история решений.
 - `POST /api/v1/gate-access/{id}/decision` с `{action: "approve"|"reject"|"revoke", note: "..."}`. Причина обязательна для отказа/отзыва. `guard` также может читать `/auth/me`, менять собственный пароль и выходить; остальные API закрыты. `viewer` не видит заявки на въезд. Учётную запись охранника создаёт администратор через `/users`.
 

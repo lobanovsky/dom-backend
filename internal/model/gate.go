@@ -162,7 +162,10 @@ type GateEvent struct {
 	Note      string    `json:"note" db:"note"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
-type GateFilter struct{ Status, DisplayStatus, Zone, Q string }
+type GateFilter struct {
+	Status, DisplayStatus, Zone, Q, Recipient, Phone, Vehicle, Premises string
+	PremisesID                                                          int64
+}
 
 // GateBatchInput — одна заявка на несколько собственных объектов. Зоны определяет сервер.
 type GateBatchInput struct {

@@ -93,13 +93,13 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 		return zero, mapErr(err)
 	}
 	defer rollback(ctx, tx)
-	var kind string
+	var kind, premisesNumber string
 	var ownership, person int64
-	err = tx.QueryRow(ctx, `SELECT p.kind,o.id,o.person_id FROM premises p JOIN ownerships o ON o.premises_id=p.id
+	err = tx.QueryRow(ctx, `SELECT p.kind,p.number,o.id,o.person_id FROM premises p JOIN ownerships o ON o.premises_id=p.id
  JOIN persons pe ON pe.id=o.person_id JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
  WHERE p.id=$1 AND p.deleted_at IS NULL AND pe.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL
  AND o.deleted_at IS NULL AND o.valid_from<=`+gateToday+` AND (o.valid_to IS NULL OR o.valid_to>=`+gateToday+`)
- AND p.kind IN('apartment','commercial','parking_space') ORDER BY o.id LIMIT 1 FOR UPDATE OF p,o`, in.PremisesID).Scan(&kind, &ownership, &person)
+	 AND p.kind IN('apartment','commercial','parking_space') ORDER BY o.id LIMIT 1 FOR UPDATE OF p,o`, in.PremisesID).Scan(&kind, &premisesNumber, &ownership, &person)
 	if err == pgx.ErrNoRows {
 		return zero, invalid("gate: property is not eligible")
 	}
@@ -144,7 +144,7 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 		return zero, mapErr(err)
 	}
 	if s.syncer != nil {
-		if err = s.syncer.Sync(ctx, zone, in.Phone, in.RecipientName, true); err != nil {
+		if err = s.syncer.Sync(ctx, zone, in.Phone, gateDeviceName(premisesNumber), true); err != nil {
 			return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
 		}
 	}
@@ -388,14 +388,14 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		return zero, mapErr(err)
 	}
 	type state struct {
-		ID          int64  `db:"id"`
-		Status      string `db:"status"`
-		OwnershipID int64  `db:"ownership_id"`
-		Zone        string `db:"zone"`
-		Phone       string `db:"phone"`
-		Name        string `db:"recipient_name"`
+		ID             int64  `db:"id"`
+		Status         string `db:"status"`
+		OwnershipID    int64  `db:"ownership_id"`
+		Zone           string `db:"zone"`
+		Phone          string `db:"phone"`
+		PremisesNumber string `db:"premises_number"`
 	}
-	states, err := collect[state](tx.Query(ctx, `SELECT id,status,ownership_id,zone,phone,recipient_name FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	states, err := collect[state](tx.Query(ctx, `SELECT g.id,g.status,g.ownership_id,g.zone,g.phone,p.number premises_number FROM gate_requests g JOIN premises p ON p.id=g.premises_id WHERE g.group_id=$1 ORDER BY g.id FOR UPDATE OF g`, groupID))
 	if err != nil {
 		return zero, err
 	}
@@ -417,21 +417,33 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		}
 	}
 	if s.syncer != nil && (action == "approve" || action == "revoke") {
+		groups := make(map[string][]string)
 		for _, row := range states {
-			if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, row.Zone+":"+row.Phone); err != nil {
+			key := row.Zone + ":" + row.Phone
+			groups[key] = append(groups[key], row.PremisesNumber)
+		}
+		keys := make([]string, 0, len(groups))
+		for key := range groups {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, key); err != nil {
 				return zero, mapErr(err)
 			}
 		}
-		for _, row := range states {
+		for _, key := range keys {
+			parts := strings.SplitN(key, ":", 2)
+			zone, phone := parts[0], parts[1]
 			enabled := action == "approve"
 			if !enabled {
 				var remains bool
-				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active)`, groupID, row.Zone, row.Phone).Scan(&remains); err != nil {
+				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active)`, groupID, zone, phone).Scan(&remains); err != nil {
 					return zero, mapErr(err)
 				}
 				enabled = remains
 			}
-			if err = s.syncer.Sync(ctx, row.Zone, row.Phone, row.Name, enabled); err != nil {
+			if err = s.syncer.Sync(ctx, zone, phone, gateDeviceName(strings.Join(groups[key], " ")), enabled); err != nil {
 				return zero, &Error{ErrIntegration, "не удалось обновить доступ на устройствах"}
 			}
 		}

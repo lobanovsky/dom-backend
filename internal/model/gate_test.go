@@ -22,3 +22,27 @@ func TestGateInput(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGateMultipleVehicleValidation(t *testing.T) {
+	v := GateInput{PremisesID: 1, Zone: "courtyard", Phone: "79990000001", RecipientName: "Тест", Relation: "owner", Vehicles: []GateVehicleInput{{PlateNumber: "А123АА77", Brand: "Audi"}, {PlateNumber: "В456ВВ77", Brand: "Toyota"}}}
+	v.Normalize()
+	if e := v.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	duplicate := v
+	duplicate.Vehicles = []GateVehicleInput{{PlateNumber: "А123 АА77"}, {PlateNumber: "а123аа77"}}
+	duplicate.Normalize()
+	if duplicate.Validate() == nil {
+		t.Fatal("duplicate car accepted")
+	}
+	noCar := v
+	noCar.NoPersonalVehicle = true
+	if noCar.Validate() == nil {
+		t.Fatal("cars and no personal vehicle accepted")
+	}
+	legacy := GateInput{VehiclePlate: "а123аа77", VehicleBrand: "Audi"}
+	legacy.Normalize()
+	if len(legacy.Vehicles) != 1 || legacy.StoredVehicles()[0].PlateNumber != "А123АА77" {
+		t.Fatal("legacy fields must still work")
+	}
+}

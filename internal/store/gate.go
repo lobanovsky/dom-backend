@@ -16,12 +16,12 @@ type Gate struct{ pool *pgxpool.Pool }
 func NewGate(p *pgxpool.Pool) *Gate { return &Gate{p} }
 
 const gateToday = `(now() AT TIME ZONE 'Europe/Moscow')::date`
-const gateKindZone = `((p.kind='apartment' AND g.zone='courtyard') OR (p.kind='parking_space' AND g.zone='parking'))`
+const gateKindZone = `((p.kind IN('apartment','commercial') AND g.zone='courtyard') OR (p.kind='parking_space' AND g.zone='parking'))`
 const gateEligibility = `o.person_id=g.person_id AND o.premises_id=g.premises_id AND o.deleted_at IS NULL
  AND o.valid_from<=` + gateToday + ` AND (o.valid_to IS NULL OR o.valid_to>=` + gateToday + `)
  AND pe.deleted_at IS NULL AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL AND ` + gateKindZone
 const gateView = `WITH base AS (
- SELECT g.id,g.group_id,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
+ SELECT g.id,g.group_id,g.vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
  concat_ws(' ',pe.last_name,pe.first_name,pe.middle_name) applicant_name,b.address,p.number premises_number,p.kind premises_kind,
  g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,g.comment,g.status,g.review_note,g.created_at,g.updated_at,
  COALESCE((` + gateEligibility + `),false) eligible
@@ -35,8 +35,8 @@ const gateView = `WITH base AS (
 
 func (s *Gate) Properties(ctx context.Context, person int64) ([]model.GateProperty, error) {
 	return collect[model.GateProperty](s.pool.Query(ctx, `SELECT DISTINCT p.id,p.building_id,p.number,p.kind,b.address,
- CASE WHEN p.kind='apartment' THEN 'courtyard' ELSE 'parking' END zone
- FROM premises p JOIN buildings b ON b.id=p.building_id WHERE p.kind IN('apartment','parking_space') AND `+residentOwns+` ORDER BY p.building_id,p.kind,p.number`, person))
+ CASE WHEN p.kind IN('apartment','commercial') THEN 'courtyard' ELSE 'parking' END zone
+ FROM premises p JOIN buildings b ON b.id=p.building_id WHERE p.kind IN('apartment','commercial','parking_space') AND `+residentOwns+` ORDER BY p.building_id,p.kind,p.number`, person))
 }
 func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit, offset int) ([]model.GateRequest, error) {
 	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`, presentation AS (
@@ -45,7 +45,8 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  ), matched AS (
  SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,vehicle_plate,vehicle_brand,premises_number,address) ILIKE '%'||$4||'%'
- OR ($5<>'' AND phone LIKE '%'||$5||'%'))
+ OR ($5<>'' AND phone LIKE '%'||$5||'%')
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(vehicles) car WHERE COALESCE((car->>'active')::boolean,true) AND concat_ws(' ',car->>'plate_number',car->>'brand') ILIKE '%'||$4||'%'))
  ), selected_groups AS (
  SELECT g.group_id FROM gate_view g JOIN matched m USING(group_id) GROUP BY g.group_id
  ORDER BY max(g.created_at) DESC,g.group_id DESC LIMIT $6 OFFSET $7
@@ -99,7 +100,7 @@ func (s *Gate) createRow(ctx context.Context, tx pgx.Tx, person int64, in model.
  JOIN persons pe ON pe.id=o.person_id JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
  WHERE o.person_id=$1 AND p.id=$2 AND o.deleted_at IS NULL AND pe.deleted_at IS NULL AND p.deleted_at IS NULL
  AND b.deleted_at IS NULL AND org.deleted_at IS NULL AND o.valid_from<=`+gateToday+` AND (o.valid_to IS NULL OR o.valid_to>=`+gateToday+`)
- AND ((p.kind='apartment' AND $3='courtyard') OR (p.kind='parking_space' AND $3='parking')) ORDER BY o.id LIMIT 1 FOR SHARE OF o`, person, in.PremisesID, in.Zone).Scan(&ownership)
+ AND ((p.kind IN('apartment','commercial') AND $3='courtyard') OR (p.kind='parking_space' AND $3='parking')) ORDER BY o.id LIMIT 1 FOR SHARE OF o`, person, in.PremisesID, in.Zone).Scan(&ownership)
 	if err == pgx.ErrNoRows {
 		return 0, invalid("gate: property is not eligible")
 	}
@@ -119,8 +120,8 @@ func (s *Gate) createRow(ctx context.Context, tx pgx.Tx, person int64, in model.
 	if valid {
 		return 0, &Error{ErrConflict, "gate: duplicate request"}
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,vehicle_plate,vehicle_brand,occasional_vehicle,valid_until,comment)
- VALUES($13,$14,$15,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, person, ownership, in.PremisesID, in.Zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.Comment, id, groupID, in.NoPersonalVehicle).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,vehicle_plate,vehicle_brand,occasional_vehicle,valid_until,comment,vehicles)
+ VALUES($13,$14,$15,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$16) RETURNING id`, person, ownership, in.PremisesID, in.Zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.Comment, id, groupID, in.NoPersonalVehicle, in.StoredVehicles()).Scan(&id)
 	if err != nil {
 		return 0, mapErr(err)
 	}
@@ -152,7 +153,7 @@ func (s *Gate) CreateBatch(ctx context.Context, person int64, in model.GateBatch
 	for _, premise := range ids {
 		contact := in.Contact()
 		contact.PremisesID = premise
-		if err = tx.QueryRow(ctx, `SELECT CASE kind WHEN 'apartment' THEN 'courtyard' WHEN 'parking_space' THEN 'parking' ELSE '' END FROM premises WHERE id=$1`, premise).Scan(&contact.Zone); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT CASE WHEN kind IN('apartment','commercial') THEN 'courtyard' WHEN kind='parking_space' THEN 'parking' ELSE '' END FROM premises WHERE id=$1`, premise).Scan(&contact.Zone); err != nil {
 			return nil, mapErr(err)
 		}
 		if contact.Zone == "" {

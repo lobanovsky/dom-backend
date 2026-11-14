@@ -8,7 +8,7 @@ func TestGateInput(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if valid.Phone != "79991234567" || valid.RecipientName != "Анна" || valid.VehiclePlate != "А123АА77" {
+	if valid.Phone != "79991234567" || valid.RecipientName != "Анна" || valid.VehiclePlate != "а123аа77" {
 		t.Fatalf("normalization: %+v", valid)
 	}
 	for _, bad := range []func(*GateInput){func(v *GateInput) { v.Phone = "123" }, func(v *GateInput) { v.Phone = "79991234567;admin" }, func(v *GateInput) { v.Zone = "all" }, func(v *GateInput) { v.PremisesID = 0 }, func(v *GateInput) { v.Relation = "admin" }, func(v *GateInput) { v.RecipientName = "" }} {
@@ -42,7 +42,7 @@ func TestGateMultipleVehicleValidation(t *testing.T) {
 	}
 	legacy := GateInput{VehiclePlate: "а123аа77", VehicleBrand: "Audi"}
 	legacy.Normalize()
-	if len(legacy.Vehicles) != 1 || legacy.StoredVehicles()[0].PlateNumber != "А123АА77" {
+	if len(legacy.Vehicles) != 1 || legacy.StoredVehicles()[0].PlateNumber != "а123аа77" {
 		t.Fatal("legacy fields must still work")
 	}
 }

@@ -64,6 +64,73 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
 func (s *Gate) get(ctx context.Context, person, id int64) (model.GateRequest, error) {
 	return one[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE id=$1 AND ($2::bigint=0 OR person_id=$2)`, id, person))
 }
+
+// AdminCreate выдаёт прямой действующий доступ и фиксирует администратора в журнале.
+func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateInput) (model.GateRequest, error) {
+	var zero model.GateRequest
+	if !user.IsAdmin() {
+		return zero, invalid("gate: invalid action")
+	}
+	in.Normalize()
+	if err := in.Validate(); err != nil {
+		return zero, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return zero, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	var kind string
+	var ownership, person int64
+	err = tx.QueryRow(ctx, `SELECT p.kind,o.id,o.person_id FROM premises p JOIN ownerships o ON o.premises_id=p.id
+ JOIN persons pe ON pe.id=o.person_id JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
+ WHERE p.id=$1 AND p.deleted_at IS NULL AND pe.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL
+ AND o.deleted_at IS NULL AND o.valid_from<=`+gateToday+` AND (o.valid_to IS NULL OR o.valid_to>=`+gateToday+`)
+ AND p.kind IN('apartment','commercial','parking_space') ORDER BY o.id LIMIT 1 FOR UPDATE OF p,o`, in.PremisesID).Scan(&kind, &ownership, &person)
+	if err == pgx.ErrNoRows {
+		return zero, invalid("gate: property is not eligible")
+	}
+	if err != nil {
+		return zero, mapErr(err)
+	}
+	zone := "courtyard"
+	if kind == "parking_space" {
+		zone = "parking"
+	}
+	if in.Zone != zone {
+		return zero, invalid("gate: property is not eligible")
+	}
+	var valid bool
+	if err = tx.QueryRow(ctx, `SELECT $1::date IS NULL OR $1::date>=`+gateToday, in.ValidUntil).Scan(&valid); err != nil {
+		return zero, mapErr(err)
+	}
+	if !valid {
+		return zero, invalid("gate: expiry is in the past")
+	}
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE premises_id=$1 AND zone=$2 AND phone=$3 AND effective_status IN('pending','approved'))`, in.PremisesID, zone, in.Phone).Scan(&valid); err != nil {
+		return zero, mapErr(err)
+	}
+	if valid {
+		return zero, &Error{ErrConflict, "gate: duplicate request"}
+	}
+	var id int64
+	if err = tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('gate_requests','id'))`).Scan(&id); err != nil {
+		return zero, mapErr(err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,vehicle_plate,vehicle_brand,occasional_vehicle,valid_until,comment,vehicles,status)
+ VALUES($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'',$14,'approved')`, id, in.NoPersonalVehicle, person, ownership, in.PremisesID, zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.StoredVehicles())
+	if err != nil {
+		return zero, mapErr(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_user_id,note) VALUES($1,'created','admin',$2,'Доступ добавлен администратором без заявки')`, id, user.ID); err != nil {
+		return zero, mapErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return zero, mapErr(err)
+	}
+	return s.get(ctx, 0, id)
+}
+
 func (s *Gate) Events(ctx context.Context, person, id int64) ([]model.GateEvent, error) {
 	if _, err := s.get(ctx, person, id); err != nil {
 		return nil, err

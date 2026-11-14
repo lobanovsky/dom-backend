@@ -28,6 +28,11 @@ func (f *fakeGate) List(_ context.Context, p int64, filter model.GateFilter, _, 
 	f.filter = filter
 	return f.rows, nil
 }
+func (f *fakeGate) AdminCreate(_ context.Context, user model.User, in model.GateInput) (model.GateRequest, error) {
+	f.user = user
+	f.in = in
+	return model.GateRequest{ID: 42, Status: "approved", RecipientName: in.RecipientName, VehiclePlate: in.VehiclePlate}, nil
+}
 
 func TestGateResidentRejectedFilter(t *testing.T) {
 	f := &fakeGate{}
@@ -86,6 +91,20 @@ func TestGateResidentEdit(t *testing.T) {
 		t.Fatalf("resident edit: %d %s person=%d", w.Code, w.Body.String(), f.person)
 	}
 }
+
+func TestGateAdminCreateDirectAccess(t *testing.T) {
+	f := &fakeGate{}
+	mux := http.NewServeMux()
+	gateHandlers{f}.registerAdmin(mux)
+	r := httptest.NewRequest("POST", "/api/v1/gate-access", strings.NewReader(`{"premises_id":4,"zone":"courtyard","phone":"+7 900 123 45 67","recipient_name":"Анна","relation":"guest","vehicles":[{"plate_number":"Х896УУ797","brand":"Ford"}]}`))
+	r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, model.User{ID: 3, Role: model.RoleAdmin}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 201 || f.user.ID != 3 || f.in.VehiclePlate != "х896уу797" {
+		t.Fatalf("admin direct create: %d %s user=%+v plate=%q", w.Code, w.Body.String(), f.user, f.in.VehiclePlate)
+	}
+}
+
 func (f *fakeGate) Create(_ context.Context, p int64, in model.GateInput) (model.GateRequest, error) {
 	f.person = p
 	f.in = in

@@ -47,7 +47,7 @@ func (v *GateEditInput) Normalize() {
 	v.RecipientName = strings.TrimSpace(v.RecipientName)
 	v.Vehicles = append([]GateVehicleInput{}, v.Vehicles...)
 	for i := range v.Vehicles {
-		v.Vehicles[i].PlateNumber = strings.ToUpper(strings.TrimSpace(v.Vehicles[i].PlateNumber))
+		v.Vehicles[i].PlateNumber = strings.ToLower(strings.TrimSpace(v.Vehicles[i].PlateNumber))
 		v.Vehicles[i].Brand = strings.TrimSpace(v.Vehicles[i].Brand)
 	}
 }
@@ -103,7 +103,7 @@ func (v GateEditInput) StoredVehicles() []GateVehicle {
 func (v *GateInput) Normalize() {
 	v.Phone = NormalizePhone(v.Phone)
 	v.RecipientName = strings.TrimSpace(v.RecipientName)
-	v.VehiclePlate = strings.ToUpper(strings.TrimSpace(v.VehiclePlate))
+	v.VehiclePlate = strings.ToLower(strings.TrimSpace(v.VehiclePlate))
 	v.VehicleBrand = strings.TrimSpace(v.VehicleBrand)
 	v.Comment = strings.TrimSpace(v.Comment)
 	if v.Vehicles == nil && (v.VehiclePlate != "" || v.VehicleBrand != "") {
@@ -111,7 +111,7 @@ func (v *GateInput) Normalize() {
 	}
 	v.Vehicles = append([]GateVehicleInput{}, v.Vehicles...)
 	for i := range v.Vehicles {
-		v.Vehicles[i].PlateNumber = strings.ToUpper(strings.TrimSpace(v.Vehicles[i].PlateNumber))
+		v.Vehicles[i].PlateNumber = strings.ToLower(strings.TrimSpace(v.Vehicles[i].PlateNumber))
 		v.Vehicles[i].Brand = strings.TrimSpace(v.Vehicles[i].Brand)
 	}
 	if len(v.Vehicles) > 0 {

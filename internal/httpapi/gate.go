@@ -10,6 +10,7 @@ import (
 
 type GateStore interface {
 	CreateBatch(context.Context, int64, model.GateBatchInput) ([]model.GateRequest, error)
+	AdminCreate(context.Context, model.User, model.GateInput) (model.GateRequest, error)
 	Properties(context.Context, int64) ([]model.GateProperty, error)
 	List(context.Context, int64, model.GateFilter, int, int) ([]model.GateRequest, error)
 	Create(context.Context, int64, model.GateInput) (model.GateRequest, error)
@@ -44,10 +45,37 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 		}
 	}
 	mux.HandleFunc("GET /api/v1/gate-access", wrap(h.list(false)))
+	mux.HandleFunc("POST /api/v1/gate-access", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !currentUser(r).IsAdmin() {
+			writeError(w, 403, "forbidden")
+			return
+		}
+		h.adminCreate(w, r)
+	})
 	mux.HandleFunc("PUT /api/v1/gate-access/{id}", wrap(h.edit(false)))
 	mux.HandleFunc("GET /api/v1/gate-access/{id}/events", wrap(h.events(false)))
 	mux.HandleFunc("POST /api/v1/gate-access/{id}/decision", wrap(h.action(false)))
 }
+
+func (h gateHandlers) adminCreate(w http.ResponseWriter, r *http.Request) {
+	var in model.GateInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Normalize()
+	if err := in.Validate(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	item, err := h.s.AdminCreate(r.Context(), currentUser(r), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 201, item)
+}
+
 func (h gateHandlers) registerResident(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/resident/gate-access", h.list(true))
 	mux.HandleFunc("GET /api/v1/resident/gate-access/properties", h.properties)

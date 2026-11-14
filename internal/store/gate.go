@@ -36,7 +36,7 @@ const gateEligibility = `o.person_id=g.person_id AND o.premises_id=g.premises_id
 const gateView = `WITH base AS (
  SELECT g.id,g.group_id,g.vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
  concat_ws(' ',pe.last_name,pe.first_name,pe.middle_name) applicant_name,b.address,p.number premises_number,p.kind premises_kind,
- g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,
+ g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,g.eldes_label,
  CASE WHEN lower(trim(g.comment)) IN ('перенесено из housekeeper. доступ был действующим.','перенесено из housekeeper. доступ был отключен.','перенесено из housekeeper. доступ был отключён.') THEN '' ELSE g.comment END comment,
  g.status,g.review_note,g.created_at,g.updated_at,
  COALESCE((` + gateEligibility + `),false) eligible

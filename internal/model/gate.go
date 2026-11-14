@@ -195,6 +195,7 @@ type GateRequest struct {
 	Address           string        `json:"address" db:"address"`
 	PremisesNumber    string        `json:"premises_number" db:"premises_number"`
 	PremisesKind      string        `json:"premises_kind" db:"premises_kind"`
+	ELDESLabel        string        `json:"eldes_label,omitempty" db:"eldes_label"`
 	Zone              string        `json:"zone" db:"zone"`
 	Phone             string        `json:"phone" db:"phone"`
 	RecipientName     string        `json:"recipient_name" db:"recipient_name"`

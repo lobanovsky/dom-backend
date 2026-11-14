@@ -120,6 +120,7 @@ func (h gateHandlers) list(resident bool) http.HandlerFunc {
 			for i := range items {
 				items[i].Comment = ""
 				items[i].ReviewNote = ""
+				items[i].ELDESLabel = ""
 			}
 		}
 		writeList(w, items, p)
@@ -158,6 +159,7 @@ func (h gateHandlers) create(w http.ResponseWriter, r *http.Request) {
 	}
 	item.Comment = ""
 	item.ReviewNote = ""
+	item.ELDESLabel = ""
 	writeJSON(w, 201, item)
 }
 func (h gateHandlers) action(resident bool) http.HandlerFunc {
@@ -185,6 +187,7 @@ func (h gateHandlers) action(resident bool) http.HandlerFunc {
 		if resident {
 			item.Comment = ""
 			item.ReviewNote = ""
+			item.ELDESLabel = ""
 		}
 		writeJSON(w, 200, item)
 	}
@@ -217,6 +220,7 @@ func (h gateHandlers) edit(resident bool) http.HandlerFunc {
 		if resident {
 			item.Comment = ""
 			item.ReviewNote = ""
+			item.ELDESLabel = ""
 		}
 		writeJSON(w, 200, item)
 	}

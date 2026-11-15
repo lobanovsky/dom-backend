@@ -46,20 +46,20 @@ func TestGateVehiclesAndCommercial(t *testing.T) {
 	}
 	cleanup(t, pool, "gate_requests", rows[0].ID)
 	r := rows[0]
-	if len(r.Vehicles) != 2 || r.Vehicles[0].PlateNumber != "А123АА77" || !r.Vehicles[1].Active || r.VehiclePlate != "А123АА77" {
+	if len(r.Vehicles) != 2 || r.Vehicles[0].PlateNumber != "а123аа77" || r.Vehicles[1].ID == 0 {
 		t.Fatalf("vehicles not preserved: %+v", r)
 	}
 	found, e := s.List(ctx, person.ID, model.GateFilter{Q: "В456ВВ77"}, 50, 0)
 	if e != nil || len(found) != 1 {
 		t.Fatalf("search second car: %+v %v", found, e)
 	}
-	// Неактивный автомобиль хранится для истории, но не считается текущим при поиске.
-	if _, e = pool.Exec(ctx, `UPDATE gate_requests SET vehicles=jsonb_set(vehicles,'{1,active}','false') WHERE id=$1`, r.ID); e != nil {
+	// Удаление из реестра удаляет связь с заявкой, а архивных записей нет.
+	if e = s.DeleteVehicle(ctx, person.ID, r.Vehicles[1].ID); e != nil {
 		t.Fatal(e)
 	}
 	history, e := s.get(ctx, person.ID, r.ID)
-	if e != nil || len(history.Vehicles) != 2 || history.Vehicles[1].Active {
-		t.Fatalf("inactive car lost: %+v %v", history, e)
+	if e != nil || len(history.Vehicles) != 1 {
+		t.Fatalf("removed car still linked: %+v %v", history, e)
 	}
 	found, e = s.List(ctx, person.ID, model.GateFilter{Q: "В456ВВ77"}, 50, 0)
 	if e != nil || len(found) != 0 {

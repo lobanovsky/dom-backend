@@ -34,9 +34,9 @@ const gateEligibility = `o.person_id=g.person_id AND o.premises_id=g.premises_id
  AND o.valid_from<=` + gateToday + ` AND (o.valid_to IS NULL OR o.valid_to>=` + gateToday + `)
  AND pe.deleted_at IS NULL AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL AND ` + gateKindZone
 const gateView = `WITH base AS (
- SELECT g.id,g.group_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'plate_number',v.plate_number,'brand',v.brand,'active',v.active) ORDER BY v.id) FROM gate_request_vehicles rv JOIN gate_vehicles v ON v.id=rv.vehicle_id WHERE rv.request_id=g.id AND v.deleted_at IS NULL),g.vehicles) vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
+ SELECT g.id,g.group_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'plate_number',v.plate_number,'brand',v.brand) ORDER BY v.id) FROM gate_request_vehicles rv JOIN gate_vehicles v ON v.id=rv.vehicle_id WHERE rv.request_id=g.id),'[]'::jsonb) vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
  concat_ws(' ',pe.last_name,pe.first_name,pe.middle_name) applicant_name,b.address,p.number premises_number,p.kind premises_kind,
- g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,g.eldes_label,
+ g.zone,g.phone,g.recipient_name,g.relation,g.occasional_vehicle,g.valid_until,g.eldes_label,
  CASE WHEN lower(trim(g.comment)) IN ('перенесено из housekeeper. доступ был действующим.','перенесено из housekeeper. доступ был отключен.','перенесено из housekeeper. доступ был отключён.') THEN '' ELSE g.comment END comment,
  g.status,g.review_note,g.created_at,g.updated_at,
  COALESCE((` + gateEligibility + `),false) eligible
@@ -61,12 +61,12 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
  AND ($1::bigint=0 OR display_status<>'revoke_requested')
  AND ($14::boolean OR $1::bigint=0 OR display_status<>'rejected')
- AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,vehicle_plate,vehicle_brand,premises_number,address) ILIKE '%'||$4||'%'
+ AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,premises_number,address) ILIKE '%'||$4||'%'
  OR ($5<>'' AND phone LIKE '%'||$5||'%')
  OR EXISTS(SELECT 1 FROM jsonb_array_elements(vehicles) car WHERE COALESCE((car->>'active')::boolean,true) AND concat_ws(' ',car->>'plate_number',car->>'brand') ILIKE '%'||$4||'%'))
  AND ($9='' OR recipient_name ILIKE '%'||$9||'%' OR applicant_name ILIKE '%'||$9||'%')
  AND ($10='' OR phone LIKE '%'||regexp_replace($10,'[^0-9]','','g')||'%')
- AND ($11='' OR vehicle_plate ILIKE '%'||$11||'%' OR vehicle_brand ILIKE '%'||$11||'%' OR EXISTS(SELECT 1 FROM jsonb_array_elements(vehicles) car WHERE COALESCE((car->>'active')::boolean,true) AND concat_ws(' ',car->>'plate_number',car->>'brand') ILIKE '%'||$11||'%'))
+ AND ($11='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(vehicles) car WHERE concat_ws(' ',car->>'plate_number',car->>'brand') ILIKE '%'||$11||'%'))
  AND ($12='' OR premises_number ILIKE '%'||$12||'%' OR address ILIKE '%'||$12||'%')
  AND ($13::bigint=0 OR premises_id=$13)
  ), selected_groups AS (
@@ -136,8 +136,8 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 	if err = tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('gate_requests','id'))`).Scan(&id); err != nil {
 		return zero, mapErr(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,vehicle_plate,vehicle_brand,occasional_vehicle,valid_until,comment,vehicles,status)
- VALUES($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'',$14,'approved')`, id, in.NoPersonalVehicle, person, ownership, in.PremisesID, zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.StoredVehicles())
+	_, err = tx.Exec(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,occasional_vehicle,valid_until,comment,status)
+	 VALUES($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'','approved')`, id, in.NoPersonalVehicle, person, ownership, in.PremisesID, zone, in.Phone, in.RecipientName, in.Relation, in.OccasionalVehicle, in.ValidUntil)
 	if err != nil {
 		return zero, mapErr(err)
 	}
@@ -228,13 +228,10 @@ func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64
 		return zero, mapErr(err)
 	}
 	type editState struct {
-		ID           int64               `db:"id"`
-		Status       string              `db:"status"`
-		Vehicles     []model.GateVehicle `db:"vehicles"`
-		VehiclePlate string              `db:"vehicle_plate"`
-		VehicleBrand string              `db:"vehicle_brand"`
+		ID     int64  `db:"id"`
+		Status string `db:"status"`
 	}
-	states, err := collect[editState](tx.Query(ctx, `SELECT id,status,vehicles,vehicle_plate,vehicle_brand FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	states, err := collect[editState](tx.Query(ctx, `SELECT id,status FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
 	if err != nil {
 		return zero, err
 	}
@@ -243,27 +240,12 @@ func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64
 			return zero, &Error{ErrConflict, "gate: request status changed"}
 		}
 	}
-	oldVehicles := states[0].Vehicles
-	if len(oldVehicles) == 0 && (states[0].VehiclePlate != "" || states[0].VehicleBrand != "") {
-		oldVehicles = []model.GateVehicle{{PlateNumber: states[0].VehiclePlate, Brand: states[0].VehicleBrand, Active: true}}
-	}
-	updatedVehicles := make([]model.GateVehicle, 0, len(oldVehicles)+len(in.Vehicles))
-	for _, old := range oldVehicles {
-		if !old.Active {
-			updatedVehicles = append(updatedVehicles, old)
-		}
-	}
-	updatedVehicles = append(updatedVehicles, in.StoredVehicles()...)
-	plate, brand := "", ""
-	if len(in.Vehicles) > 0 {
-		plate, brand = in.Vehicles[0].PlateNumber, in.Vehicles[0].Brand
+	var owner int64
+	if err = tx.QueryRow(ctx, `SELECT person_id FROM gate_requests WHERE group_id=$1 LIMIT 1`, groupID).Scan(&owner); err != nil {
+		return zero, mapErr(err)
 	}
 	if in.VehicleIDs != nil {
-		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles='[]'::jsonb,vehicle_plate='',vehicle_brand='',no_personal_vehicle=$4,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, in.NoPersonalVehicle); err != nil {
-			return zero, mapErr(err)
-		}
-		var owner int64
-		if err = tx.QueryRow(ctx, `SELECT person_id FROM gate_requests WHERE group_id=$1 LIMIT 1`, groupID).Scan(&owner); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,no_personal_vehicle=$4,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, in.NoPersonalVehicle); err != nil {
 			return zero, mapErr(err)
 		}
 		for _, state := range states {
@@ -271,36 +253,24 @@ func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64
 				return zero, err
 			}
 		}
-	} else if person == 0 {
-		var owner int64
-		if err = tx.QueryRow(ctx, `SELECT person_id FROM gate_requests WHERE group_id=$1 LIMIT 1`, groupID).Scan(&owner); err != nil {
-			return zero, mapErr(err)
-		}
-		archived := make([]model.GateVehicle, 0)
-		for _, old := range updatedVehicles {
-			if !old.Active {
-				archived = append(archived, old)
-			}
-		}
+	} else {
 		for _, state := range states {
-			if _, err = tx.Exec(ctx, `DELETE FROM gate_request_vehicles rv USING gate_vehicles v WHERE rv.vehicle_id=v.id AND rv.request_id=$1 AND v.active`, state.ID); err != nil {
+			if _, err = tx.Exec(ctx, `DELETE FROM gate_request_vehicles WHERE request_id=$1`, state.ID); err != nil {
 				return zero, mapErr(err)
 			}
 		}
-		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate='',vehicle_brand='',no_personal_vehicle=$5,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, archived, in.NoPersonalVehicle); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,no_personal_vehicle=$4,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, in.NoPersonalVehicle); err != nil {
 			return zero, mapErr(err)
 		}
 		requestIDs := make([]int64, 0, len(states))
 		for _, state := range states {
 			requestIDs = append(requestIDs, state.ID)
 		}
-		if !in.NoPersonalVehicle {
+		if !in.NoPersonalVehicle && len(in.Vehicles) > 0 {
 			if err = saveAndLinkAdminVehicles(ctx, tx, requestIDs, owner, in.Vehicles); err != nil {
 				return zero, err
 			}
 		}
-	} else if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate=$5,vehicle_brand=$6,no_personal_vehicle=$7,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, updatedVehicles, plate, brand, in.NoPersonalVehicle); err != nil {
-		return zero, mapErr(err)
 	}
 	var actorPerson, actorUser *int64
 	role := "resident"
@@ -377,13 +347,17 @@ func (s *Gate) createRow(ctx context.Context, tx pgx.Tx, person int64, in model.
 	if valid {
 		return 0, &Error{ErrConflict, "gate: duplicate request"}
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,vehicle_plate,vehicle_brand,occasional_vehicle,valid_until,comment,vehicles)
- VALUES($13,$14,$15,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$16) RETURNING id`, person, ownership, in.PremisesID, in.Zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.Comment, id, groupID, in.NoPersonalVehicle, in.StoredVehicles()).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO gate_requests(id,group_id,no_personal_vehicle,person_id,ownership_id,premises_id,zone,phone,recipient_name,relation,occasional_vehicle,valid_until,comment)
+	 VALUES($11,$12,$13,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, person, ownership, in.PremisesID, in.Zone, in.Phone, in.RecipientName, in.Relation, in.OccasionalVehicle, in.ValidUntil, in.Comment, id, groupID, in.NoPersonalVehicle).Scan(&id)
 	if err != nil {
 		return 0, mapErr(err)
 	}
 	if in.VehicleIDs != nil {
 		if err = linkGateVehicles(ctx, tx, id, person, in.VehicleIDs, false); err != nil {
+			return 0, err
+		}
+	} else if len(in.Vehicles) > 0 {
+		if err = saveAndLinkAdminVehicles(ctx, tx, []int64{id}, person, in.Vehicles); err != nil {
 			return 0, err
 		}
 	}

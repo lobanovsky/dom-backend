@@ -17,7 +17,6 @@ type GateVehicle struct {
 	ID          int64  `json:"id,omitempty"`
 	PlateNumber string `json:"plate_number"`
 	Brand       string `json:"brand"`
-	Active      bool   `json:"active"`
 }
 
 // GateVehicleRecord — автомобиль в общем реестре собственника.
@@ -26,7 +25,6 @@ type GateVehicleRecord struct {
 	PersonID    int64  `json:"-" db:"person_id"`
 	PlateNumber string `json:"plate_number" db:"plate_number"`
 	Brand       string `json:"brand" db:"brand"`
-	Active      bool   `json:"active" db:"active"`
 }
 
 type GateVehicleRecordInput struct {
@@ -133,7 +131,7 @@ func (v GateEditInput) Validate() error {
 func (v GateEditInput) StoredVehicles() []GateVehicle {
 	out := make([]GateVehicle, 0, len(v.Vehicles))
 	for _, car := range v.Vehicles {
-		out = append(out, GateVehicle{PlateNumber: car.PlateNumber, Brand: car.Brand, Active: true})
+		out = append(out, GateVehicle{PlateNumber: car.PlateNumber, Brand: car.Brand})
 	}
 	return out
 }
@@ -163,7 +161,7 @@ func (v *GateInput) Normalize() {
 func (v GateInput) StoredVehicles() []GateVehicle {
 	out := make([]GateVehicle, 0, len(v.Vehicles))
 	for _, car := range v.Vehicles {
-		out = append(out, GateVehicle{PlateNumber: car.PlateNumber, Brand: car.Brand, Active: true})
+		out = append(out, GateVehicle{PlateNumber: car.PlateNumber, Brand: car.Brand})
 	}
 	return out
 }
@@ -261,8 +259,6 @@ type GateRequest struct {
 	Phone             string        `json:"phone" db:"phone"`
 	RecipientName     string        `json:"recipient_name" db:"recipient_name"`
 	Relation          string        `json:"relation" db:"relation"`
-	VehiclePlate      string        `json:"vehicle_plate" db:"vehicle_plate"`
-	VehicleBrand      string        `json:"vehicle_brand" db:"vehicle_brand"`
 	OccasionalVehicle bool          `json:"occasional_vehicle" db:"occasional_vehicle"`
 	ValidUntil        *Date         `json:"valid_until" db:"valid_until"`
 	Comment           string        `json:"comment" db:"comment"`

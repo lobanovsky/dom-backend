@@ -32,7 +32,7 @@ func (f *fakeGate) List(_ context.Context, p int64, filter model.GateFilter, _, 
 func (f *fakeGate) AdminCreate(_ context.Context, user model.User, in model.GateInput) (model.GateRequest, error) {
 	f.user = user
 	f.in = in
-	return model.GateRequest{ID: 42, Status: "approved", RecipientName: in.RecipientName, VehiclePlate: in.VehiclePlate}, nil
+	return model.GateRequest{ID: 42, Status: "approved", RecipientName: in.RecipientName}, nil
 }
 
 func TestGateResidentRejectedFilter(t *testing.T) {

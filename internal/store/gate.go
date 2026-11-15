@@ -161,7 +161,7 @@ func (s *Gate) Events(ctx context.Context, person, id int64) ([]model.GateEvent,
 	return collect[model.GateEvent](s.pool.Query(ctx, `SELECT id,action,actor_role,note,created_at FROM gate_events WHERE request_id=(SELECT group_id FROM gate_requests WHERE id=$1) ORDER BY id`, id))
 }
 
-// DeleteRejected физически удаляет отклонённую заявку целиком, включая её группу и события истории.
+// DeleteRejected физически удаляет неактивную заявку целиком, включая её группу и события истории.
 func (s *Gate) DeleteRejected(ctx context.Context, id int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -173,17 +173,21 @@ func (s *Gate) DeleteRejected(ctx context.Context, id int64) error {
 		return mapErr(err)
 	}
 	type gateState struct {
-		ID     int64  `db:"id"`
-		Status string `db:"status"`
+		ID int64 `db:"id"`
 	}
-	rows, err := collect[gateState](tx.Query(ctx, `SELECT id,status FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	rows, err := collect[gateState](tx.Query(ctx, `SELECT id FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
 	if err != nil {
 		return err
 	}
-	for _, row := range rows {
-		if row.Status != "rejected" {
-			return &Error{ErrConflict, "gate: only rejected requests can be deleted"}
-		}
+	if len(rows) == 0 {
+		return &Error{ErrNotFound, "not found"}
+	}
+	var active, pending bool
+	if err = tx.QueryRow(ctx, gateView+`SELECT COALESCE(bool_or(active),false),COALESCE(bool_and(status='pending'),false) FROM gate_view WHERE group_id=$1`, groupID).Scan(&active, &pending); err != nil {
+		return mapErr(err)
+	}
+	if active || pending {
+		return &Error{ErrConflict, "gate: only inactive rejected requests can be deleted"}
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=$1`, groupID); err != nil {
 		return mapErr(err)
@@ -413,9 +417,6 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 	}
 	if target == "" {
 		return zero, invalid("gate: invalid action")
-	}
-	if person == 0 && action == "revoke" && note == "" {
-		return zero, invalid("gate: decision reason is required")
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -55,10 +55,11 @@ func (s *Gate) Properties(ctx context.Context, person int64) ([]model.GateProper
 }
 func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit, offset int) ([]model.GateRequest, error) {
 	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`, presentation AS (
- SELECT group_id,CASE WHEN bool_or(active) THEN 'approved' WHEN bool_and(status='pending') THEN 'pending' ELSE 'rejected' END display_status
+ SELECT group_id,CASE WHEN bool_or(active) THEN 'approved' WHEN bool_and(status='pending') THEN 'pending' WHEN bool_and(status='revoke_requested') THEN 'revoke_requested' ELSE 'rejected' END display_status
  FROM gate_view GROUP BY group_id
  ), matched AS (
  SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
+ AND ($1::bigint=0 OR display_status<>'revoke_requested')
  AND ($14::boolean OR $1::bigint=0 OR display_status<>'rejected')
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,vehicle_plate,vehicle_brand,premises_number,address) ILIKE '%'||$4||'%'
  OR ($5<>'' AND phone LIKE '%'||$5||'%')
@@ -120,7 +121,7 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 	if !valid {
 		return zero, invalid("gate: expiry is in the past")
 	}
-	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE premises_id=$1 AND zone=$2 AND phone=$3 AND effective_status IN('pending','approved'))`, in.PremisesID, zone, in.Phone).Scan(&valid); err != nil {
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE premises_id=$1 AND zone=$2 AND phone=$3 AND effective_status IN('pending','approved','revoke_requested'))`, in.PremisesID, zone, in.Phone).Scan(&valid); err != nil {
 		return zero, mapErr(err)
 	}
 	if valid {
@@ -183,7 +184,7 @@ func (s *Gate) DeleteRejected(ctx context.Context, id int64) error {
 		return &Error{ErrNotFound, "not found"}
 	}
 	var active, pending bool
-	if err = tx.QueryRow(ctx, gateView+`SELECT COALESCE(bool_or(active),false),COALESCE(bool_and(status='pending'),false) FROM gate_view WHERE group_id=$1`, groupID).Scan(&active, &pending); err != nil {
+	if err = tx.QueryRow(ctx, gateView+`SELECT COALESCE(bool_or(active),false),COALESCE(bool_and(status IN('pending','revoke_requested')),false) FROM gate_view WHERE group_id=$1`, groupID).Scan(&active, &pending); err != nil {
 		return mapErr(err)
 	}
 	if active || pending {
@@ -320,7 +321,7 @@ func (s *Gate) createRow(ctx context.Context, tx pgx.Tx, person int64, in model.
 	if !valid {
 		return 0, invalid("gate: expiry is in the past")
 	}
-	if err := tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE person_id=$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved'))`, person, in.PremisesID, in.Zone, in.Phone).Scan(&valid); err != nil {
+	if err := tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE person_id=$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved','revoke_requested'))`, person, in.PremisesID, in.Zone, in.Phone).Scan(&valid); err != nil {
 		return 0, mapErr(err)
 	}
 	if valid {
@@ -390,7 +391,7 @@ func (s *Gate) CreateBatch(ctx context.Context, person int64, in model.GateBatch
 	return collect[model.GateRequest](s.pool.Query(ctx, gateView+`SELECT * FROM gate_view WHERE group_id=ANY($1::bigint[]) ORDER BY id`, groupIDs))
 }
 
-// Act фиксирует только допустимый переход; выдача в устройство выполняется отдельным этапом.
+// Act фиксирует допустимый переход; запрос жителя на отзыв откладывает синхронизацию до решения администратора.
 func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64, action, note string) (model.GateRequest, error) {
 	var zero model.GateRequest
 	note = strings.TrimSpace(note)
@@ -403,7 +404,7 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		case "cancel":
 			target = "cancelled"
 		case "revoke":
-			target = "revoked"
+			target = "revoke_requested"
 		}
 	} else if user.Role == model.RoleAdmin || user.Role == model.RoleGuard {
 		switch action {
@@ -413,6 +414,10 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 			target = "rejected"
 		case "revoke":
 			target = "revoked"
+		case "revoke_device":
+			if user.Role == model.RoleAdmin {
+				target = "revoked"
+			}
 		}
 	}
 	if target == "" {
@@ -441,9 +446,18 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		return zero, err
 	}
 	for _, row := range states {
-		if (action == "revoke" && row.Status != "approved") || (action != "revoke" && row.Status != "pending") {
+		validStatus := row.Status == "pending" && (action == "approve" || action == "reject" || action == "cancel") ||
+			row.Status == "approved" && (action == "revoke" || action == "revoke_device") ||
+			action == "revoke_device" && row.Status == "revoke_requested"
+		if action == "revoke_device" {
+			validStatus = row.Status == "revoke_requested"
+		}
+		if !validStatus {
 			return zero, &Error{ErrConflict, "gate: request status changed"}
 		}
+	}
+	if action == "revoke_device" && s.syncer == nil {
+		return zero, &Error{ErrIntegration, "интеграция ELDES не настроена"}
 	}
 	if action == "approve" {
 		if _, err = tx.Exec(ctx, `SELECT id FROM ownerships WHERE id IN(SELECT ownership_id FROM gate_requests WHERE group_id=$1) ORDER BY id FOR SHARE`, groupID); err != nil {
@@ -457,7 +471,7 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 			return zero, invalid("gate: property or expiry is no longer eligible")
 		}
 	}
-	if s.syncer != nil && person == 0 && (action == "approve" || action == "revoke") {
+	if s.syncer != nil && person == 0 && (action == "approve" || action == "revoke" || action == "revoke_device") {
 		groups := make(map[string][]string)
 		for _, row := range states {
 			key := row.Zone + ":" + row.Phone

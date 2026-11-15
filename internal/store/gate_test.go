@@ -60,6 +60,11 @@ func TestGateLifecycleAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup(t, pool, "users", guard.ID)
+	admin, err := NewUsers(pool).Create(ctx, "gate-test-admin", "unused", model.RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "users", admin.ID)
 	input := model.GateInput{PremisesID: apartment.ID, Zone: "courtyard", Phone: "8 999 123 45 67", RecipientName: "Гость", Relation: "guest"}
 	create := func(in model.GateInput) model.GateRequest {
 		r, e := s.Create(ctx, owner.ID, in)
@@ -119,11 +124,23 @@ func TestGateLifecycleAndPermissions(t *testing.T) {
 		t.Fatalf("redecision: %v", err)
 	}
 	r, err = s.Act(ctx, owner.ID, model.User{}, r.ID, "revoke", "")
+	if err != nil || r.Active || r.Status != "revoke_requested" {
+		t.Fatalf("revoke request: %+v %v", r, err)
+	}
+	adminList, err := s.List(ctx, 0, model.GateFilter{DisplayStatus: "revoke_requested"}, 50, 0)
+	if err != nil || len(adminList) != 1 {
+		t.Fatalf("admin revoke request list: %+v %v", adminList, err)
+	}
+	residentList, err := s.List(ctx, owner.ID, model.GateFilter{}, 50, 0)
+	if err != nil || len(residentList) != 0 {
+		t.Fatalf("resident should see revoked access disappear: %+v %v", residentList, err)
+	}
+	r, err = NewGate(pool, testGateSyncer{}).Act(ctx, 0, admin, r.ID, "revoke_device", "")
 	if err != nil || r.Active || r.Status != "revoked" {
-		t.Fatalf("revoke: %+v %v", r, err)
+		t.Fatalf("device revoke: %+v %v", r, err)
 	}
 	events, err := s.Events(ctx, owner.ID, r.ID)
-	if err != nil || len(events) != 3 || events[0].Action != "submitted" || events[1].ActorRole != "guard" || events[2].Action != "revoked" {
+	if err != nil || len(events) != 4 || events[0].Action != "submitted" || events[1].ActorRole != "guard" || events[2].Action != "revoke_requested" || events[3].Action != "revoked" {
 		t.Fatalf("audit: %+v %v", events, err)
 	}
 	r = create(input)
@@ -214,6 +231,10 @@ func TestGateLifecycleAndPermissions(t *testing.T) {
 		t.Fatalf("concurrent decisions: %d/%d", success, conflict)
 	}
 }
+
+type testGateSyncer struct{}
+
+func (testGateSyncer) Sync(context.Context, string, string, string, bool) error { return nil }
 
 func TestGateConcurrentCreation(t *testing.T) {
 	ctx := context.Background()

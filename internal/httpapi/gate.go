@@ -17,6 +17,7 @@ type GateStore interface {
 	Edit(context.Context, int64, model.User, int64, model.GateEditInput) (model.GateRequest, error)
 	Act(context.Context, int64, model.User, int64, string, string) (model.GateRequest, error)
 	Events(context.Context, int64, int64) ([]model.GateEvent, error)
+	DeleteRejected(context.Context, int64) error
 }
 type gateHandlers struct{ s GateStore }
 
@@ -56,6 +57,22 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/gate-access/{id}", wrap(h.edit(false)))
 	mux.HandleFunc("GET /api/v1/gate-access/{id}/events", wrap(h.events(false)))
 	mux.HandleFunc("POST /api/v1/gate-access/{id}/decision", wrap(h.action(false)))
+	mux.HandleFunc("DELETE /api/v1/gate-access/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if !currentUser(r).IsAdmin() {
+			writeError(w, 403, "forbidden")
+			return
+		}
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		if err := h.s.DeleteRejected(r.Context(), id); err != nil {
+			writeErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 }
 
 func (h gateHandlers) adminCreate(w http.ResponseWriter, r *http.Request) {

@@ -12,11 +12,12 @@ import (
 )
 
 type fakeGate struct {
-	person int64
-	user   model.User
-	in     model.GateInput
-	filter model.GateFilter
-	rows   []model.GateRequest
+	person    int64
+	user      model.User
+	in        model.GateInput
+	filter    model.GateFilter
+	rows      []model.GateRequest
+	deletedID int64
 }
 
 func (f *fakeGate) Properties(_ context.Context, p int64) ([]model.GateProperty, error) {
@@ -122,6 +123,10 @@ func (f *fakeGate) Act(_ context.Context, p int64, u model.User, _ int64, _, _ s
 func (f *fakeGate) Events(_ context.Context, p, _ int64) ([]model.GateEvent, error) {
 	f.person = p
 	return []model.GateEvent{}, nil
+}
+func (f *fakeGate) DeleteRejected(_ context.Context, id int64) error {
+	f.deletedID = id
+	return nil
 }
 func TestGateGuardAuthorization(t *testing.T) {
 	f := newFakeUsers()

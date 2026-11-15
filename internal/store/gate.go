@@ -161,6 +161,39 @@ func (s *Gate) Events(ctx context.Context, person, id int64) ([]model.GateEvent,
 	return collect[model.GateEvent](s.pool.Query(ctx, `SELECT id,action,actor_role,note,created_at FROM gate_events WHERE request_id=(SELECT group_id FROM gate_requests WHERE id=$1) ORDER BY id`, id))
 }
 
+// DeleteRejected физически удаляет отклонённую заявку целиком, включая её группу и события истории.
+func (s *Gate) DeleteRejected(ctx context.Context, id int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	var groupID int64
+	if err = tx.QueryRow(ctx, `SELECT group_id FROM gate_requests WHERE id=$1 FOR UPDATE`, id).Scan(&groupID); err != nil {
+		return mapErr(err)
+	}
+	type gateState struct {
+		ID     int64  `db:"id"`
+		Status string `db:"status"`
+	}
+	rows, err := collect[gateState](tx.Query(ctx, `SELECT id,status FROM gate_requests WHERE group_id=$1 ORDER BY id FOR UPDATE`, groupID))
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.Status != "rejected" {
+			return &Error{ErrConflict, "gate: only rejected requests can be deleted"}
+		}
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM gate_requests WHERE group_id=$1`, groupID); err != nil {
+		return mapErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return mapErr(err)
+	}
+	return nil
+}
+
 // Edit меняет только имя, отношение и автомобили, атомарно для всей заявки.
 func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64, in model.GateEditInput) (model.GateRequest, error) {
 	var zero model.GateRequest

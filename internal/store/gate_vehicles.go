@@ -53,12 +53,12 @@ func linkGateVehicles(ctx context.Context, tx pgx.Tx, requestID, person int64, i
 		return nil
 	}
 	if len(ids) > 10 {
-		return invalid("vehicle_ids", "at most 10 cars are allowed")
+		return invalid("gate: at most 10 cars are allowed")
 	}
 	seen := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		if id <= 0 || seen[id] {
-			return invalid("vehicle_ids", "must be unique positive IDs")
+			return invalid("gate: vehicle IDs must be unique positive IDs")
 		}
 		seen[id] = true
 	}
@@ -67,7 +67,7 @@ func linkGateVehicles(ctx context.Context, tx pgx.Tx, requestID, person int64, i
 		return mapErr(err)
 	}
 	if count != len(ids) {
-		return invalid("vehicle_ids", "car is not available")
+		return invalid("gate: car is not available")
 	}
 	for _, id := range ids {
 		if _, err := tx.Exec(ctx, `INSERT INTO gate_request_vehicles(request_id,vehicle_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, requestID, id); err != nil {

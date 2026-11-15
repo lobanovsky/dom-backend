@@ -6,6 +6,73 @@ import (
 	"unicode"
 )
 
+// GateServiceAccess — служебный доступ, не привязанный к помещению.
+type GateServiceAccess struct {
+	ID           int64             `json:"id" db:"id"`
+	Category     string            `json:"category" db:"category"`
+	Name         string            `json:"name" db:"name"`
+	Phone        string            `json:"phone" db:"phone"`
+	VehiclePlate string            `json:"vehicle_plate" db:"vehicle_plate"`
+	VehicleBrand string            `json:"vehicle_brand" db:"vehicle_brand"`
+	ValidUntil   *Date             `json:"valid_until" db:"valid_until"`
+	Comment      string            `json:"comment" db:"comment"`
+	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
+	Zones        []GateServiceZone `json:"zones" db:"-"`
+}
+type GateServiceZone struct {
+	Zone      string `json:"zone" db:"zone"`
+	Status    string `json:"status" db:"status"`
+	SyncError string `json:"sync_error" db:"sync_error"`
+}
+type GateServiceAccessInput struct {
+	Category     string   `json:"category"`
+	Name         string   `json:"name"`
+	Phone        string   `json:"phone"`
+	VehiclePlate string   `json:"vehicle_plate"`
+	VehicleBrand string   `json:"vehicle_brand"`
+	ValidUntil   *Date    `json:"valid_until"`
+	Comment      string   `json:"comment"`
+	Zones        []string `json:"zones"`
+}
+
+func (v *GateServiceAccessInput) Normalize() {
+	v.Name = strings.TrimSpace(v.Name)
+	v.Phone = NormalizePhone(v.Phone)
+	v.VehiclePlate = strings.ToLower(strings.TrimSpace(v.VehiclePlate))
+	v.VehicleBrand = strings.TrimSpace(v.VehicleBrand)
+	v.Comment = strings.TrimSpace(v.Comment)
+}
+func (v GateServiceAccessInput) Validate() error {
+	if v.Category != "staff" && v.Category != "contractor" && v.Category != "special_vehicle" {
+		return invalid("category", "is invalid")
+	}
+	if v.Name == "" || len([]rune(v.Name)) > 120 || len(v.Comment) > 1000 || strings.IndexFunc(v.Name+v.Comment+v.VehicleBrand+v.VehiclePlate, unicode.IsControl) >= 0 {
+		return invalid("name", "or comment is invalid")
+	}
+	if len(v.Phone) < 10 || len(v.Phone) > 15 {
+		return invalid("phone", "is invalid")
+	}
+	for _, r := range v.Phone {
+		if r < '0' || r > '9' {
+			return invalid("phone", "must contain digits only")
+		}
+	}
+	if len(v.VehiclePlate) > 24 || len(v.VehicleBrand) > 80 {
+		return invalid("vehicle", "is invalid")
+	}
+	if len(v.Zones) == 0 || len(v.Zones) > 2 {
+		return invalid("zones", "select courtyard, parking or both")
+	}
+	seen := map[string]bool{}
+	for _, z := range v.Zones {
+		if (z != "courtyard" && z != "parking") || seen[z] {
+			return invalid("zone", "is invalid")
+		}
+		seen[z] = true
+	}
+	return nil
+}
+
 // GateVehicleInput — автомобиль в новой заявке.
 type GateVehicleInput struct {
 	PlateNumber string `json:"plate_number"`

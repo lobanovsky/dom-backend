@@ -154,8 +154,14 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 		return zero, mapErr(err)
 	}
 	if s.syncer != nil {
-		if err = s.syncer.Sync(ctx, zone, in.Phone, gateDeviceName(premisesNumber), true); err != nil {
-			return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
+		var alreadyEnabled bool
+		if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND zone=$2 AND phone=$3 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.zone=$2 AND a.phone=$3 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, id, zone, in.Phone).Scan(&alreadyEnabled); err != nil {
+			return zero, mapErr(err)
+		}
+		if !alreadyEnabled {
+			if err = s.syncer.Sync(ctx, zone, in.Phone, gateDeviceName(premisesNumber), true); err != nil {
+				return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
+			}
 		}
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -520,9 +526,18 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 			parts := strings.SplitN(key, ":", 2)
 			zone, phone := parts[0], parts[1]
 			enabled := action == "approve"
+			if enabled {
+				var alreadyEnabled bool
+				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.zone=$2 AND a.phone=$3 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, groupID, zone, phone).Scan(&alreadyEnabled); err != nil {
+					return zero, mapErr(err)
+				}
+				if alreadyEnabled {
+					continue
+				}
+			}
 			if !enabled {
 				var remains bool
-				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active)`, groupID, zone, phone).Scan(&remains); err != nil {
+				if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE group_id<>$1 AND zone=$2 AND phone=$3 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.zone=$2 AND a.phone=$3 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, groupID, zone, phone).Scan(&remains); err != nil {
 					return zero, mapErr(err)
 				}
 				enabled = remains

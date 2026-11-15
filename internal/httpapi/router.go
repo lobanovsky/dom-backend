@@ -80,6 +80,7 @@ func NewRouter(d Deps) http.Handler {
 	api := http.NewServeMux()
 	if d.Gate != nil {
 		gateHandlers{d.Gate}.registerAdmin(api)
+		gateHandlers{d.Gate}.registerService(api)
 	}
 	if d.MeterReadingExport != nil {
 		api.HandleFunc("GET /api/v1/meter-readings/export", meterExportHandlers{d.MeterReadingExport}.export)

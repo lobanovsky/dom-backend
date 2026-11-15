@@ -64,6 +64,23 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	a := auth.New(users, cfg.AdminSessionSecret, cfg.SessionTTL)
+	gate := store.NewGate(pool, store.NewHTTPGateAccessSyncer(os.Getenv("ELDES_API_URL"), os.Getenv("GATE_ACCESS_INTEGRATION_TOKEN")))
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				work, cancel := context.WithTimeout(ctx, 45*time.Second)
+				if e := gate.ProcessExpiredServiceAccesses(work); e != nil {
+					log.Error("служебные доступы: ошибка обработки сроков", "err", e)
+				}
+				cancel()
+			}
+		}
+	}()
 
 	premises := store.NewPremisesStore(pool)
 	ownerships := store.NewOwnerships(pool)
@@ -156,7 +173,7 @@ func run(log *slog.Logger) error {
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Auth:                 a,
 			Residents:            residents,
-			Gate:                 store.NewGate(pool, store.NewHTTPGateAccessSyncer(os.Getenv("ELDES_API_URL"), os.Getenv("GATE_ACCESS_INTEGRATION_TOKEN"))),
+			Gate:                 gate,
 			ResidentOptions:      httpapi.ResidentOptions{BaseURL: residentConfig.BaseURL, MailEnabled: residentConfig.Enabled()},
 			Users:                users,
 			Organizations:        store.NewOrganizations(pool),

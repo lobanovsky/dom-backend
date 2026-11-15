@@ -34,7 +34,7 @@ const gateEligibility = `o.person_id=g.person_id AND o.premises_id=g.premises_id
  AND o.valid_from<=` + gateToday + ` AND (o.valid_to IS NULL OR o.valid_to>=` + gateToday + `)
  AND pe.deleted_at IS NULL AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL AND ` + gateKindZone
 const gateView = `WITH base AS (
- SELECT g.id,g.group_id,g.vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
+ SELECT g.id,g.group_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'plate_number',v.plate_number,'brand',v.brand,'active',v.active) ORDER BY v.id) FROM gate_request_vehicles rv JOIN gate_vehicles v ON v.id=rv.vehicle_id WHERE rv.request_id=g.id AND v.deleted_at IS NULL),g.vehicles) vehicles,g.no_personal_vehicle,g.person_id,g.premises_id,p.building_id,
  concat_ws(' ',pe.last_name,pe.first_name,pe.middle_name) applicant_name,b.address,p.number premises_number,p.kind premises_kind,
  g.zone,g.phone,g.recipient_name,g.relation,g.vehicle_plate,g.vehicle_brand,g.occasional_vehicle,g.valid_until,g.eldes_label,
  CASE WHEN lower(trim(g.comment)) IN ('перенесено из housekeeper. доступ был действующим.','перенесено из housekeeper. доступ был отключен.','перенесено из housekeeper. доступ был отключён.') THEN '' ELSE g.comment END comment,
@@ -140,6 +140,15 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
  VALUES($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'',$14,'approved')`, id, in.NoPersonalVehicle, person, ownership, in.PremisesID, zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.StoredVehicles())
 	if err != nil {
 		return zero, mapErr(err)
+	}
+	if in.VehicleIDs != nil {
+		if err = linkGateVehicles(ctx, tx, id, person, in.VehicleIDs, false); err != nil {
+			return zero, err
+		}
+	} else if len(in.Vehicles) > 0 {
+		if err = saveAndLinkAdminVehicles(ctx, tx, []int64{id}, person, in.Vehicles); err != nil {
+			return zero, err
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_user_id,note) VALUES($1,'created','admin',$2,'Доступ добавлен администратором без заявки')`, id, user.ID); err != nil {
 		return zero, mapErr(err)
@@ -249,7 +258,48 @@ func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64
 	if len(in.Vehicles) > 0 {
 		plate, brand = in.Vehicles[0].PlateNumber, in.Vehicles[0].Brand
 	}
-	if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate=$5,vehicle_brand=$6,no_personal_vehicle=$7,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, updatedVehicles, plate, brand, in.NoPersonalVehicle); err != nil {
+	if in.VehicleIDs != nil {
+		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles='[]'::jsonb,vehicle_plate='',vehicle_brand='',no_personal_vehicle=$4,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, in.NoPersonalVehicle); err != nil {
+			return zero, mapErr(err)
+		}
+		var owner int64
+		if err = tx.QueryRow(ctx, `SELECT person_id FROM gate_requests WHERE group_id=$1 LIMIT 1`, groupID).Scan(&owner); err != nil {
+			return zero, mapErr(err)
+		}
+		for _, state := range states {
+			if err = linkGateVehicles(ctx, tx, state.ID, owner, in.VehicleIDs, true); err != nil {
+				return zero, err
+			}
+		}
+	} else if person == 0 {
+		var owner int64
+		if err = tx.QueryRow(ctx, `SELECT person_id FROM gate_requests WHERE group_id=$1 LIMIT 1`, groupID).Scan(&owner); err != nil {
+			return zero, mapErr(err)
+		}
+		archived := make([]model.GateVehicle, 0)
+		for _, old := range updatedVehicles {
+			if !old.Active {
+				archived = append(archived, old)
+			}
+		}
+		for _, state := range states {
+			if _, err = tx.Exec(ctx, `DELETE FROM gate_request_vehicles rv USING gate_vehicles v WHERE rv.vehicle_id=v.id AND rv.request_id=$1 AND v.active`, state.ID); err != nil {
+				return zero, mapErr(err)
+			}
+		}
+		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate='',vehicle_brand='',no_personal_vehicle=$5,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, archived, in.NoPersonalVehicle); err != nil {
+			return zero, mapErr(err)
+		}
+		requestIDs := make([]int64, 0, len(states))
+		for _, state := range states {
+			requestIDs = append(requestIDs, state.ID)
+		}
+		if !in.NoPersonalVehicle {
+			if err = saveAndLinkAdminVehicles(ctx, tx, requestIDs, owner, in.Vehicles); err != nil {
+				return zero, err
+			}
+		}
+	} else if _, err = tx.Exec(ctx, `UPDATE gate_requests SET recipient_name=$2,relation=$3,vehicles=$4,vehicle_plate=$5,vehicle_brand=$6,no_personal_vehicle=$7,updated_at=now() WHERE group_id=$1`, groupID, in.RecipientName, in.Relation, updatedVehicles, plate, brand, in.NoPersonalVehicle); err != nil {
 		return zero, mapErr(err)
 	}
 	var actorPerson, actorUser *int64
@@ -331,6 +381,11 @@ func (s *Gate) createRow(ctx context.Context, tx pgx.Tx, person int64, in model.
  VALUES($13,$14,$15,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$16) RETURNING id`, person, ownership, in.PremisesID, in.Zone, in.Phone, in.RecipientName, in.Relation, in.VehiclePlate, in.VehicleBrand, in.OccasionalVehicle, in.ValidUntil, in.Comment, id, groupID, in.NoPersonalVehicle, in.StoredVehicles()).Scan(&id)
 	if err != nil {
 		return 0, mapErr(err)
+	}
+	if in.VehicleIDs != nil {
+		if err = linkGateVehicles(ctx, tx, id, person, in.VehicleIDs, false); err != nil {
+			return 0, err
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_person_id) VALUES($1,'submitted','resident',$2)`, id, person); err != nil {
 		return 0, mapErr(err)

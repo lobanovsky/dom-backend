@@ -20,6 +20,13 @@ type GateStore interface {
 	DeleteRejected(context.Context, int64) error
 }
 type gateHandlers struct{ s GateStore }
+type gateVehicleStore interface {
+	ListVehicles(context.Context, int64) ([]model.GateVehicleRecord, error)
+	SaveVehicle(context.Context, int64, int64, model.GateVehicleRecordInput) (model.GateVehicleRecord, error)
+	ArchiveVehicle(context.Context, int64, int64) error
+	AdminVehicle(context.Context, int64, model.GateVehicleRecordInput) (model.GateVehicleRecord, error)
+	AdminArchiveVehicle(context.Context, int64) error
+}
 
 var gateEventPath = regexp.MustCompile(`^/api/v1/gate-access/[1-9][0-9]*/events$`)
 var gateDecisionPath = regexp.MustCompile(`^/api/v1/gate-access/[1-9][0-9]*/decision$`)
@@ -46,6 +53,17 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 		}
 	}
 	mux.HandleFunc("GET /api/v1/gate-access", wrap(h.list(false)))
+	adminOnly := func(fn http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !currentUser(r).IsAdmin() {
+				writeError(w, 403, "forbidden")
+				return
+			}
+			fn(w, r)
+		}
+	}
+	mux.HandleFunc("PUT /api/v1/gate-vehicles/{id}", adminOnly(h.adminVehicle))
+	mux.HandleFunc("DELETE /api/v1/gate-vehicles/{id}", adminOnly(h.adminArchiveVehicle))
 	mux.HandleFunc("POST /api/v1/gate-access", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if !currentUser(r).IsAdmin() {
@@ -96,10 +114,132 @@ func (h gateHandlers) adminCreate(w http.ResponseWriter, r *http.Request) {
 func (h gateHandlers) registerResident(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/resident/gate-access", h.list(true))
 	mux.HandleFunc("GET /api/v1/resident/gate-access/properties", h.properties)
+	mux.HandleFunc("GET /api/v1/resident/gate-access/vehicles", h.listVehicles)
+	mux.HandleFunc("POST /api/v1/resident/gate-access/vehicles", h.saveVehicle)
+	mux.HandleFunc("PUT /api/v1/resident/gate-access/vehicles/{id}", h.saveVehicle)
+	mux.HandleFunc("DELETE /api/v1/resident/gate-access/vehicles/{id}", h.archiveVehicle)
 	mux.HandleFunc("POST /api/v1/resident/gate-access", h.create)
 	mux.HandleFunc("POST /api/v1/resident/gate-access/batch", h.createBatch)
 	mux.HandleFunc("PUT /api/v1/resident/gate-access/{id}", h.edit(true))
 	mux.HandleFunc("POST /api/v1/resident/gate-access/{id}/action", h.action(true))
+}
+
+func (h gateHandlers) listVehicles(w http.ResponseWriter, r *http.Request) {
+	person, ok := gatePerson(w, r, true)
+	if !ok {
+		return
+	}
+	s, ok := h.s.(gateVehicleStore)
+	if !ok {
+		writeError(w, 503, "vehicle registry unavailable")
+		return
+	}
+	items, err := s.ListVehicles(r.Context(), person)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (h gateHandlers) saveVehicle(w http.ResponseWriter, r *http.Request) {
+	person, ok := gatePerson(w, r, true)
+	if !ok {
+		return
+	}
+	s, ok := h.s.(gateVehicleStore)
+	if !ok {
+		writeError(w, 503, "vehicle registry unavailable")
+		return
+	}
+	id := int64(0)
+	if r.Method == "PUT" {
+		var valid bool
+		id, valid = pathID(w, r)
+		if !valid {
+			return
+		}
+	}
+	var in model.GateVehicleRecordInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Normalize()
+	if err := in.Validate(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	item, err := s.SaveVehicle(r.Context(), person, id, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	status := http.StatusOK
+	if id == 0 {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, item)
+}
+func (h gateHandlers) archiveVehicle(w http.ResponseWriter, r *http.Request) {
+	person, ok := gatePerson(w, r, true)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	s, ok := h.s.(gateVehicleStore)
+	if !ok {
+		writeError(w, 503, "vehicle registry unavailable")
+		return
+	}
+	if err := s.ArchiveVehicle(r.Context(), person, id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+func (h gateHandlers) adminVehicle(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	s, ok := h.s.(gateVehicleStore)
+	if !ok {
+		writeError(w, 503, "vehicle registry unavailable")
+		return
+	}
+	var in model.GateVehicleRecordInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	in.Normalize()
+	if err := in.Validate(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	item, err := s.AdminVehicle(r.Context(), id, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, item)
+}
+func (h gateHandlers) adminArchiveVehicle(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	s, ok := h.s.(gateVehicleStore)
+	if !ok {
+		writeError(w, 503, "vehicle registry unavailable")
+		return
+	}
+	if err := s.AdminArchiveVehicle(r.Context(), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func gatePerson(w http.ResponseWriter, r *http.Request, resident bool) (int64, bool) {
 	if !resident {

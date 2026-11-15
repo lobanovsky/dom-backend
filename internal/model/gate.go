@@ -14,14 +14,45 @@ type GateVehicleInput struct {
 
 // GateVehicle сохраняет также снятые с использования автомобили.
 type GateVehicle struct {
+	ID          int64  `json:"id,omitempty"`
 	PlateNumber string `json:"plate_number"`
 	Brand       string `json:"brand"`
 	Active      bool   `json:"active"`
 }
 
+// GateVehicleRecord — автомобиль в общем реестре собственника.
+type GateVehicleRecord struct {
+	ID          int64  `json:"id" db:"id"`
+	PersonID    int64  `json:"-" db:"person_id"`
+	PlateNumber string `json:"plate_number" db:"plate_number"`
+	Brand       string `json:"brand" db:"brand"`
+	Active      bool   `json:"active" db:"active"`
+}
+
+type GateVehicleRecordInput struct {
+	PlateNumber string `json:"plate_number"`
+	Brand       string `json:"brand"`
+}
+
+func (v *GateVehicleRecordInput) Normalize() {
+	v.PlateNumber = strings.ToLower(strings.TrimSpace(v.PlateNumber))
+	v.Brand = strings.TrimSpace(v.Brand)
+}
+
+func (v GateVehicleRecordInput) Validate() error {
+	if v.PlateNumber == "" {
+		return invalid("plate_number", "is required")
+	}
+	if len([]rune(v.PlateNumber)) > 24 || len([]rune(v.Brand)) > 80 || strings.IndexFunc(v.PlateNumber+v.Brand, unicode.IsControl) >= 0 {
+		return invalid("vehicle", "invalid car number or brand")
+	}
+	return nil
+}
+
 // GateInput — неизменяемые после отправки сведения получателя доступа.
 type GateInput struct {
 	Vehicles          []GateVehicleInput `json:"vehicles"`
+	VehicleIDs        []int64            `json:"vehicle_ids"`
 	PremisesID        int64              `json:"premises_id"`
 	Zone              string             `json:"zone"`
 	Phone             string             `json:"phone"`
@@ -38,6 +69,7 @@ type GateInput struct {
 // GateEditInput — редактируемые сведения заявки; телефон и объект доступа неизменны.
 type GateEditInput struct {
 	Vehicles          []GateVehicleInput `json:"vehicles"`
+	VehicleIDs        []int64            `json:"vehicle_ids"`
 	RecipientName     string             `json:"recipient_name"`
 	Relation          string             `json:"relation"`
 	NoPersonalVehicle bool               `json:"no_personal_vehicle"`
@@ -67,6 +99,12 @@ func (v GateEditInput) Validate() error {
 	}
 	if v.NoPersonalVehicle && len(v.Vehicles) > 0 {
 		return invalid("vehicle", "car must be empty without a personal vehicle")
+	}
+	if v.VehicleIDs != nil && len(v.Vehicles) > 0 {
+		return invalid("vehicle_ids", "use either vehicle IDs or vehicle data")
+	}
+	if err := validateGateVehicleIDs(v.VehicleIDs, v.NoPersonalVehicle); err != nil {
+		return err
 	}
 	seenCars := map[string]bool{}
 	for _, car := range v.Vehicles {
@@ -130,6 +168,9 @@ func (v GateInput) StoredVehicles() []GateVehicle {
 	return out
 }
 func (v GateInput) Validate() error {
+	if v.VehicleIDs != nil && len(v.Vehicles) > 0 {
+		return invalid("vehicle_ids", "use either vehicle IDs or vehicle data")
+	}
 	if len(v.Vehicles) > 10 {
 		return invalid("vehicles", "at most 10 cars are allowed")
 	}
@@ -153,6 +194,9 @@ func (v GateInput) Validate() error {
 		if key != "" {
 			seenCars[key] = true
 		}
+	}
+	if err := validateGateVehicleIDs(v.VehicleIDs, v.NoPersonalVehicle); err != nil {
+		return err
 	}
 	if v.NoPersonalVehicle && (len(v.Vehicles) > 0 || v.VehiclePlate != "" || v.VehicleBrand != "") {
 		return invalid("vehicle", "car must be empty without a personal vehicle")
@@ -179,6 +223,23 @@ func (v GateInput) Validate() error {
 	}
 	if v.RecipientName == "" {
 		return invalid("recipient_name", "is required")
+	}
+	return nil
+}
+
+func validateGateVehicleIDs(ids []int64, noVehicle bool) error {
+	if len(ids) > 10 {
+		return invalid("vehicle_ids", "at most 10 cars are allowed")
+	}
+	if noVehicle && len(ids) > 0 {
+		return invalid("vehicle_ids", "car must be empty without a personal vehicle")
+	}
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			return invalid("vehicle_ids", "must be unique positive IDs")
+		}
+		seen[id] = true
 	}
 	return nil
 }
@@ -237,6 +298,7 @@ type GateFilter struct {
 // GateBatchInput — одна заявка на несколько собственных объектов. Зоны определяет сервер.
 type GateBatchInput struct {
 	Vehicles          []GateVehicleInput `json:"vehicles"`
+	VehicleIDs        []int64            `json:"vehicle_ids"`
 	PremisesIDs       []int64            `json:"premises_ids"`
 	Phone             string             `json:"phone"`
 	RecipientName     string             `json:"recipient_name"`
@@ -248,7 +310,7 @@ type GateBatchInput struct {
 }
 
 func (v GateBatchInput) Contact() GateInput {
-	return GateInput{Vehicles: v.Vehicles, Phone: v.Phone, RecipientName: v.RecipientName, Relation: v.Relation, VehiclePlate: v.VehiclePlate, VehicleBrand: v.VehicleBrand, NoPersonalVehicle: v.NoPersonalVehicle, Comment: v.Comment}
+	return GateInput{Vehicles: v.Vehicles, VehicleIDs: v.VehicleIDs, Phone: v.Phone, RecipientName: v.RecipientName, Relation: v.Relation, VehiclePlate: v.VehiclePlate, VehicleBrand: v.VehicleBrand, NoPersonalVehicle: v.NoPersonalVehicle, Comment: v.Comment}
 }
 func (v GateBatchInput) Validate() error {
 	if len(v.PremisesIDs) == 0 || len(v.PremisesIDs) > 50 {

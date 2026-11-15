@@ -414,7 +414,7 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 	if target == "" {
 		return zero, invalid("gate: invalid action")
 	}
-	if person == 0 && (action == "reject" || action == "revoke") && note == "" {
+	if person == 0 && action == "revoke" && note == "" {
 		return zero, invalid("gate: decision reason is required")
 	}
 	tx, err := s.pool.Begin(ctx)

@@ -104,8 +104,12 @@ func TestGateLifecycleAndPermissions(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatalf("foreign list: %+v %v", list, err)
 	}
-	if _, err = s.Act(ctx, 0, guard, r.ID, "reject", ""); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("reason required: %v", err)
+	rejectInput := input
+	rejectInput.Phone = "79991234569"
+	rejected := create(rejectInput)
+	rejected, err = s.Act(ctx, 0, guard, rejected.ID, "reject", "")
+	if err != nil || rejected.Status != "rejected" {
+		t.Fatalf("reject without reason: %+v %v", rejected, err)
 	}
 	r, err = s.Act(ctx, 0, guard, r.ID, "approve", "Проверено")
 	if err != nil || !r.Active {

@@ -68,10 +68,10 @@ func gateServiceStatusPriority(status string) int {
 func (s *Gate) LookupGatePhone(ctx context.Context, phone string) ([]model.GatePhoneLookupEntry, error) {
 	return collect[model.GatePhoneLookupEntry](s.pool.Query(ctx, gateView+`SELECT zone,'property' source,recipient_name name,
 CASE premises_kind WHEN 'parking_space' THEN 'Машиноместо ' ELSE CASE WHEN premises_kind='commercial' THEN 'Коммерческое помещение ' ELSE 'Квартира ' END END || premises_number || ', ' || address location,
-effective_status status,(active OR status='revoke_requested') on_device,''::text sync_error
+premises_id,building_id,premises_kind,premises_number,effective_status status,(active OR status='revoke_requested') on_device,''::text sync_error
 FROM gate_view WHERE phone=$1 AND (active OR status='revoke_requested' OR effective_status='pending')
 UNION ALL
-SELECT z.zone,'service' source,(array_agg(a.name ORDER BY a.id))[1] name,'' location,
+SELECT z.zone,'service' source,(array_agg(a.name ORDER BY a.id))[1] name,'' location,0::bigint premises_id,0::bigint building_id,''::text premises_kind,''::text premises_number,
 CASE WHEN bool_or(z.status='active') THEN 'active' ELSE 'revoke_pending' END status,
 true on_device,COALESCE(max(NULLIF(z.sync_error,'')),'') sync_error
 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id

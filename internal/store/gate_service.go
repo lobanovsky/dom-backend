@@ -71,11 +71,12 @@ CASE premises_kind WHEN 'parking_space' THEN 'Машиноместо ' ELSE CASE
 effective_status status,(active OR status='revoke_requested') on_device,''::text sync_error
 FROM gate_view WHERE phone=$1 AND (active OR status='revoke_requested' OR effective_status='pending')
 UNION ALL
-SELECT z.zone,'service' source,a.name,'' location,
-CASE WHEN z.status='revoke_pending' THEN 'revoke_pending' ELSE 'active' END status,
-true on_device,z.sync_error
+SELECT z.zone,'service' source,(array_agg(a.name ORDER BY a.id))[1] name,'' location,
+CASE WHEN bool_or(z.status='active') THEN 'active' ELSE 'revoke_pending' END status,
+true on_device,COALESCE(max(NULLIF(z.sync_error,'')),'') sync_error
 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id
 WHERE a.phone=$1 AND z.status IN('active','revoke_pending') AND (z.status<>'active' OR a.valid_until IS NULL OR a.valid_until>=`+gateToday+`)
+GROUP BY z.zone
 ORDER BY zone,source,location,name`, phone))
 }
 

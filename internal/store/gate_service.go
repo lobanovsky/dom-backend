@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"sort"
 
 	"dom-backend/internal/model"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Gate) ServiceAccesses(ctx context.Context) ([]model.GateServiceAccess, error) {
-	items, err := collect[model.GateServiceAccess](s.pool.Query(ctx, `SELECT id,category,name,phone,vehicle_plate,vehicle_brand,valid_until,comment,created_at FROM gate_service_accesses ORDER BY created_at DESC,id DESC`))
+	items, err := collect[model.GateServiceAccess](s.pool.Query(ctx, `SELECT id,category,name,phone,vehicle_plate,vehicle_brand,valid_until,comment,created_at FROM gate_service_accesses ORDER BY id`))
 	if err != nil {
 		return nil, err
 	}
@@ -17,7 +19,50 @@ func (s *Gate) ServiceAccesses(ctx context.Context) ([]model.GateServiceAccess, 
 			return nil, err
 		}
 	}
-	return items, nil
+	// ELDES держит один номер телефона на зону. Объединяем старые отдельные
+	// записи с тем же телефоном в одну строку на каждую зону.
+	merged := make([]model.GateServiceAccess, 0, len(items))
+	indexByPhone := make(map[string]int, len(items))
+	for _, item := range items {
+		index, exists := indexByPhone[item.Phone]
+		if !exists {
+			indexByPhone[item.Phone] = len(merged)
+			merged = append(merged, item)
+			continue
+		}
+		current := &merged[index]
+		for _, zone := range item.Zones {
+			found := false
+			for i := range current.Zones {
+				if current.Zones[i].Zone != zone.Zone {
+					continue
+				}
+				found = true
+				if gateServiceStatusPriority(zone.Status) > gateServiceStatusPriority(current.Zones[i].Status) || (current.Zones[i].SyncError == "" && zone.SyncError != "") {
+					current.Zones[i] = zone
+				}
+				break
+			}
+			if !found {
+				current.Zones = append(current.Zones, zone)
+			}
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].CreatedAt.After(merged[j].CreatedAt) })
+	return merged, nil
+}
+
+func gateServiceStatusPriority(status string) int {
+	switch status {
+	case "active":
+		return 4
+	case "revoke_pending":
+		return 3
+	case "expired":
+		return 2
+	default:
+		return 1
+	}
 }
 
 func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in model.GateServiceAccessInput) (model.GateServiceAccess, error) {
@@ -44,7 +89,7 @@ func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in mode
 	if !valid {
 		return zero, invalid("gate: expiry is in the past")
 	}
-	keys := append([]string(nil), in.Zones...)
+	keys := append([]string{"service-access:" + in.Phone}, in.Zones...)
 	for i := range keys {
 		keys[i] += ":" + in.Phone
 	}
@@ -55,23 +100,36 @@ func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in mode
 		}
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `INSERT INTO gate_service_accesses(category,name,phone,vehicle_plate,vehicle_brand,valid_until,comment,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, in.Category, in.Name, in.Phone, in.VehiclePlate, in.VehicleBrand, in.ValidUntil, in.Comment, user.ID).Scan(&id)
-	if err != nil {
+	err = tx.QueryRow(ctx, `SELECT id FROM gate_service_accesses WHERE phone=$1 ORDER BY id LIMIT 1 FOR UPDATE`, in.Phone).Scan(&id)
+	if err == pgx.ErrNoRows {
+		err = tx.QueryRow(ctx, `INSERT INTO gate_service_accesses(category,name,phone,vehicle_plate,vehicle_brand,valid_until,comment,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, in.Category, in.Name, in.Phone, in.VehiclePlate, in.VehicleBrand, in.ValidUntil, in.Comment, user.ID).Scan(&id)
+		if err != nil {
+			return zero, mapErr(err)
+		}
+	} else if err != nil {
 		return zero, mapErr(err)
+	} else {
+		if _, err = tx.Exec(ctx, `UPDATE gate_service_accesses SET category=$2,name=$3,vehicle_plate=$4,vehicle_brand=$5,valid_until=$6,comment=$7,updated_at=now() WHERE phone=$1`, in.Phone, in.Category, in.Name, in.VehiclePlate, in.VehicleBrand, in.ValidUntil, in.Comment); err != nil {
+			return zero, mapErr(err)
+		}
 	}
 	var needSync []string
 	for _, zone := range in.Zones {
-		var other bool
-		if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE zone=$1 AND phone=$2 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.zone=$1 AND a.phone=$2 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, zone, in.Phone).Scan(&other); err != nil {
+		var exists bool
+		if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE zone=$1 AND phone=$2 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.zone=$1 AND a.phone=$2 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, zone, in.Phone).Scan(&exists); err != nil {
 			return zero, mapErr(err)
 		}
-		if !other {
+		if !exists {
 			needSync = append(needSync, zone)
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO gate_service_access_zones(access_id,zone) VALUES($1,$2)`, id, zone); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO gate_service_access_zones(access_id,zone) VALUES($1,$2) ON CONFLICT(access_id,zone) DO UPDATE SET status='active',pending_action='',sync_error='',updated_at=now()`, id, zone); err != nil {
 			return zero, mapErr(err)
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id,note) VALUES($1,$2,'created',$3,'Служебный доступ создан')`, id, zone, user.ID); err != nil {
+		action, note := "zone_added", "Служебная зона добавлена"
+		if exists {
+			action, note = "duplicate_ignored", "Телефон уже имел доступ в этой зоне; повторная запись объединена"
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id,note) VALUES($1,$2,$3,$4,$5)`, id, zone, action, user.ID, note); err != nil {
 			return zero, mapErr(err)
 		}
 	}
@@ -93,7 +151,7 @@ func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in mode
 		return zero, err
 	}
 	for _, item := range all {
-		if item.ID == id {
+		if item.Phone == in.Phone {
 			return item, nil
 		}
 	}
@@ -118,20 +176,24 @@ func (s *Gate) RevokeServiceZone(ctx context.Context, user model.User, id int64,
 	}
 	defer rollback(ctx, tx)
 	var phone, name string
-	var status string
-	err = tx.QueryRow(ctx, `SELECT a.phone,a.name,z.status FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.access_id=$1 AND z.zone=$2 FOR UPDATE OF z`, id, zone).Scan(&phone, &name, &status)
+	err = tx.QueryRow(ctx, `SELECT phone,name FROM gate_service_accesses WHERE id=$1`, id).Scan(&phone, &name)
 	if err != nil {
 		return mapErr(err)
-	}
-	if status != "active" {
-		return &Error{ErrConflict, "доступ уже закрыт или ожидает удаления"}
 	}
 	key := zone + ":" + phone
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, key); err != nil {
 		return mapErr(err)
 	}
+	var active bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE a.phone=$1 AND z.zone=$2 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, phone, zone).Scan(&active)
+	if err != nil {
+		return mapErr(err)
+	}
+	if !active {
+		return &Error{ErrConflict, "доступ уже закрыт или ожидает удаления"}
+	}
 	var remains bool
-	err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE zone=$1 AND phone=$2 AND active) OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id WHERE z.access_id<>$3 AND z.zone=$1 AND a.phone=$2 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, zone, phone, id).Scan(&remains)
+	err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE zone=$1 AND phone=$2 AND active)`, zone, phone).Scan(&remains)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -140,19 +202,14 @@ func (s *Gate) RevokeServiceZone(ctx context.Context, user model.User, id int64,
 			return &Error{ErrIntegration, "интеграция ELDES не настроена"}
 		}
 		if err = s.syncer.Sync(ctx, zone, phone, gateDeviceName(name), false); err != nil {
-			_, _ = tx.Exec(ctx, `UPDATE gate_service_access_zones SET status='revoke_pending',pending_action='revoke',sync_error=$3,updated_at=now() WHERE access_id=$1 AND zone=$2`, id, zone, err.Error())
-			_, _ = tx.Exec(ctx, `INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id,note) VALUES($1,$2,'revoke_pending',$3,$4)`, id, zone, user.ID, err.Error())
+			_, _ = tx.Exec(ctx, `WITH changed AS (UPDATE gate_service_access_zones z SET status='revoke_pending',pending_action='revoke',sync_error=$3,updated_at=now() FROM gate_service_accesses a WHERE z.access_id=a.id AND a.phone=$1 AND z.zone=$2 AND z.status='active' RETURNING z.access_id) INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id,note) SELECT access_id,$2,'revoke_pending',$4,$3 FROM changed`, phone, zone, err.Error(), user.ID)
 			if e := tx.Commit(ctx); e != nil {
 				return mapErr(e)
 			}
 			return &Error{ErrIntegration, "удаление из ELDES ожидает повтора"}
 		}
 	}
-	_, err = tx.Exec(ctx, `UPDATE gate_service_access_zones SET status='revoked',pending_action='',sync_error='',updated_at=now() WHERE access_id=$1 AND zone=$2`, id, zone)
-	if err != nil {
-		return mapErr(err)
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id) VALUES($1,$2,'revoked',$3)`, id, zone, user.ID)
+	_, err = tx.Exec(ctx, `WITH changed AS (UPDATE gate_service_access_zones z SET status='revoked',pending_action='',sync_error='',updated_at=now() FROM gate_service_accesses a WHERE z.access_id=a.id AND a.phone=$1 AND z.zone=$2 AND z.status IN ('active','revoke_pending') RETURNING z.access_id) INSERT INTO gate_service_access_events(access_id,zone,action,actor_user_id) SELECT access_id,$2,'revoked',$3 FROM changed`, phone, zone, user.ID)
 	if err != nil {
 		return mapErr(err)
 	}

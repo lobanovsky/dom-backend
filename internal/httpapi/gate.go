@@ -62,6 +62,7 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 			fn(w, r)
 		}
 	}
+	mux.HandleFunc("GET /api/v1/gate-access/lookup", adminOnly(h.lookupPhone))
 	mux.HandleFunc("PUT /api/v1/gate-vehicles/{id}", adminOnly(h.adminVehicle))
 	mux.HandleFunc("DELETE /api/v1/gate-vehicles/{id}", adminOnly(h.adminDeleteVehicle))
 	mux.HandleFunc("POST /api/v1/gate-access", func(w http.ResponseWriter, r *http.Request) {

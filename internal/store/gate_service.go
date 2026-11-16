@@ -65,6 +65,20 @@ func gateServiceStatusPriority(status string) int {
 	}
 }
 
+func (s *Gate) LookupGatePhone(ctx context.Context, phone string) ([]model.GatePhoneLookupEntry, error) {
+	return collect[model.GatePhoneLookupEntry](s.pool.Query(ctx, gateView+`SELECT zone,'property' source,recipient_name name,
+CASE premises_kind WHEN 'parking_space' THEN 'Машиноместо ' ELSE CASE WHEN premises_kind='commercial' THEN 'Коммерческое помещение ' ELSE 'Квартира ' END END || premises_number || ', ' || address location,
+effective_status status,(active OR status='revoke_requested') on_device,''::text sync_error
+FROM gate_view WHERE phone=$1 AND (active OR status='revoke_requested' OR effective_status='pending')
+UNION ALL
+SELECT z.zone,'service' source,a.name,'' location,
+CASE WHEN z.status='revoke_pending' THEN 'revoke_pending' ELSE 'active' END status,
+true on_device,z.sync_error
+FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id
+WHERE a.phone=$1 AND z.status IN('active','revoke_pending') AND (z.status<>'active' OR a.valid_until IS NULL OR a.valid_until>=`+gateToday+`)
+ORDER BY zone,source,location,name`, phone))
+}
+
 func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in model.GateServiceAccessInput) (model.GateServiceAccess, error) {
 	var zero model.GateServiceAccess
 	if !user.IsAdmin() {

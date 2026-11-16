@@ -4,12 +4,17 @@ import (
 	"context"
 	"dom-backend/internal/model"
 	"net/http"
+	"strings"
 )
 
 type gateServiceStore interface {
 	ServiceAccesses(context.Context) ([]model.GateServiceAccess, error)
 	CreateServiceAccess(context.Context, model.User, model.GateServiceAccessInput) (model.GateServiceAccess, error)
 	RevokeServiceZone(context.Context, model.User, int64, string) error
+}
+
+type gatePhoneLookupStore interface {
+	LookupGatePhone(context.Context, string) ([]model.GatePhoneLookupEntry, error)
 }
 
 func (h gateHandlers) registerService(mux *http.ServeMux) {
@@ -63,4 +68,29 @@ func (h gateHandlers) registerService(mux *http.ServeMux) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
+}
+
+func (h gateHandlers) lookupPhone(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.s.(gatePhoneLookupStore)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "Поиск доступов недоступен")
+		return
+	}
+	phone := model.NormalizePhone(strings.TrimSpace(r.URL.Query().Get("phone")))
+	if len(phone) < 11 || len(phone) > 15 {
+		writeError(w, http.StatusBadRequest, "Введите номер телефона полностью")
+		return
+	}
+	for _, digit := range phone {
+		if digit < '0' || digit > '9' {
+			writeError(w, http.StatusBadRequest, "Введите номер телефона только цифрами")
+			return
+		}
+	}
+	items, err := s.LookupGatePhone(r.Context(), phone)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"phone": phone, "items": items})
 }

@@ -24,6 +24,18 @@ type GateServiceZone struct {
 	Status    string `json:"status" db:"status"`
 	SyncError string `json:"sync_error" db:"sync_error"`
 }
+
+// GatePhoneLookupEntry describes one active or pending access basis for a phone.
+type GatePhoneLookupEntry struct {
+	Zone      string `json:"zone" db:"zone"`
+	Source    string `json:"source" db:"source"`
+	Name      string `json:"name" db:"name"`
+	Location  string `json:"location" db:"location"`
+	Status    string `json:"status" db:"status"`
+	OnDevice  bool   `json:"on_device" db:"on_device"`
+	SyncError string `json:"sync_error" db:"sync_error"`
+}
+
 type GateServiceAccessInput struct {
 	Category     string   `json:"category"`
 	Name         string   `json:"name"`

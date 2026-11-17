@@ -38,6 +38,7 @@ type ResidentStore interface {
 	SubmitReading(context.Context, model.ResidentAccount, model.MeterReading, *int64) (model.MeterReading, error)
 	Audit(context.Context, model.ResidentAccount, int64) ([]json.RawMessage, error)
 	Approve(context.Context, int64, int64, string, bool) error
+	InviteEligibleOwners(context.Context, int64, string) (model.ResidentInviteBatchResult, error)
 	SetWindow(context.Context, model.ResidentWindow) error
 	Access(context.Context, int64) (map[string]any, error)
 	Window(context.Context, int64) (*model.ResidentWindow, error)
@@ -171,6 +172,7 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 	})
 	admin.HandleFunc("PUT /api/v1/resident-access/{id}", h.approve)
 	admin.HandleFunc("POST /api/v1/resident-access/{id}/invite", h.invite)
+	admin.HandleFunc("POST /api/v1/resident-access/invite-owners", h.inviteOwners)
 	admin.HandleFunc("PUT /api/v1/resident-windows/{id}", h.setWindow)
 	admin.HandleFunc("DELETE /api/v1/resident-windows/{id}", h.deleteWindow)
 	admin.HandleFunc("GET /api/v1/resident-schedules/{id}", h.schedule)
@@ -501,6 +503,23 @@ func (h *residentHandlers) invite(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
+
+func (h *residentHandlers) inviteOwners(w http.ResponseWriter, r *http.Request) {
+	if !residentAdmin(w, r) {
+		return
+	}
+	if !h.options.MailEnabled {
+		writeError(w, 503, "email delivery is not configured; contact management")
+		return
+	}
+	result, err := h.store.InviteEligibleOwners(r.Context(), currentUser(r).ID, h.options.BaseURL)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *residentHandlers) setWindow(w http.ResponseWriter, r *http.Request) {
 	if !residentAdmin(w, r) {
 		return

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 
 	"dom-backend/internal/model"
@@ -113,7 +114,8 @@ func (s *Residents) RequestToken(ctx context.Context, email, purpose, baseURL st
 		return err
 	}
 	// Не отзываем прежнюю ссылку по публичному запросу: это позволило бы мешать активации.
-	_, err = tx.Exec(ctx, `INSERT INTO resident_tokens(token_hash,person_id,email,purpose,expires_at) VALUES($1,$2,$3,$4,now()+interval '48 hours')`, ResidentTokenHash(raw), person, email, purpose)
+	_, err = tx.Exec(ctx, `INSERT INTO resident_tokens(token_hash,person_id,email,purpose,expires_at)
+ VALUES($1,$2,$3,$4,CASE WHEN $4='activate' THEN NULL ELSE now()+interval '48 hours' END)`, ResidentTokenHash(raw), person, email, purpose)
 	if err != nil {
 		return err
 	}
@@ -123,6 +125,122 @@ func (s *Residents) RequestToken(ctx context.Context, email, purpose, baseURL st
 	}
 	return tx.Commit(ctx)
 }
+
+// InviteEligibleOwners включает доступ и ставит приглашение в очередь для действующих собственников без настроенного кабинета.
+func (s *Residents) InviteEligibleOwners(ctx context.Context, admin int64, baseURL string) (model.ResidentInviteBatchResult, error) {
+	result := model.ResidentInviteBatchResult{Skipped: []model.ResidentInviteBatchSkip{}}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return result, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+
+	rows, err := tx.Query(ctx, `SELECT p.id,concat_ws(' ',p.last_name,p.first_name,p.middle_name),
+ NULLIF(lower(btrim(p.emails[1])),''),
+ EXISTS(SELECT 1 FROM resident_accounts a WHERE a.person_id=p.id)
+ FROM persons p
+ WHERE p.deleted_at IS NULL
+ AND EXISTS(SELECT 1 FROM ownerships o JOIN premises rp ON rp.id=o.premises_id
+  JOIN buildings b ON b.id=rp.building_id JOIN organizations org ON org.id=b.organization_id
+  WHERE o.person_id=p.id AND o.deleted_at IS NULL AND rp.deleted_at IS NULL
+   AND b.deleted_at IS NULL AND org.deleted_at IS NULL
+   AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date
+   AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date))
+ AND NOT EXISTS(SELECT 1 FROM resident_access ra WHERE ra.person_id=p.id)
+ ORDER BY p.id FOR UPDATE OF p`)
+	if err != nil {
+		return result, mapErr(err)
+	}
+	type candidate struct {
+		personID int64
+		name     string
+		email    *string
+		account  bool
+	}
+	candidates := make([]candidate, 0)
+	for rows.Next() {
+		var item candidate
+		if err := rows.Scan(&item.personID, &item.name, &item.email, &item.account); err != nil {
+			rows.Close()
+			return result, mapErr(err)
+		}
+		candidates = append(candidates, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return result, mapErr(err)
+	}
+	rows.Close()
+
+	skip := func(item candidate, reason string) {
+		result.Skipped = append(result.Skipped, model.ResidentInviteBatchSkip{PersonID: item.personID, Name: item.name, Reason: reason})
+	}
+	for _, item := range candidates {
+		if item.account {
+			skip(item, "already_registered")
+			continue
+		}
+		if item.email == nil {
+			skip(item, "missing_email")
+			continue
+		}
+		email := *item.email
+		parsed, parseErr := mail.ParseAddress(email)
+		if parseErr != nil || parsed.Address != email || len(email) > 254 {
+			skip(item, "invalid_email")
+			continue
+		}
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, item.personID); err != nil {
+			return result, mapErr(err)
+		}
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident-email:' || $1,0))`, email); err != nil {
+			return result, mapErr(err)
+		}
+		var emailInUse bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM resident_access WHERE enabled AND email=$1)
+ OR EXISTS(SELECT 1 FROM resident_accounts WHERE email=$1)`, email).Scan(&emailInUse); err != nil {
+			return result, mapErr(err)
+		}
+		if emailInUse {
+			skip(item, "email_in_use")
+			continue
+		}
+
+		tag, err := tx.Exec(ctx, `INSERT INTO resident_access(person_id,email,enabled,approved_by)
+ SELECT p.id,$2,true,$3 FROM persons p
+ WHERE p.id=$1 AND p.deleted_at IS NULL AND lower(btrim(p.emails[1]))=$2
+ AND EXISTS(SELECT 1 FROM ownerships o JOIN premises rp ON rp.id=o.premises_id
+  JOIN buildings b ON b.id=rp.building_id JOIN organizations org ON org.id=b.organization_id
+  WHERE o.person_id=p.id AND o.deleted_at IS NULL AND rp.deleted_at IS NULL
+   AND b.deleted_at IS NULL AND org.deleted_at IS NULL
+   AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date
+   AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date))
+ ON CONFLICT DO NOTHING`, item.personID, email, admin)
+		if err != nil {
+			return result, mapErr(err)
+		}
+		if tag.RowsAffected() != 1 {
+			skip(item, "no_longer_eligible")
+			continue
+		}
+		raw, err := residentToken()
+		if err != nil {
+			return result, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO resident_tokens(token_hash,person_id,email,purpose,expires_at) VALUES($1,$2,$3,'activate',NULL)`, ResidentTokenHash(raw), item.personID, email); err != nil {
+			return result, mapErr(err)
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO resident_mail_outbox(email,link,expires_at) VALUES($1,$2,now()+interval '48 hours')`, email, baseURL+"/#set-password?token="+raw); err != nil {
+			return result, mapErr(err)
+		}
+		result.Invited++
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return result, mapErr(err)
+	}
+	return result, nil
+}
+
 func (s *Residents) RedeemToken(ctx context.Context, raw, hash string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -131,7 +249,7 @@ func (s *Residents) RedeemToken(ctx context.Context, raw, hash string) error {
 	defer rollback(ctx, tx)
 	var person int64
 	var email, purpose string
-	err = tx.QueryRow(ctx, `SELECT person_id,email,purpose FROM resident_tokens WHERE token_hash=$1 AND expires_at>now()`, ResidentTokenHash(raw)).Scan(&person, &email, &purpose)
+	err = tx.QueryRow(ctx, `SELECT person_id,email,purpose FROM resident_tokens WHERE token_hash=$1 AND (expires_at IS NULL OR expires_at>now())`, ResidentTokenHash(raw)).Scan(&person, &email, &purpose)
 	if err != nil {
 		return invalid("invalid or expired link")
 	}
@@ -139,7 +257,7 @@ func (s *Residents) RedeemToken(ctx context.Context, raw, hash string) error {
 		return err
 	}
 	var tokenPresent bool
-	if err = tx.QueryRow(ctx, `SELECT true FROM resident_tokens WHERE token_hash=$1 AND expires_at>now() FOR UPDATE`, ResidentTokenHash(raw)).Scan(&tokenPresent); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT true FROM resident_tokens WHERE token_hash=$1 AND (expires_at IS NULL OR expires_at>now()) FOR UPDATE`, ResidentTokenHash(raw)).Scan(&tokenPresent); err != nil {
 		return invalid("invalid or expired link")
 	}
 	// Блокировка подтверждения сериализует конкурирующие активации и отключение доступа.
@@ -372,12 +490,29 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, person); err != nil {
 		return err
 	}
+	if enabled {
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM ownerships o JOIN premises p ON p.id=o.premises_id
+ JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
+ WHERE o.person_id=$1 AND o.deleted_at IS NULL AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL
+ AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date
+ AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date))`, person).Scan(&eligible); err != nil {
+			return err
+		}
+		if !eligible {
+			return invalid("resident access can only be enabled for current owners")
+		}
+	}
 	var profileHasEmail bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons p WHERE p.id=$1 AND p.deleted_at IS NULL AND lower(p.emails[1])=lower($2))`, person, email).Scan(&profileHasEmail); err != nil {
 		return err
 	}
 	if !profileHasEmail {
 		return invalid("resident email must be listed in the person's profile")
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident-email:' || $1,0))`, email); err != nil {
+		return err
 	}
 	var existing string
 	lookup := tx.QueryRow(ctx, `SELECT email FROM resident_accounts WHERE person_id=$1 FOR UPDATE`, person).Scan(&existing)

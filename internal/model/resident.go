@@ -49,6 +49,18 @@ type ResidentAccess struct {
 	Eligible      bool       `json:"eligible" db:"eligible"`
 }
 
+// ResidentInviteBatchResult — итог массового приглашения действующих собственников.
+type ResidentInviteBatchResult struct {
+	Invited int                       `json:"invited"`
+	Skipped []ResidentInviteBatchSkip `json:"skipped"`
+}
+
+type ResidentInviteBatchSkip struct {
+	PersonID int64  `json:"person_id"`
+	Name     string `json:"name"`
+	Reason   string `json:"reason"`
+}
+
 // ResidentSchedule — повторяющиеся дни приёма по московскому времени.
 type ResidentSchedule struct {
 	BuildingID int64 `json:"building_id" db:"building_id"`

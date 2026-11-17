@@ -16,13 +16,13 @@ const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.ta
 	` + meterActive + ` AS active,
 	COALESCE(m.next_verification_at < CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE), false) AS verification_overdue,
 	b.id AS location_building_id, b.address AS building_address, b.name AS building_name, p.kind AS premises_kind, p.number AS premises_number,
-	lr.reading_date AS last_reading_date, lr.t1 AS last_t1, lr.t2 AS last_t2, lr.t3 AS last_t3,
+	lr.reading_date AS last_reading_date, lr.period AS last_reading_period, lr.t1 AS last_t1, lr.t2 AS last_t2, lr.t3 AS last_t3,
 	m.created_at, m.updated_at, m.deleted_at
 	FROM meters m
 	LEFT JOIN premises p ON p.id = m.premises_id
 	JOIN buildings b ON b.id = COALESCE(m.building_id, p.building_id)
 	LEFT JOIN LATERAL (
-		SELECT reading_date, t1, t2, t3 FROM meter_readings r
+		SELECT reading_date, period, t1, t2, t3 FROM meter_readings r
 		WHERE r.meter_id = m.id AND r.deleted_at IS NULL ORDER BY r.reading_date DESC LIMIT 1
 	) lr ON true`
 
@@ -41,12 +41,17 @@ func (s *Meters) List(ctx context.Context, f model.MeterFilter, limit, offset in
 		   AND ($6::text IS NULL OR m.serial_number ILIKE $6 OR m.name ILIKE $6)
 		   AND ($7::text IS NULL OR p.number ILIKE $7)
 		   AND (m.deleted_at IS NOT NULL) = $8
+		   AND ($12::bool IS NULL OR $12 = EXISTS(
+				SELECT 1 FROM meter_readings reading
+				WHERE reading.meter_id = m.id AND reading.deleted_at IS NULL
+				  AND ($11::date IS NULL OR reading.period = $11)
+			))
 		 ORDER BY m.premises_id IS NOT NULL,
 		          CASE WHEN m.premises_id IS NULL THEN COALESCE(b.name, b.address) END,
 		          CASE WHEN m.premises_id IS NULL THEN array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource) END,
 		          CASE WHEN m.premises_id IS NULL THEN lower(m.name) END NULLS LAST,
 		          substring(p.number from '\d+')::numeric NULLS LAST, p.number, p.id, array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource), m.serial_number, m.id LIMIT $9 OFFSET $10`,
-		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), exactPattern(f.PremisesNumber), f.Deleted, limit, offset))
+		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), exactPattern(f.PremisesNumber), f.Deleted, limit, offset, f.ReadingPeriod, f.HasReading))
 }
 
 func (s *Meters) Get(ctx context.Context, id int64) (model.Meter, error) {

@@ -144,6 +144,8 @@ type MeterFilter struct {
 	PremisesID     *int64
 	Resource       *string
 	Active         *bool
+	ReadingPeriod  *Date
+	HasReading     *bool
 	Q              *string // подстрока в номере или названии счётчика
 	PremisesNumber *string // точный номер помещения (без учёта регистра)
 }

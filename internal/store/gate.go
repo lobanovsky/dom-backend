@@ -59,7 +59,11 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  SELECT group_id,CASE WHEN bool_or(active) THEN 'approved' WHEN bool_and(status='pending') THEN 'pending' WHEN bool_and(status='revoke_requested') THEN 'revoke_requested' ELSE 'rejected' END display_status
  FROM gate_view GROUP BY group_id
  ), matched AS (
- SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=ANY(string_to_array($8,','))) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
+ SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=ANY(string_to_array($8,','))) AND ($1::bigint=0 OR person_id=$1 OR (active AND EXISTS(
+  SELECT 1 FROM gate_events e WHERE e.request_id=gate_view.id AND e.action='created' AND e.note='Доступ добавлен администратором без заявки'
+ ) AND EXISTS(SELECT 1 FROM ownerships owner JOIN premises rp ON rp.id=owner.premises_id JOIN buildings rb ON rb.id=rp.building_id JOIN organizations org ON org.id=rb.organization_id
+  WHERE owner.person_id=$1 AND owner.premises_id=gate_view.premises_id AND owner.deleted_at IS NULL AND rp.deleted_at IS NULL AND rb.deleted_at IS NULL AND org.deleted_at IS NULL
+   AND owner.valid_from<=`+gateToday+` AND (owner.valid_to IS NULL OR owner.valid_to>=`+gateToday+`)))) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
  AND ($1::bigint=0 OR display_status<>'revoke_requested')
  AND ($14::boolean OR $1::bigint=0 OR display_status<>'rejected')
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,premises_number,address) ILIKE '%'||$4||'%'

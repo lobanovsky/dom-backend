@@ -56,6 +56,11 @@ func gateDeviceName(value string) string {
 	return name
 }
 
+// gatePremisesLabel оставляет в подписи номер помещения и столько имени пользователя, сколько помещается в лимит ELDES.
+func gatePremisesLabel(premisesNumber, recipientName string) string {
+	return gateDeviceName(strings.TrimSpace(premisesNumber) + "-" + strings.TrimSpace(recipientName))
+}
+
 func (s *HTTPGateAccessSyncer) Sync(ctx context.Context, zone, phone, name string, enabled bool) error {
 	if s.baseURL == "" || s.token == "" {
 		return errors.New("ELDES integration is not configured")

@@ -159,7 +159,7 @@ func (s *Gate) AdminCreate(ctx context.Context, user model.User, in model.GateIn
 			return zero, mapErr(err)
 		}
 		if !alreadyEnabled {
-			if err = s.syncer.Sync(ctx, zone, in.Phone, gateDeviceName(premisesNumber), true); err != nil {
+			if err = s.syncer.Sync(ctx, zone, in.Phone, gatePremisesLabel(premisesNumber, in.RecipientName), true); err != nil {
 				return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
 			}
 		}
@@ -475,8 +475,9 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		Zone           string `db:"zone"`
 		Phone          string `db:"phone"`
 		PremisesNumber string `db:"premises_number"`
+		RecipientName  string `db:"recipient_name"`
 	}
-	states, err := collect[state](tx.Query(ctx, `SELECT g.id,g.status,g.ownership_id,g.zone,g.phone,p.number premises_number FROM gate_requests g JOIN premises p ON p.id=g.premises_id WHERE g.group_id=$1 ORDER BY g.id FOR UPDATE OF g`, groupID))
+	states, err := collect[state](tx.Query(ctx, `SELECT g.id,g.status,g.ownership_id,g.zone,g.phone,p.number premises_number,g.recipient_name FROM gate_requests g JOIN premises p ON p.id=g.premises_id WHERE g.group_id=$1 ORDER BY g.id FOR UPDATE OF g`, groupID))
 	if err != nil {
 		return zero, err
 	}
@@ -510,7 +511,7 @@ func (s *Gate) Act(ctx context.Context, person int64, user model.User, id int64,
 		groups := make(map[string][]string)
 		for _, row := range states {
 			key := row.Zone + ":" + row.Phone
-			groups[key] = append(groups[key], row.PremisesNumber)
+			groups[key] = append(groups[key], strings.TrimSpace(row.PremisesNumber)+"-"+strings.TrimSpace(row.RecipientName))
 		}
 		keys := make([]string, 0, len(groups))
 		for key := range groups {

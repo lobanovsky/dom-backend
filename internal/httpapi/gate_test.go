@@ -128,6 +128,9 @@ func (f *fakeGate) DeleteRejected(_ context.Context, id int64) error {
 	f.deletedID = id
 	return nil
 }
+func (f *fakeGate) RestoreRejected(_ context.Context, _ model.User, id int64) (model.GateRequest, error) {
+	return model.GateRequest{ID: id, Status: "approved"}, nil
+}
 func TestGateGuardAuthorization(t *testing.T) {
 	f := newFakeUsers()
 	f.add("guard", "guardpass1", model.RoleGuard)

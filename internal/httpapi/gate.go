@@ -19,6 +19,7 @@ type GateStore interface {
 	Act(context.Context, int64, model.User, int64, string, string) (model.GateRequest, error)
 	Events(context.Context, int64, int64) ([]model.GateEvent, error)
 	DeleteRejected(context.Context, int64) error
+	RestoreRejected(context.Context, model.User, int64) (model.GateRequest, error)
 }
 type gateHandlers struct{ s GateStore }
 type gateVehicleStore interface {
@@ -74,6 +75,7 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 		}
 		h.adminCreate(w, r)
 	})
+	mux.HandleFunc("POST /api/v1/gate-access/{id}/restore", adminOnly(h.restoreRejected))
 	mux.HandleFunc("PUT /api/v1/gate-access/{id}", wrap(h.edit(false)))
 	mux.HandleFunc("GET /api/v1/gate-access/{id}/events", wrap(h.events(false)))
 	mux.HandleFunc("POST /api/v1/gate-access/{id}/decision", wrap(h.action(false)))
@@ -93,6 +95,19 @@ func (h gateHandlers) registerAdmin(mux *http.ServeMux) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+func (h gateHandlers) restoreRejected(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.s.RestoreRejected(r.Context(), currentUser(r), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (h gateHandlers) adminCreate(w http.ResponseWriter, r *http.Request) {

@@ -214,6 +214,86 @@ func (s *Gate) DeleteRejected(ctx context.Context, id int64) error {
 	return nil
 }
 
+// RestoreRejected повторно активирует прежнюю запись и синхронизирует устройство, не создавая дубль.
+func (s *Gate) RestoreRejected(ctx context.Context, user model.User, id int64) (model.GateRequest, error) {
+	var zero model.GateRequest
+	if !user.IsAdmin() {
+		return zero, invalid("gate: invalid action")
+	}
+	if s.syncer == nil {
+		return zero, &Error{ErrIntegration, "интеграция ELDES не настроена"}
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return zero, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	type state struct {
+		GroupID        int64  `db:"group_id"`
+		Status         string `db:"status"`
+		Zone           string `db:"zone"`
+		Phone          string `db:"phone"`
+		RecipientName  string `db:"recipient_name"`
+		PremisesID     int64  `db:"premises_id"`
+		PremisesNumber string `db:"premises_number"`
+	}
+	row, err := one[state](tx.Query(ctx, `SELECT g.group_id,g.status,g.zone,g.phone,g.recipient_name,g.premises_id,p.number premises_number
+ FROM gate_requests g JOIN premises p ON p.id=g.premises_id WHERE g.id=$1 FOR UPDATE OF g`, id))
+	if err != nil {
+		return zero, err
+	}
+	if row.Status != "rejected" && row.Status != "cancelled" && row.Status != "revoked" && row.Status != "approved" {
+		return zero, &Error{ErrConflict, "gate: only rejected access can be restored"}
+	}
+	var eligible, unexpired bool
+	if err = tx.QueryRow(ctx, gateView+`SELECT eligible,(valid_until IS NULL OR valid_until>=`+gateToday+`) FROM gate_view WHERE id=$1`, id).Scan(&eligible, &unexpired); err != nil {
+		return zero, mapErr(err)
+	}
+	if !eligible {
+		return zero, invalid("gate: property is not eligible")
+	}
+	if !unexpired {
+		return zero, invalid("gate: expiry is in the past")
+	}
+	var duplicate bool
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved','revoke_requested'))`, id, row.PremisesID, row.Zone, row.Phone).Scan(&duplicate); err != nil {
+		return zero, mapErr(err)
+	}
+	if duplicate {
+		return zero, &Error{ErrConflict, "gate: duplicate request"}
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, row.Zone+":"+row.Phone); err != nil {
+		return zero, mapErr(err)
+	}
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved','revoke_requested'))`, id, row.PremisesID, row.Zone, row.Phone).Scan(&duplicate); err != nil {
+		return zero, mapErr(err)
+	}
+	if duplicate {
+		return zero, &Error{ErrConflict, "gate: duplicate request"}
+	}
+	var alreadyEnabled bool
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND zone=$2 AND phone=$3 AND active)
+ OR EXISTS(SELECT 1 FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id
+  WHERE z.zone=$2 AND a.phone=$3 AND z.status='active' AND (a.valid_until IS NULL OR a.valid_until>=`+gateToday+`))`, id, row.Zone, row.Phone).Scan(&alreadyEnabled); err != nil {
+		return zero, mapErr(err)
+	}
+	if !alreadyEnabled {
+		if err = s.syncer.Sync(ctx, row.Zone, row.Phone, gatePremisesLabel(row.PremisesNumber, row.RecipientName), true); err != nil {
+			return zero, &Error{ErrIntegration, "не удалось добавить доступ на устройства"}
+		}
+	}
+	if _, err = tx.Exec(ctx, `UPDATE gate_requests SET status='approved',review_note='',updated_at=now() WHERE id=$1`, id); err != nil {
+		return zero, mapErr(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_user_id,note) VALUES($1,'approved','admin',$2,'Доступ повторно предоставлен администратором')`, row.GroupID, user.ID); err != nil {
+		return zero, mapErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return zero, mapErr(err)
+	}
+	return s.get(ctx, 0, id)
+}
+
 // Edit меняет только имя, отношение и автомобили, атомарно для всей заявки.
 func (s *Gate) Edit(ctx context.Context, person int64, user model.User, id int64, in model.GateEditInput) (model.GateRequest, error) {
 	var zero model.GateRequest

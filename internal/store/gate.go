@@ -58,7 +58,7 @@ func (s *Gate) List(ctx context.Context, person int64, f model.GateFilter, limit
  SELECT group_id,CASE WHEN bool_or(active) THEN 'approved' WHEN bool_and(status='pending') THEN 'pending' WHEN bool_and(status='revoke_requested') THEN 'revoke_requested' ELSE 'rejected' END display_status
  FROM gate_view GROUP BY group_id
  ), matched AS (
- SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=$8) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
+ SELECT DISTINCT group_id FROM gate_view JOIN presentation USING(group_id) WHERE ($8='' OR display_status=ANY(string_to_array($8,','))) AND ($1::bigint=0 OR person_id=$1) AND ($2='' OR effective_status=$2) AND ($3='' OR zone=$3)
  AND ($1::bigint=0 OR display_status<>'revoke_requested')
  AND ($14::boolean OR $1::bigint=0 OR display_status<>'rejected')
  AND ($4='' OR concat_ws(' ',recipient_name,applicant_name,phone,premises_number,address) ILIKE '%'||$4||'%'

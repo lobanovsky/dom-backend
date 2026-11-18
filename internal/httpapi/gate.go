@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 type GateStore interface {
@@ -265,7 +266,14 @@ func (h gateHandlers) list(resident bool) http.HandlerFunc {
 		}
 		includeRejected := p.Bool("include_rejected")
 		f := model.GateFilter{Status: p.texts["status"], DisplayStatus: p.texts["display_status"], Zone: p.texts["zone"], Q: p.texts["q"], Recipient: p.texts["recipient"], Phone: p.texts["phone"], Vehicle: p.texts["vehicle"], Premises: p.texts["premises"], PremisesID: p.ints["premises_id"], IncludeRejected: includeRejected != nil && *includeRejected}
-		if !slices.Contains([]string{"", "pending", "approved", "revoke_requested", "rejected"}, f.DisplayStatus) || p.Deleted || !slices.Contains([]string{"", "pending", "approved", "rejected", "cancelled", "revoke_requested", "revoked", "expired", "ineligible"}, f.Status) || !slices.Contains([]string{"", "courtyard", "parking"}, f.Zone) || len([]rune(f.Q)) > 120 {
+		validDisplayStatuses := map[string]bool{"pending": true, "approved": true, "revoke_requested": true, "rejected": true}
+		for _, status := range strings.Split(f.DisplayStatus, ",") {
+			if status != "" && !validDisplayStatuses[status] {
+				writeError(w, 422, "gate: invalid filters")
+				return
+			}
+		}
+		if p.Deleted || !slices.Contains([]string{"", "pending", "approved", "rejected", "cancelled", "revoke_requested", "revoked", "expired", "ineligible"}, f.Status) || !slices.Contains([]string{"", "courtyard", "parking"}, f.Zone) || len([]rune(f.Q)) > 120 {
 			writeError(w, 422, "gate: invalid filters")
 			return
 		}

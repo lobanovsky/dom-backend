@@ -80,6 +80,20 @@ GROUP BY z.zone
 ORDER BY zone,source,location,name`, phone))
 }
 
+func (s *Gate) LookupGateRecipient(ctx context.Context, recipient string) ([]model.GatePhoneLookupEntry, error) {
+	return collect[model.GatePhoneLookupEntry](s.pool.Query(ctx, gateView+`SELECT zone,'property' source,recipient_name name,
+CASE premises_kind WHEN 'parking_space' THEN 'Машиноместо ' ELSE CASE WHEN premises_kind='commercial' THEN 'Коммерческое помещение ' ELSE 'Квартира ' END END || premises_number || ', ' || address location,
+premises_id,building_id,premises_kind,premises_number,effective_status status,(active OR status='revoke_requested') on_device,''::text sync_error
+FROM gate_view WHERE recipient_name ILIKE '%'||$1||'%' AND (active OR status='revoke_requested' OR effective_status='pending')
+UNION ALL
+SELECT z.zone,'service' source,a.name name,'' location,0::bigint premises_id,0::bigint building_id,''::text premises_kind,''::text premises_number,
+CASE WHEN z.status='active' THEN 'active' ELSE 'revoke_pending' END status,
+z.status='active' on_device,COALESCE(z.sync_error,'') sync_error
+FROM gate_service_access_zones z JOIN gate_service_accesses a ON a.id=z.access_id
+WHERE a.name ILIKE '%'||$1||'%' AND z.status IN('active','revoke_pending') AND (z.status<>'active' OR a.valid_until IS NULL OR a.valid_until>=`+gateToday+`)
+ORDER BY zone,source,location,name`, recipient))
+}
+
 func (s *Gate) CreateServiceAccess(ctx context.Context, user model.User, in model.GateServiceAccessInput) (model.GateServiceAccess, error) {
 	var zero model.GateServiceAccess
 	if !user.IsAdmin() {

@@ -5,6 +5,7 @@ import (
 	"dom-backend/internal/model"
 	"net/http"
 	"strings"
+	"unicode"
 )
 
 type gateServiceStore interface {
@@ -15,6 +16,7 @@ type gateServiceStore interface {
 
 type gatePhoneLookupStore interface {
 	LookupGatePhone(context.Context, string) ([]model.GatePhoneLookupEntry, error)
+	LookupGateRecipient(context.Context, string) ([]model.GatePhoneLookupEntry, error)
 }
 
 func (h gateHandlers) registerService(mux *http.ServeMux) {
@@ -76,7 +78,26 @@ func (h gateHandlers) lookupPhone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Поиск доступов недоступен")
 		return
 	}
-	phone := model.NormalizePhone(strings.TrimSpace(r.URL.Query().Get("phone")))
+	phoneInput := strings.TrimSpace(r.URL.Query().Get("phone"))
+	recipient := strings.TrimSpace(r.URL.Query().Get("recipient"))
+	if recipient != "" {
+		if phoneInput != "" {
+			writeError(w, http.StatusBadRequest, "Ищите либо по телефону, либо по ФИО")
+			return
+		}
+		if len([]rune(recipient)) < 2 || len([]rune(recipient)) > 120 || strings.IndexFunc(recipient, unicode.IsControl) >= 0 {
+			writeError(w, http.StatusBadRequest, "Введите не менее двух символов ФИО")
+			return
+		}
+		items, err := s.LookupGateRecipient(r.Context(), recipient)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"recipient": recipient, "items": items})
+		return
+	}
+	phone := model.NormalizePhone(phoneInput)
 	if len(phone) < 11 || len(phone) > 15 {
 		writeError(w, http.StatusBadRequest, "Введите номер телефона полностью")
 		return

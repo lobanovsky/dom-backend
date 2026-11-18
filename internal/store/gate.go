@@ -229,15 +229,21 @@ func (s *Gate) RestoreRejected(ctx context.Context, user model.User, id int64) (
 	}
 	defer rollback(ctx, tx)
 	type state struct {
-		GroupID        int64  `db:"group_id"`
-		Status         string `db:"status"`
-		Zone           string `db:"zone"`
-		Phone          string `db:"phone"`
-		RecipientName  string `db:"recipient_name"`
-		PremisesID     int64  `db:"premises_id"`
-		PremisesNumber string `db:"premises_number"`
+		GroupID        int64       `db:"group_id"`
+		PersonID       int64       `db:"person_id"`
+		OwnershipID    int64       `db:"ownership_id"`
+		Status         string      `db:"status"`
+		Zone           string      `db:"zone"`
+		Phone          string      `db:"phone"`
+		RecipientName  string      `db:"recipient_name"`
+		Relation       string      `db:"relation"`
+		NoPersonalCar  bool        `db:"no_personal_vehicle"`
+		OccasionalCar  bool        `db:"occasional_vehicle"`
+		ValidUntil     *model.Date `db:"valid_until"`
+		PremisesID     int64       `db:"premises_id"`
+		PremisesNumber string      `db:"premises_number"`
 	}
-	row, err := one[state](tx.Query(ctx, `SELECT g.group_id,g.status,g.zone,g.phone,g.recipient_name,g.premises_id,p.number premises_number
+	row, err := one[state](tx.Query(ctx, `SELECT g.group_id,g.person_id,g.ownership_id,g.status,g.zone,g.phone,g.recipient_name,g.relation,g.no_personal_vehicle,g.occasional_vehicle,g.valid_until,g.premises_id,p.number premises_number
  FROM gate_requests g JOIN premises p ON p.id=g.premises_id WHERE g.id=$1 FOR UPDATE OF g`, id))
 	if err != nil {
 		return zero, err
@@ -255,21 +261,75 @@ func (s *Gate) RestoreRejected(ctx context.Context, user model.User, id int64) (
 	if !unexpired {
 		return zero, invalid("gate: expiry is in the past")
 	}
-	var duplicate bool
-	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved','revoke_requested'))`, id, row.PremisesID, row.Zone, row.Phone).Scan(&duplicate); err != nil {
-		return zero, mapErr(err)
-	}
-	if duplicate {
-		return zero, &Error{ErrConflict, "gate: duplicate request"}
-	}
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, row.Zone+":"+row.Phone); err != nil {
 		return zero, mapErr(err)
 	}
-	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','approved','revoke_requested'))`, id, row.PremisesID, row.Zone, row.Phone).Scan(&duplicate); err != nil {
+	var pendingDuplicate bool
+	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND premises_id=$2 AND zone=$3 AND phone=$4 AND effective_status IN('pending','revoke_requested'))`, id, row.PremisesID, row.Zone, row.Phone).Scan(&pendingDuplicate); err != nil {
 		return zero, mapErr(err)
 	}
-	if duplicate {
+	if pendingDuplicate {
 		return zero, &Error{ErrConflict, "gate: duplicate request"}
+	}
+	type activeDuplicate struct {
+		ID       int64 `db:"id"`
+		GroupID  int64 `db:"group_id"`
+		PersonID int64 `db:"person_id"`
+	}
+	duplicates, err := collect[activeDuplicate](tx.Query(ctx, gateView+`SELECT v.id,v.group_id,v.person_id FROM gate_view v JOIN gate_requests g ON g.id=v.id
+ WHERE v.id<>$1 AND v.premises_id=$2 AND v.zone=$3 AND v.phone=$4 AND v.active ORDER BY v.id FOR UPDATE OF g`, id, row.PremisesID, row.Zone, row.Phone))
+	if err != nil {
+		return zero, err
+	}
+	if len(duplicates) > 1 {
+		return zero, &Error{ErrConflict, "gate: multiple active duplicate requests"}
+	}
+	if len(duplicates) == 1 {
+		duplicate := duplicates[0]
+		if duplicate.PersonID == row.PersonID {
+			return zero, &Error{ErrConflict, "gate: access is already active"}
+		}
+		var recoverable bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gate_requests d WHERE d.id=$1 AND d.recipient_name=$2 AND d.relation=$3
+ AND d.no_personal_vehicle=$4 AND d.valid_until IS NOT DISTINCT FROM $5
+ AND EXISTS(SELECT 1 FROM gate_events e WHERE e.request_id=d.id AND e.action='created' AND e.note='Доступ добавлен администратором без заявки'))`,
+			duplicate.ID, row.RecipientName, row.Relation, row.NoPersonalCar, row.ValidUntil).Scan(&recoverable); err != nil {
+			return zero, mapErr(err)
+		}
+		if !recoverable {
+			return zero, &Error{ErrConflict, "gate: duplicate request"}
+		}
+		type vehicle struct {
+			PlateNumber string `db:"plate_number"`
+			Brand       string `db:"brand"`
+		}
+		cars, err := collect[vehicle](tx.Query(ctx, `SELECT v.plate_number,v.brand FROM gate_request_vehicles rv JOIN gate_vehicles v ON v.id=rv.vehicle_id WHERE rv.request_id=$1 ORDER BY v.id`, duplicate.ID))
+		if err != nil {
+			return zero, err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM gate_request_vehicles WHERE request_id=$1`, duplicate.ID); err != nil {
+			return zero, mapErr(err)
+		}
+		if !row.NoPersonalCar && len(cars) > 0 {
+			inputs := make([]model.GateVehicleInput, 0, len(cars))
+			for _, car := range cars {
+				inputs = append(inputs, model.GateVehicleInput{PlateNumber: car.PlateNumber, Brand: car.Brand})
+			}
+			if err = saveAndLinkAdminVehicles(ctx, tx, []int64{duplicate.ID}, row.PersonID, inputs); err != nil {
+				return zero, err
+			}
+		}
+		if _, err = tx.Exec(ctx, `UPDATE gate_requests SET person_id=$2,ownership_id=$3,recipient_name=$4,relation=$5,no_personal_vehicle=$6,occasional_vehicle=$7,valid_until=$8,updated_at=now() WHERE id=$1`,
+			duplicate.ID, row.PersonID, row.OwnershipID, row.RecipientName, row.Relation, row.NoPersonalCar, row.OccasionalCar, row.ValidUntil); err != nil {
+			return zero, mapErr(err)
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO gate_events(request_id,action,actor_role,actor_user_id,note) VALUES($1,'updated','admin',$2,$3)`, duplicate.GroupID, user.ID, fmt.Sprintf("Действующий доступ привязан к собственнику из заявки № %d", id)); err != nil {
+			return zero, mapErr(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return zero, mapErr(err)
+		}
+		return s.get(ctx, 0, duplicate.ID)
 	}
 	var alreadyEnabled bool
 	if err = tx.QueryRow(ctx, gateView+`SELECT EXISTS(SELECT 1 FROM gate_view WHERE id<>$1 AND zone=$2 AND phone=$3 AND active)

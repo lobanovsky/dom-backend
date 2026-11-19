@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"regexp"
+	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"dom-backend/internal/model"
@@ -65,9 +68,78 @@ func (s *Persons) Create(ctx context.Context, in model.Person) (model.Person, er
 }
 
 func (s *Persons) Update(ctx context.Context, id int64, in model.Person) (model.Person, error) {
-	return one[model.Person](s.pool.Query(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.Person{}, err
+	}
+	defer rollback(ctx, tx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, id); err != nil {
+		return model.Person{}, err
+	}
+	oldLogin, err := emailForPerson(ctx, tx, `SELECT email FROM resident_accounts WHERE person_id=$1 FOR UPDATE`, id)
+	if err != nil {
+		return model.Person{}, err
+	}
+	oldAccessEmail, err := emailForPerson(ctx, tx, `SELECT email FROM resident_access WHERE person_id=$1 FOR UPDATE`, id)
+	if err != nil {
+		return model.Person{}, err
+	}
+
+	var p model.Person
+	err = tx.QueryRow(ctx,
 		`UPDATE persons SET last_name = $2, first_name = $3, middle_name = $4, birth_date = $5, phones = $6, emails = $7, updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL RETURNING id, last_name, first_name, middle_name, birth_date, phones, emails, created_at, updated_at, deleted_at`, id, in.LastName, in.FirstName, in.MiddleName, in.BirthDate, in.Phones, in.Emails))
+		 WHERE id = $1 AND deleted_at IS NULL RETURNING id, last_name, first_name, middle_name, birth_date, phones, emails, created_at, updated_at, deleted_at`, id, in.LastName, in.FirstName, in.MiddleName, in.BirthDate, in.Phones, in.Emails).Scan(
+		&p.ID, &p.LastName, &p.FirstName, &p.MiddleName, &p.BirthDate, &p.Phones, &p.Emails, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt)
+	if err != nil {
+		return model.Person{}, mapErr(err)
+	}
+
+	if len(in.Emails) == 0 {
+		if oldLogin != nil || oldAccessEmail != nil {
+			return model.Person{}, invalid("resident account requires a primary email")
+		}
+	} else {
+		newLogin := in.Emails[0]
+		loginChanged := (oldLogin != nil && !strings.EqualFold(strings.TrimSpace(*oldLogin), strings.TrimSpace(newLogin))) ||
+			(oldAccessEmail != nil && !strings.EqualFold(strings.TrimSpace(*oldAccessEmail), strings.TrimSpace(newLogin)))
+		if oldLogin != nil && loginChanged {
+			_, err = tx.Exec(ctx, `UPDATE resident_accounts SET email=lower(btrim($2)) WHERE person_id=$1`, id, newLogin)
+			if err != nil {
+				return model.Person{}, mapErr(err)
+			}
+		}
+		if _, err = tx.Exec(ctx, `UPDATE resident_access SET email=lower(btrim($2)),updated_at=now() WHERE person_id=$1`, id, newLogin); err != nil {
+			return model.Person{}, mapErr(err)
+		}
+		if loginChanged {
+			if _, err = tx.Exec(ctx, `DELETE FROM resident_tokens WHERE person_id=$1`, id); err != nil {
+				return model.Person{}, err
+			}
+			for _, previous := range []*string{oldLogin, oldAccessEmail} {
+				if previous != nil {
+					if _, err = tx.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE email=$1`, *previous); err != nil {
+						return model.Person{}, err
+					}
+				}
+			}
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return model.Person{}, mapErr(err)
+	}
+	return p, nil
+}
+
+func emailForPerson(ctx context.Context, tx pgx.Tx, query string, id int64) (*string, error) {
+	var email string
+	err := tx.QueryRow(ctx, query, id).Scan(&email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &email, nil
 }
 
 // Restore снимает отметку удаления. Если родительская запись удалена или номер уже

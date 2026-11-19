@@ -143,7 +143,7 @@ func TestMetersAndReadings(t *testing.T) {
 		t.Errorf("list: %v %+v", err, list)
 	}
 	got, err := meters.Get(ctx, elec.ID)
-	if err != nil || got.LastReadingDate == nil || *got.LastT1 != 150 {
+	if err != nil || got.LastReadingDate == nil || *got.LastT1 != 150 || *got.LastDeltaT1 != 30 || *got.LastDeltaT2 != 20 || *got.LastDeltaT3 != 10 {
 		t.Errorf("last reading: %v %+v", err, got)
 	}
 	ml, err := meters.List(ctx, model.MeterFilter{BuildingID: &b.ID}, 50, 0)

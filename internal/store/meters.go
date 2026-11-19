@@ -17,13 +17,27 @@ const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.ta
 	COALESCE(m.next_verification_at < CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE), false) AS verification_overdue,
 	b.id AS location_building_id, b.address AS building_address, b.name AS building_name, p.kind AS premises_kind, p.number AS premises_number,
 	lr.reading_date AS last_reading_date, lr.period AS last_reading_period, lr.t1 AS last_t1, lr.t2 AS last_t2, lr.t3 AS last_t3,
+	lr.delta_t1 AS last_delta_t1, lr.delta_t2 AS last_delta_t2, lr.delta_t3 AS last_delta_t3,
 	m.created_at, m.updated_at, m.deleted_at
 	FROM meters m
 	LEFT JOIN premises p ON p.id = m.premises_id
 	JOIN buildings b ON b.id = COALESCE(m.building_id, p.building_id)
 	LEFT JOIN LATERAL (
-		SELECT reading_date, period, t1, t2, t3 FROM meter_readings r
-		WHERE r.meter_id = m.id AND r.deleted_at IS NULL ORDER BY r.reading_date DESC LIMIT 1
+		SELECT latest.reading_date, latest.period, latest.t1, latest.t2, latest.t3,
+		       (latest.t1 - COALESCE(latest.previous_t1, m.initial_t1)) * m.coefficient AS delta_t1,
+		       CASE WHEN latest.t2 IS NULL THEN NULL ELSE (latest.t2 - COALESCE(latest.previous_t2, m.initial_t2)) * m.coefficient END AS delta_t2,
+		       CASE WHEN latest.t3 IS NULL THEN NULL ELSE (latest.t3 - COALESCE(latest.previous_t3, m.initial_t3)) * m.coefficient END AS delta_t3
+		FROM (
+			SELECT recent.*,
+			       lead(recent.t1) OVER (ORDER BY recent.reading_date DESC) AS previous_t1,
+			       lead(recent.t2) OVER (ORDER BY recent.reading_date DESC) AS previous_t2,
+			       lead(recent.t3) OVER (ORDER BY recent.reading_date DESC) AS previous_t3
+			FROM (
+				SELECT reading_date, period, t1, t2, t3 FROM meter_readings r
+				WHERE r.meter_id = m.id AND r.deleted_at IS NULL ORDER BY r.reading_date DESC LIMIT 2
+			) recent
+		) latest
+		ORDER BY latest.reading_date DESC LIMIT 1
 	) lr ON true`
 
 type Meters struct{ pool *pgxpool.Pool }

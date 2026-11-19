@@ -45,6 +45,9 @@ type Meter struct {
 	LastT1              *float64 `json:"last_t1" db:"last_t1"`
 	LastT2              *float64 `json:"last_t2" db:"last_t2"`
 	LastT3              *float64 `json:"last_t3" db:"last_t3"`
+	LastDeltaT1         *float64 `json:"last_delta_t1" db:"last_delta_t1"`
+	LastDeltaT2         *float64 `json:"last_delta_t2" db:"last_delta_t2"`
+	LastDeltaT3         *float64 `json:"last_delta_t3" db:"last_delta_t3"`
 }
 
 // SetDefaults подставляет значения по умолчанию и обнуляет начальные показания неиспользуемых тарифов.

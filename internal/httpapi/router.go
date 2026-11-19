@@ -120,6 +120,7 @@ func NewRouter(d Deps) http.Handler {
 	crudHandlers[model.PremisesKind, model.PremisesKindFilter]{path: "/api/v1/premises-kinds", store: d.PremisesKinds, filter: premisesKindFilter}.register(api)
 	crudHandlers[model.Kinship, model.KinshipFilter]{path: "/api/v1/kinships", store: d.Kinships, filter: kinshipFilter}.register(api)
 	crudHandlers[model.Meter, model.MeterFilter]{path: "/api/v1/meters", store: d.Meters, filter: meterFilter, prepare: func(m *model.Meter) { m.SetDefaults() }}.register(api)
+	api.HandleFunc("GET /api/v1/meters/export", meterCatalogExportHandlers{d.Meters}.export)
 	meterImportHandlers{d.MeterReadingImporter}.register(api)
 	accountServiceBulkHandlers{d.AccountServiceBulk}.register(api)
 	crudHandlers[model.AccountService, model.AccountServiceFilter]{path: "/api/v1/account-services", store: d.AccountServices, filter: accountServiceFilter}.register(api)

@@ -46,12 +46,13 @@ func (s *Meters) List(ctx context.Context, f model.MeterFilter, limit, offset in
 				WHERE reading.meter_id = m.id AND reading.deleted_at IS NULL
 				  AND ($11::date IS NULL OR reading.period = $11)
 			))
+		   AND ($13::bool IS NULL OR m.manual_reading_required = $13)
 		 ORDER BY m.premises_id IS NOT NULL,
 		          CASE WHEN m.premises_id IS NULL THEN COALESCE(b.name, b.address) END,
 		          CASE WHEN m.premises_id IS NULL THEN array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource) END,
 		          CASE WHEN m.premises_id IS NULL THEN lower(m.name) END NULLS LAST,
 		          substring(p.number from '\d+')::numeric NULLS LAST, p.number, p.id, array_position(ARRAY['cold_water', 'hot_water', 'electricity'], m.resource), m.serial_number, m.id LIMIT $9 OFFSET $10`,
-		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), exactPattern(f.PremisesNumber), f.Deleted, limit, offset, f.ReadingPeriod, f.HasReading))
+		f.Scope, f.BuildingID, f.PremisesID, f.Resource, f.Active, likePattern(f.Q), exactPattern(f.PremisesNumber), f.Deleted, limit, offset, f.ReadingPeriod, f.HasReading, f.ManualReadingRequired))
 }
 
 func (s *Meters) Get(ctx context.Context, id int64) (model.Meter, error) {

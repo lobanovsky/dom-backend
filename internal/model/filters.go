@@ -138,16 +138,17 @@ type AssignmentScope struct {
 }
 
 type MeterFilter struct {
-	Deleted        bool    // true — только удалённые (корзина), false — только действующие
-	Scope          *string // common — общедомовые, individual — в помещениях
-	BuildingID     *int64  // счётчики дома и счётчики его помещений
-	PremisesID     *int64
-	Resource       *string
-	Active         *bool
-	ReadingPeriod  *Date
-	HasReading     *bool
-	Q              *string // подстрока в номере или названии счётчика
-	PremisesNumber *string // точный номер помещения (без учёта регистра)
+	Deleted               bool    // true — только удалённые (корзина), false — только действующие
+	Scope                 *string // common — общедомовые, individual — в помещениях
+	BuildingID            *int64  // счётчики дома и счётчики его помещений
+	PremisesID            *int64
+	Resource              *string
+	Active                *bool
+	ReadingPeriod         *Date
+	HasReading            *bool
+	ManualReadingRequired *bool
+	Q                     *string // подстрока в номере или названии счётчика
+	PremisesNumber        *string // точный номер помещения (без учёта регистра)
 }
 
 type MeterReadingFilter struct {

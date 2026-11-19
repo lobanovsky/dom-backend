@@ -73,7 +73,7 @@ func TestPersonPrimaryEmailUpdatesResidentLogin(t *testing.T) {
 		}{
 			{`DELETE FROM resident_sessions WHERE account_id=$1`, []any{account}},
 			{`DELETE FROM resident_tokens WHERE person_id=$1`, []any{person.ID}},
-			{`DELETE FROM resident_mail_outbox WHERE email='login-old@example.test'`},
+			{`DELETE FROM resident_mail_outbox WHERE email='login-old@example.test'`, nil},
 			{`DELETE FROM resident_access WHERE person_id=$1`, []any{person.ID}},
 			{`DELETE FROM resident_accounts WHERE person_id=$1`, []any{person.ID}},
 			{`DELETE FROM persons WHERE id=$1`, []any{person.ID}},

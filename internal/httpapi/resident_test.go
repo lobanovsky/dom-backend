@@ -14,8 +14,16 @@ import (
 
 type residentFake struct {
 	ResidentStore
-	requests int
-	hash     string
+	requests       int
+	hash           string
+	passwordPerson int64
+	passwordEmail  string
+	passwordHash   string
+}
+
+func (f *residentFake) SetPassword(_ context.Context, person, _ int64, email, hash string) error {
+	f.passwordPerson, f.passwordEmail, f.passwordHash = person, email, hash
+	return nil
 }
 
 func (f *residentFake) Session(_ context.Context, token string) (model.ResidentAccount, error) {
@@ -23,6 +31,33 @@ func (f *residentFake) Session(_ context.Context, token string) (model.ResidentA
 		return model.ResidentAccount{}, store.ErrNotFound
 	}
 	return model.ResidentAccount{ID: 42, PersonID: 7, Email: "a@example.test"}, nil
+}
+
+func TestAdminCanSetResidentPassword(t *testing.T) {
+	hash, err := auth.HashPassword("admin-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &residentFake{}
+	h := NewRouter(Deps{Auth: testAuth(hash), Residents: fake})
+	admin := loginAs(t, h, "admin", "admin-password")
+	request := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPut, "/api/v1/resident-access/7/password", strings.NewReader(body))
+		r.AddCookie(admin)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if got := request(`{"email":"a@example.test","password":"short"}`).Code; got != http.StatusUnprocessableEntity {
+		t.Fatalf("short password status = %d", got)
+	}
+	w := request(`{"email":"a@example.test","password":"resident-pass-1"}`)
+	if w.Code != http.StatusOK || fake.passwordPerson != 7 || fake.passwordEmail != "a@example.test" || fake.passwordHash == "resident-pass-1" || fake.passwordHash == "" {
+		t.Fatalf("set password result status=%d body=%s fake=%+v", w.Code, w.Body.String(), fake)
+	}
+	if strings.Contains(w.Body.String(), fake.passwordHash) || strings.Contains(w.Body.String(), "resident-pass-1") {
+		t.Fatal("response must not contain password or hash")
+	}
 }
 func (f *residentFake) Profile(_ context.Context, id int64) (model.Person, error) {
 	return model.Person{FirstName: "Житель", LastName: "Тест"}, nil

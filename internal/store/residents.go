@@ -490,6 +490,13 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, person); err != nil {
 		return err
 	}
+	var personExists bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons WHERE id=$1 AND deleted_at IS NULL)`, person).Scan(&personExists); err != nil {
+		return err
+	}
+	if !personExists {
+		return ErrNotFound
+	}
 	if enabled {
 		var eligible bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(
@@ -535,6 +542,82 @@ func (s *Residents) Approve(ctx context.Context, person, admin int64, email stri
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM resident_tokens WHERE person_id=$1`, person)
 	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE email=$1`, email); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// SetPassword создаёт аккаунт или сбрасывает пароль, одновременно включая доступ. Старые сессии и ссылки отзываются.
+func (s *Residents) SetPassword(ctx context.Context, person, admin int64, email, hash string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollback(ctx, tx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident:' || $1::bigint::text,0))`, person); err != nil {
+		return err
+	}
+	var eligible bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM persons pe JOIN ownerships o ON o.person_id=pe.id JOIN premises p ON p.id=o.premises_id
+ JOIN buildings b ON b.id=p.building_id JOIN organizations org ON org.id=b.organization_id
+ WHERE pe.id=$1 AND pe.deleted_at IS NULL AND o.deleted_at IS NULL AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND org.deleted_at IS NULL
+ AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date
+ AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date))`, person).Scan(&eligible); err != nil {
+		return err
+	}
+	if !eligible {
+		return invalid("resident access can only be enabled for current owners")
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('resident-email:' || $1,0))`, email); err != nil {
+		return err
+	}
+	var existingEmail string
+	var accountActive bool
+	lookup := tx.QueryRow(ctx, `SELECT email,active FROM resident_accounts WHERE person_id=$1 FOR UPDATE`, person).Scan(&existingEmail, &accountActive)
+	if lookup != nil && !errors.Is(lookup, pgx.ErrNoRows) {
+		return lookup
+	}
+	if lookup == nil {
+		if existingEmail != email {
+			return invalid("account email cannot be changed through access approval")
+		}
+		if !accountActive {
+			return invalid("resident account is disabled")
+		}
+	} else {
+		var profileHasEmail bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM persons WHERE id=$1 AND deleted_at IS NULL AND lower(emails[1])=lower($2))`, person, email).Scan(&profileHasEmail); err != nil {
+			return err
+		}
+		if !profileHasEmail {
+			return invalid("resident email must be listed in the person's profile")
+		}
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO resident_access(person_id,email,enabled,approved_by)
+ SELECT id,$2,true,$3 FROM persons WHERE id=$1 AND deleted_at IS NULL
+ ON CONFLICT(person_id) DO UPDATE SET email=excluded.email,enabled=true,approved_by=excluded.approved_by,updated_at=now()`, person, email, admin)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	if lookup == nil {
+		_, err = tx.Exec(ctx, `UPDATE resident_accounts SET password_hash=$2 WHERE person_id=$1 AND active`, person, hash)
+	} else {
+		_, err = tx.Exec(ctx, `INSERT INTO resident_accounts(person_id,email,password_hash) VALUES($1,$2,$3)`, person, email, hash)
+	}
+	if err != nil {
+		return mapErr(err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM resident_sessions WHERE account_id IN(SELECT id FROM resident_accounts WHERE person_id=$1)`, person); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM resident_tokens WHERE person_id=$1`, person); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM resident_mail_outbox WHERE email=$1`, email); err != nil {

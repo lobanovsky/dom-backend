@@ -38,6 +38,7 @@ type ResidentStore interface {
 	SubmitReading(context.Context, model.ResidentAccount, model.MeterReading, *int64) (model.MeterReading, error)
 	Audit(context.Context, model.ResidentAccount, int64) ([]json.RawMessage, error)
 	Approve(context.Context, int64, int64, string, bool) error
+	SetPassword(context.Context, int64, int64, string, string) error
 	InviteEligibleOwners(context.Context, int64, string) (model.ResidentInviteBatchResult, error)
 	SetWindow(context.Context, model.ResidentWindow) error
 	Access(context.Context, int64) (map[string]any, error)
@@ -171,6 +172,7 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 		writeJSON(w, 200, v)
 	})
 	admin.HandleFunc("PUT /api/v1/resident-access/{id}", h.approve)
+	admin.HandleFunc("PUT /api/v1/resident-access/{id}/password", h.setPassword)
 	admin.HandleFunc("POST /api/v1/resident-access/{id}/invite", h.invite)
 	admin.HandleFunc("POST /api/v1/resident-access/invite-owners", h.inviteOwners)
 	admin.HandleFunc("PUT /api/v1/resident-windows/{id}", h.setWindow)
@@ -502,6 +504,42 @@ func (h *residentHandlers) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (h *residentHandlers) setPassword(w http.ResponseWriter, r *http.Request) {
+	if !residentAdmin(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	email, ok := residentEmail(in.Email)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, "email: invalid email")
+		return
+	}
+	if err := model.ValidatePassword("password", in.Password); err != nil {
+		writeErr(w, err)
+		return
+	}
+	hash, err := auth.HashPassword(in.Password)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.store.SetPassword(r.Context(), id, currentUser(r).ID, email, hash); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *residentHandlers) inviteOwners(w http.ResponseWriter, r *http.Request) {

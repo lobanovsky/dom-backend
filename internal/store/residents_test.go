@@ -328,6 +328,13 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	if e != nil || a.PasswordHash != "hash-three" {
 		t.Fatalf("reset: %v", e)
 	}
+	if e = s.SetPassword(ctx, person.ID, admin, "resident@example.test", "admin-set-hash"); e != nil {
+		t.Fatal(e)
+	}
+	a, e = s.ByEmail(ctx, "resident@example.test")
+	if e != nil || a.PasswordHash != "admin-set-hash" {
+		t.Fatalf("admin password reset: %v", e)
+	}
 	session, e = s.NewSession(ctx, a.ID, a.PasswordHash)
 	if e != nil {
 		t.Fatal(e)
@@ -345,5 +352,65 @@ func TestResidentLifecycleAndIsolation(t *testing.T) {
 	assertStatus(true, false, true, true, false)
 	if _, e = s.ByEmail(ctx, "resident@example.test"); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("disabled access: %v", e)
+	}
+}
+
+func TestAdminPasswordCreatesResidentAccount(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	org, err := NewOrganizations(pool).Create(ctx, model.Organization{Kind: "tsn", Name: "resident-password-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "organizations", org.ID)
+	building, err := NewBuildings(pool).Create(ctx, model.Building{OrganizationID: org.ID, Kind: "apartment_building", Address: "resident-password-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "buildings", building.ID)
+	premises, err := NewPremisesStore(pool).Create(ctx, model.Premises{BuildingID: building.ID, Kind: "apartment", Number: "resident-password-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "premises", premises.ID)
+	person, err := NewPersons(pool).Create(ctx, model.Person{LastName: "Тест", FirstName: "Пароль", Phones: []string{}, Emails: []string{"resident-password@example.test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "persons", person.ID)
+	ownership, err := NewOwnerships(pool).Create(ctx, model.Ownership{PremisesID: premises.ID, PersonID: &person.ID, ShareNum: 1, ShareDen: 1, ValidFrom: date(2020, 1, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "ownerships", ownership.ID)
+	var admin int64
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,password_hash,role) VALUES('resident-password-test-admin','unused','admin') RETURNING id`).Scan(&admin); err != nil {
+		t.Fatal(err)
+	}
+	cleanup(t, pool, "users", admin)
+	t.Cleanup(func() {
+		for _, query := range []string{
+			`DELETE FROM resident_sessions WHERE account_id IN(SELECT id FROM resident_accounts WHERE person_id=$1)`,
+			`DELETE FROM resident_tokens WHERE person_id=$1`,
+			`DELETE FROM resident_access WHERE person_id=$1`,
+			`DELETE FROM resident_accounts WHERE person_id=$1`,
+		} {
+			if _, e := pool.Exec(ctx, query, person.ID); e != nil {
+				t.Error(e)
+			}
+		}
+	})
+
+	s := NewResidents(pool)
+	if err = s.SetPassword(ctx, person.ID, admin, "resident-password@example.test", "known-password-hash"); err != nil {
+		t.Fatal(err)
+	}
+	account, err := s.ByEmail(ctx, "resident-password@example.test")
+	if err != nil || account.PasswordHash != "known-password-hash" {
+		t.Fatalf("created account: %+v %v", account, err)
+	}
+	state, err := s.Access(ctx, person.ID)
+	if err != nil || state["enabled"] != true || state["registered"] != true {
+		t.Fatalf("account access state: %+v %v", state, err)
 	}
 }

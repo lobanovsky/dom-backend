@@ -13,7 +13,7 @@ const meterActive = `(m.installed_at <= CURRENT_DATE AND (m.removed_at IS NULL O
 
 const meterSelect = `SELECT m.id, m.building_id, m.premises_id, m.resource, m.tariffs, m.serial_number, m.name, m.model, m.comment, m.coefficient,
 	m.installed_at, m.removed_at, m.verified_at, m.next_verification_at, m.initial_t1, m.initial_t2, m.initial_t3,
-	` + meterActive + ` AS active,
+	m.manual_reading_required, ` + meterActive + ` AS active,
 	COALESCE(m.next_verification_at < CURRENT_DATE AND (m.removed_at IS NULL OR m.removed_at >= CURRENT_DATE), false) AS verification_overdue,
 	b.id AS location_building_id, b.address AS building_address, b.name AS building_name, p.kind AS premises_kind, p.number AS premises_number,
 	lr.reading_date AS last_reading_date, lr.period AS last_reading_period, lr.t1 AS last_t1, lr.t2 AS last_t2, lr.t3 AS last_t3,
@@ -62,10 +62,10 @@ func (s *Meters) Create(ctx context.Context, in model.Meter) (model.Meter, error
 	var id int64
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO meters (building_id, premises_id, resource, tariffs, serial_number, name, model, comment, coefficient,
-		        installed_at, removed_at, verified_at, next_verification_at, initial_t1, initial_t2, initial_t3)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+		        installed_at, removed_at, verified_at, next_verification_at, initial_t1, initial_t2, initial_t3, manual_reading_required)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
 		in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Name, in.Model, in.Comment, in.Coefficient,
-		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3).Scan(&id)
+		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3, in.ManualReadingRequired).Scan(&id)
 	if err != nil {
 		return model.Meter{}, mapErr(err)
 	}
@@ -109,10 +109,10 @@ func (s *Meters) Update(ctx context.Context, id int64, in model.Meter) (model.Me
 	}
 	_, err = tx.Exec(ctx,
 		`UPDATE meters SET building_id = $2, premises_id = $3, resource = $4, tariffs = $5, serial_number = $6, name = $7, model = $8, comment = $9, coefficient = $10,
-		        installed_at = $11, removed_at = $12, verified_at = $13, next_verification_at = $14, initial_t1 = $15, initial_t2 = $16, initial_t3 = $17, updated_at = now()
+		        installed_at = $11, removed_at = $12, verified_at = $13, next_verification_at = $14, initial_t1 = $15, initial_t2 = $16, initial_t3 = $17, manual_reading_required = $18, updated_at = now()
 		 WHERE id = $1`,
 		id, in.BuildingID, in.PremisesID, in.Resource, in.Tariffs, in.SerialNumber, in.Name, in.Model, in.Comment, in.Coefficient,
-		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3)
+		in.InstalledAt, in.RemovedAt, in.VerifiedAt, in.NextVerificationAt, in.InitialT1, in.InitialT2, in.InitialT3, in.ManualReadingRequired)
 	if err != nil {
 		return model.Meter{}, mapErr(err)
 	}

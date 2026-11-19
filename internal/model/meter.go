@@ -15,22 +15,23 @@ var (
 // Активность, просроченная поверка, адрес и последнее показание вычисляются сервером и при записи игнорируются.
 type Meter struct {
 	Meta
-	BuildingID         *int64  `json:"building_id" db:"building_id"`
-	PremisesID         *int64  `json:"premises_id" db:"premises_id"`
-	Resource           string  `json:"resource" db:"resource"`
-	Tariffs            int     `json:"tariffs" db:"tariffs"` // у электросчётчика 1–3, у водяного всегда 1
-	SerialNumber       string  `json:"serial_number" db:"serial_number"`
-	Name               *string `json:"name" db:"name"` // название для различения счётчиков (например, «ИТП»); не уникально
-	Model              *string `json:"model" db:"model"`
-	Comment            *string `json:"comment" db:"comment"`
-	Coefficient        float64 `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
-	InstalledAt        Date    `json:"installed_at" db:"installed_at"`
-	RemovedAt          *Date   `json:"removed_at" db:"removed_at"`
-	VerifiedAt         *Date   `json:"verified_at" db:"verified_at"`
-	NextVerificationAt *Date   `json:"next_verification_at" db:"next_verification_at"`
-	InitialT1          float64 `json:"initial_t1" db:"initial_t1"`
-	InitialT2          float64 `json:"initial_t2" db:"initial_t2"`
-	InitialT3          float64 `json:"initial_t3" db:"initial_t3"`
+	BuildingID            *int64  `json:"building_id" db:"building_id"`
+	PremisesID            *int64  `json:"premises_id" db:"premises_id"`
+	Resource              string  `json:"resource" db:"resource"`
+	Tariffs               int     `json:"tariffs" db:"tariffs"` // у электросчётчика 1–3, у водяного всегда 1
+	SerialNumber          string  `json:"serial_number" db:"serial_number"`
+	Name                  *string `json:"name" db:"name"` // название для различения счётчиков (например, «ИТП»); не уникально
+	Model                 *string `json:"model" db:"model"`
+	Comment               *string `json:"comment" db:"comment"`
+	ManualReadingRequired bool    `json:"manual_reading_required" db:"manual_reading_required"`
+	Coefficient           float64 `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
+	InstalledAt           Date    `json:"installed_at" db:"installed_at"`
+	RemovedAt             *Date   `json:"removed_at" db:"removed_at"`
+	VerifiedAt            *Date   `json:"verified_at" db:"verified_at"`
+	NextVerificationAt    *Date   `json:"next_verification_at" db:"next_verification_at"`
+	InitialT1             float64 `json:"initial_t1" db:"initial_t1"`
+	InitialT2             float64 `json:"initial_t2" db:"initial_t2"`
+	InitialT3             float64 `json:"initial_t3" db:"initial_t3"`
 
 	Active              bool     `json:"active" db:"active"`
 	VerificationOverdue bool     `json:"verification_overdue" db:"verification_overdue"`

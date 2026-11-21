@@ -82,7 +82,7 @@ func importReading(ctx context.Context, tx pgx.Tx, buildingID int64, resource st
 	}
 
 	in := model.MeterReading{MeterID: meterID, ReadingDate: date, Period: period, T1: *r.T[0], T2: r.T[1], T3: r.T[2], Source: "import"}
-	if err := checkReading(ctx, tx, in, 0); err != nil {
+	if err := checkReading(ctx, tx, in, 0, false); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx,

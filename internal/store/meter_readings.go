@@ -50,7 +50,7 @@ func (s *MeterReadings) Create(ctx context.Context, in model.MeterReading) (mode
 		return model.MeterReading{}, mapErr(err)
 	}
 	defer rollback(ctx, tx)
-	if err := checkReading(ctx, tx, in, 0); err != nil {
+	if err := checkReading(ctx, tx, in, 0, true); err != nil {
 		return model.MeterReading{}, err
 	}
 	var id int64
@@ -73,7 +73,7 @@ func (s *MeterReadings) Update(ctx context.Context, id int64, in model.MeterRead
 		return model.MeterReading{}, mapErr(err)
 	}
 	defer rollback(ctx, tx)
-	if err := checkReading(ctx, tx, in, id); err != nil {
+	if err := checkReading(ctx, tx, in, id, true); err != nil {
 		return model.MeterReading{}, err
 	}
 	tag, err := tx.Exec(ctx,
@@ -100,7 +100,7 @@ func (s *MeterReadings) Restore(ctx context.Context, id int64) (model.MeterReadi
 	if err != nil {
 		return model.MeterReading{}, err
 	}
-	if err := checkReading(ctx, tx, cur, id); err != nil {
+	if err := checkReading(ctx, tx, cur, id, true); err != nil {
 		return model.MeterReading{}, err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE meter_readings SET deleted_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NOT NULL`, id)
@@ -117,10 +117,10 @@ func (s *MeterReadings) Delete(ctx context.Context, id int64) error {
 	return softDelete(ctx, s.pool, "meter_readings", id)
 }
 
-// checkReading проверяет показание по правилам счётчика: число тарифов, период работы и порядок значений
-// (показания не уменьшаются со временем). excludeID — сама проверяемая запись при правке. Счётчик блокируется
-// до конца транзакции, чтобы параллельные вводы не нарушили порядок.
-func checkReading(ctx context.Context, tx pgx.Tx, in model.MeterReading, excludeID int64) error {
+// checkReading проверяет тарифы, период работы и порядок показаний. allowDecrease разрешает администратору
+// исправить ошибочно завышенное значение; жительский ввод и импорт по-прежнему не могут уменьшать показания.
+// excludeID — сама проверяемая запись при правке. Счётчик блокируется до конца транзакции.
+func checkReading(ctx context.Context, tx pgx.Tx, in model.MeterReading, excludeID int64, allowDecrease bool) error {
 	var (
 		tariffs                      int
 		installed                    model.Date
@@ -182,7 +182,7 @@ func checkReading(ctx context.Context, tx pgx.Tx, in model.MeterReading, exclude
 		if cur[i] == nil {
 			continue
 		}
-		if prev[i] != nil && model.Milli(*cur[i]) < model.Milli(*prev[i]) {
+		if !allowDecrease && prev[i] != nil && model.Milli(*cur[i]) < model.Milli(*prev[i]) {
 			return invalid(name + ": must not be less than previous reading")
 		}
 		if hasNext && next[i] != nil && model.Milli(*cur[i]) > model.Milli(*next[i]) {

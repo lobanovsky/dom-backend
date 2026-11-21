@@ -440,7 +440,7 @@ func writeResidentReading(ctx context.Context, tx pgx.Tx, a model.ResidentAccoun
 	if id == 0 && expected != nil {
 		return 0, &Error{ErrConflict, "reading changed; refresh and try again"}
 	}
-	if err = checkReading(ctx, tx, in, id); err != nil {
+	if err = checkReading(ctx, tx, in, id, false); err != nil {
 		return 0, err
 	}
 	if id == 0 {

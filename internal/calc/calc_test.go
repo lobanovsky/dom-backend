@@ -98,7 +98,7 @@ func TestSimpleMethods(t *testing.T) {
 	manual := &Service{ID: 3, Name: "Ключи", Method: "manual", Unit: "piece", PriceFirst: r("250")}
 	in := input("56.5", fixed, area, manual)
 	in.Assignments = append(in.Assignments, Assignment{ServiceID: 3, Quantity: r("1")}, Assignment{ServiceID: 3, Quantity: r("2")})
-	res = Compute(in)
+	res := Compute(in)
 	// 56.5 × 33.333 = 1883.3145 -> 1883.31; ключи 3 × 250 = 750 (назначения месяца складываются); домофон 100.50
 	want := map[int64]float64{1: 100.5, 2: 1883.31, 3: 750}
 	if len(res.Lines) != 3 {
@@ -187,7 +187,7 @@ func TestIndividualMeter(t *testing.T) {
 	// Показание меньше предыдущего.
 	in = input("50", svc())
 	in.Meters = []Meter{meter(1, "cold_water", 1, rd(sep, "100"), rd(oct, "90"))}
-	res := Compute(in)
+	res = Compute(in)
 	if l := only(t, res); l.Status != StatusOK || f(l.Quantity) != -10 || f(l.Amount) != -451.23 || res.Total != -451.23 || !res.Complete {
 		t.Errorf("negative correction: %+v, result: %+v", l, res)
 	}

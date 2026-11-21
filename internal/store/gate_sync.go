@@ -39,8 +39,10 @@ func gateDeviceName(value string) string {
 		switch {
 		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			result.WriteRune(r)
-		case unicode.IsSpace(r) || r == '-' || r == '_' || r == '/' || r == '.':
+		case unicode.IsSpace(r) || r == '_' || r == '/' || r == '.':
 			result.WriteByte(' ')
+		case r == '-':
+			result.WriteRune(r)
 		default:
 			if latin, ok := cyrillicGateName[r]; ok {
 				result.WriteString(latin)

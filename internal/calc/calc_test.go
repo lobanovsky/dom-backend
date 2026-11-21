@@ -187,8 +187,9 @@ func TestIndividualMeter(t *testing.T) {
 	// Показание меньше предыдущего.
 	in = input("50", svc())
 	in.Meters = []Meter{meter(1, "cold_water", 1, rd(sep, "100"), rd(oct, "90"))}
-	if l := only(t, Compute(in)); l.Status != StatusNegative {
-		t.Errorf("negative: %+v", l)
+	res := Compute(in)
+	if l := only(t, res); l.Status != StatusOK || f(l.Quantity) != -10 || f(l.Amount) != -451.23 || res.Total != -451.23 || !res.Complete {
+		t.Errorf("negative correction: %+v, result: %+v", l, res)
 	}
 	// Снятый до месяца и установленный после месяца счётчики не участвуют.
 	in = input("50", svc())

@@ -19,7 +19,7 @@ const (
 	StatusNoMeters        = "no_meters"        // нет подходящих счётчиков
 	StatusNoReading       = "no_reading"       // показания за месяц не переданы
 	StatusNoPrevious      = "no_previous"      // нет предыдущего показания: первое показание счётчика — только точка отсчёта
-	StatusNegative        = "negative"         // показание меньше предыдущего
+	StatusNegative        = "negative"         // устаревший статус; теперь отрицательная разница считается корректировкой
 	StatusNoQuantity      = "no_quantity"      // не задано количество (ручная услуга)
 	StatusComponentFailed = "component_failed" // не посчиталась одна из услуг состава
 	// StatusRetired — только у счётчика в строке расчёта: снят с учёта в этом месяце и показаний за месяц нет; расчёт не блокирует.
@@ -365,7 +365,7 @@ func (c *calculator) consumption(meters []Meter, s *Service) (*big.Rat, string, 
 	total := new(big.Rat)
 	uses := []MeterUse{}
 	problem := ""
-	rank := map[string]int{StatusNegative: 1, StatusNoPrevious: 2, StatusNoReading: 3}
+	rank := map[string]int{StatusNoPrevious: 2, StatusNoReading: 3}
 	for _, m := range meters {
 		if m.Resource != s.MeterResource || m.Tariffs < tariff {
 			continue
@@ -407,12 +407,10 @@ func (c *calculator) consumption(meters []Meter, s *Service) (*big.Rat, string, 
 				coef = big.NewRat(1, 1)
 			}
 			d := new(big.Rat).Mul(new(big.Rat).Sub(cur, prev), coef)
-			if d.Sign() < 0 {
-				use.Status = StatusNegative
-			} else {
-				use.Consumption = optFloat(d)
-				total.Add(total, d)
-			}
+			// Отрицательная разница — корректировка ранее завышенного показания;
+			// включаем её в расход со знаком минус, чтобы сумма отражала перерасчёт.
+			use.Consumption = optFloat(d)
+			total.Add(total, d)
 		}
 		if use.Status != StatusOK && rank[use.Status] > rank[problem] {
 			problem = use.Status

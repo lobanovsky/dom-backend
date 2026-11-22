@@ -59,13 +59,13 @@ func ParseUM31(r io.ReadSeeker) ([]model.UM31ReadingImportRow, []model.ImportRow
 			continue
 		}
 		row := model.UM31ReadingImportRow{Row: i + 1, Serial: normalizeSerial(cell(indexes[0]))}
-		rowErr := error(nil)
+		// Выгрузка УМ-31RTU может содержать строки без привязанного счётчика.
+		// Они не являются показаниями для импорта и не должны блокировать файл.
 		if row.Serial == "" {
-			rowErr = fmt.Errorf("meter serial number is required")
+			continue
 		}
-		if rowErr == nil {
-			row.ReadingDate, rowErr = parseUM31Date(cell(indexes[1]))
-		}
+		rowErr := error(nil)
+		row.ReadingDate, rowErr = parseUM31Date(cell(indexes[1]))
 		for t := range row.T {
 			if rowErr != nil {
 				break

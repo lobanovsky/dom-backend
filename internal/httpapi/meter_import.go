@@ -14,12 +14,56 @@ import (
 
 type MeterReadingImportStore interface {
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
+	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
 
 func (h meterImportHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
+	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
+}
+
+func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportSize)
+	if err := r.ParseMultipartForm(maxImportSize); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
+		return
+	}
+	buildingID, err := strconv.ParseInt(r.FormValue("building_id"), 10, 64)
+	if err != nil || buildingID <= 0 {
+		writeError(w, http.StatusUnprocessableEntity, "building_id: must be a positive integer")
+		return
+	}
+	averageMonths := 1
+	if value := strings.TrimSpace(r.FormValue("average_months")); value != "" {
+		averageMonths, err = strconv.Atoi(value)
+	}
+	if err != nil || averageMonths < 1 || averageMonths > 12 {
+		writeError(w, http.StatusUnprocessableEntity, "average_months: must be between 1 and 12")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, `field "file" with an xls file is required`)
+		return
+	}
+	defer file.Close()
+	rows, rowErrs, err := xlsximport.ParseUM31(file)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if len(rowErrs) > 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "file contains invalid rows, nothing was imported", "rows": rowErrs})
+		return
+	}
+	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, rows)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
 }
 
 func formDate(w http.ResponseWriter, r *http.Request, field string, required bool) (*model.Date, bool) {

@@ -49,6 +49,19 @@ func (r MeterReadingImportRow) Tariffs() int {
 
 // MeterReadingImportResult — что создано при загрузке показаний.
 type MeterReadingImportResult struct {
-	MetersCreated int `json:"meters_created"`
-	Readings      int `json:"readings"`
+	MetersCreated          int      `json:"meters_created"`
+	Readings               int      `json:"readings"`
+	EstimatedReadings      int      `json:"estimated_readings"`
+	SkippedExisting        int      `json:"skipped_existing"`
+	SkippedNoHistory       int      `json:"skipped_no_history"`
+	SkippedNoHistoryMeters []string `json:"skipped_no_history_meters,omitempty"`
+}
+
+// UM31ReadingImportRow — показание из файла УМ-31RTU.
+type UM31ReadingImportRow struct {
+	Row         int
+	Serial      string
+	ReadingDate Date
+	Total       *float64
+	T           [3]*float64
 }

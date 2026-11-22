@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +15,8 @@ import (
 
 type MeterReadingImportStore interface {
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
-	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
+	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
+	ListUM31ImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
@@ -22,6 +24,7 @@ type meterImportHandlers struct{ store MeterReadingImportStore }
 func (h meterImportHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
+	mux.HandleFunc("GET /api/v1/meter-readings/import-um31/history", h.importUM31History)
 }
 
 func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +46,7 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "average_months: must be between 1 and 12")
 		return
 	}
-	file, _, err := r.FormFile("file")
+	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, `field "file" with an xls file is required`)
 		return
@@ -54,8 +57,8 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if len(rowErrs) > 0 {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "file contains invalid rows, nothing was imported", "rows": rowErrs})
+	if len(rows) == 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "В файле нет корректных строк с показаниями счётчиков.", "rows": rowErrs})
 		return
 	}
 	confirmHighUsage, err := strconv.ParseBool(r.FormValue("confirm_high_usage"))
@@ -63,7 +66,7 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "confirm_high_usage: must be true or false")
 		return
 	}
-	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, confirmHighUsage, rows)
+	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, confirmHighUsage, filepath.Base(header.Filename), rowErrs, rows)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -73,10 +76,29 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 			"error":                   "unusually high meter usage requires confirmation",
 			"high_usage_warnings":     res.HighUsageWarnings,
 			"lower_reading_estimates": res.LowerReadingEstimates,
+			"issues":                  res.Issues,
 		})
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)
+}
+
+func (h meterImportHandlers) importUM31History(w http.ResponseWriter, r *http.Request) {
+	var buildingID *int64
+	if value := strings.TrimSpace(r.URL.Query().Get("building_id")); value != "" {
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusUnprocessableEntity, "building_id: must be a positive integer")
+			return
+		}
+		buildingID = &id
+	}
+	items, err := h.store.ListUM31ImportHistory(r.Context(), buildingID, 50)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func formDate(w http.ResponseWriter, r *http.Request, field string, required bool) (*model.Date, bool) {

@@ -62,6 +62,7 @@ func ParseUM31(r io.ReadSeeker) ([]model.UM31ReadingImportRow, []model.ImportRow
 		// Выгрузка УМ-31RTU может содержать строки без привязанного счётчика.
 		// Они не являются показаниями для импорта и не должны блокировать файл.
 		if row.Serial == "" {
+			errs = append(errs, model.ImportRowError{Row: i + 1, Error: "Не указан серийный номер счётчика; строка пропущена."})
 			continue
 		}
 		rowErr := error(nil)

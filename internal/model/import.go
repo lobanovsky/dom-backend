@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // ImportRow — одна строка xlsx-файла импорта: помещение, его собственник и два лицевых счёта.
 type ImportRow struct {
 	Row                  int // номер строки в файле (с 1)
@@ -57,7 +59,26 @@ type MeterReadingImportResult struct {
 	SkippedNoHistoryMeters        []string               `json:"skipped_no_history_meters,omitempty"`
 	LowerReadingEstimates         []LowerReadingEstimate `json:"lower_reading_estimates,omitempty"`
 	HighUsageWarnings             []HighUsageWarning     `json:"high_usage_warnings,omitempty"`
+	Issues                        []MeterImportIssue     `json:"issues,omitempty"`
 	RequiresHighUsageConfirmation bool                   `json:"-"`
+}
+
+// MeterImportIssue — строка выгрузки, которая пропущена или требует внимания.
+type MeterImportIssue struct {
+	Row     int    `json:"row,omitempty"`
+	Serial  string `json:"serial,omitempty"`
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
+type MeterImportHistoryItem struct {
+	ID         int64                    `json:"id"`
+	BuildingID int64                    `json:"building_id"`
+	FileName   string                   `json:"file_name"`
+	Period     Date                     `json:"period"`
+	CreatedAt  time.Time                `json:"created_at"`
+	Result     MeterReadingImportResult `json:"result"`
+	Issues     []MeterImportIssue       `json:"issues"`
 }
 
 // LowerReadingEstimate — показание файла ниже последнего фактического, вместо него записано среднее.

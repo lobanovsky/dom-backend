@@ -133,8 +133,15 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 			}
 			result.Readings++
 			result.EstimatedReadings++
+			previousTotal := previousReading[0]
+			if m.Tariffs >= 2 {
+				previousTotal += previousReading[1]
+			}
+			if m.Tariffs >= 3 {
+				previousTotal += previousReading[2]
+			}
 			result.LowerReadingEstimates = append(result.LowerReadingEstimates, model.LowerReadingEstimate{
-				MeterSerial: m.Serial, Premises: m.PremisesNumber, PreviousReading: readingTotal(previousReading, m.Tariffs),
+				MeterSerial: m.Serial, Premises: m.PremisesNumber, PreviousReading: previousTotal,
 				FileReading: readingTotal(in, m.Tariffs), AppliedReading: readingTotal(estimated, m.Tariffs),
 			})
 			continue
@@ -317,7 +324,7 @@ func insertUM31Reading(ctx context.Context, tx pgx.Tx, in model.MeterReading) er
 	} else if err := checkReading(ctx, tx, in, 0, false); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO meter_readings (meter_id, reading_date, period, t1, t2, t3, source, comment)
+	_, err = tx.Exec(ctx, `INSERT INTO meter_readings (meter_id, reading_date, period, t1, t2, t3, source, comment)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Source, in.Comment)
 	return err
 }

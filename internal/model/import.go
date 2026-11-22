@@ -17,8 +17,9 @@ type ImportRow struct {
 
 // ImportRowError — ошибка в конкретной строке файла.
 type ImportRowError struct {
-	Row   int    `json:"row"`
-	Error string `json:"error"`
+	Row    int    `json:"row"`
+	Serial string `json:"serial,omitempty"`
+	Error  string `json:"error"`
 }
 
 // ImportResult — что создано при импорте.
@@ -74,6 +75,8 @@ type MeterImportIssue struct {
 type MeterImportHistoryItem struct {
 	ID         int64                    `json:"id"`
 	BuildingID int64                    `json:"building_id"`
+	Resource   string                   `json:"resource"`
+	Format     string                   `json:"format"`
 	FileName   string                   `json:"file_name"`
 	Period     Date                     `json:"period"`
 	CreatedAt  time.Time                `json:"created_at"`
@@ -98,6 +101,7 @@ type HighUsageWarning struct {
 	Premises      string  `json:"premises"`
 	PreviousUsage float64 `json:"previous_usage"`
 	CurrentUsage  float64 `json:"current_usage"`
+	Unit          string  `json:"unit"`
 }
 
 // UM31ReadingImportRow — показание из файла УМ-31RTU.
@@ -107,4 +111,13 @@ type UM31ReadingImportRow struct {
 	ReadingDate Date
 	Total       *float64
 	T           [3]*float64
+}
+
+// PulsarReadingImportRow — показание воды из выгрузки Пульсара.
+type PulsarReadingImportRow struct {
+	Row      int
+	Premises string
+	Resource string
+	Serial   string
+	Reading  *float64
 }

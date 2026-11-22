@@ -16,8 +16,9 @@ import (
 type MeterReadingImportStore interface {
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
-	ListUM31ImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error)
-	UndoUM31Import(ctx context.Context, importRunID int64) (int, error)
+	ImportPulsarReadings(ctx context.Context, buildingID int64, readingDate model.Date, fileName string, parseErrors []model.ImportRowError, rows []model.PulsarReadingImportRow, confirmHighUsage bool) (model.MeterReadingImportResult, error)
+	ListMeterImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error)
+	UndoMeterImport(ctx context.Context, importRunID int64) (int, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
@@ -25,16 +26,20 @@ type meterImportHandlers struct{ store MeterReadingImportStore }
 func (h meterImportHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
-	mux.HandleFunc("GET /api/v1/meter-readings/import-um31/history", h.importUM31History)
-	mux.HandleFunc("POST /api/v1/meter-readings/import-um31/history/{id}/undo", h.undoUM31Import)
+	mux.HandleFunc("POST /api/v1/meter-readings/import-pulsar", h.importPulsar)
+	mux.HandleFunc("GET /api/v1/meter-reading-imports", h.importHistory)
+	mux.HandleFunc("POST /api/v1/meter-reading-imports/{id}/undo", h.undoImport)
+	// Старые URL оставлены для закладок и уже выпущенного frontend.
+	mux.HandleFunc("GET /api/v1/meter-readings/import-um31/history", h.importHistory)
+	mux.HandleFunc("POST /api/v1/meter-readings/import-um31/history/{id}/undo", h.undoImport)
 }
 
-func (h meterImportHandlers) undoUM31Import(w http.ResponseWriter, r *http.Request) {
+func (h meterImportHandlers) undoImport(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	removed, err := h.store.UndoUM31Import(r.Context(), id)
+	removed, err := h.store.UndoMeterImport(r.Context(), id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -98,7 +103,7 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, res)
 }
 
-func (h meterImportHandlers) importUM31History(w http.ResponseWriter, r *http.Request) {
+func (h meterImportHandlers) importHistory(w http.ResponseWriter, r *http.Request) {
 	var buildingID *int64
 	if value := strings.TrimSpace(r.URL.Query().Get("building_id")); value != "" {
 		id, err := strconv.ParseInt(value, 10, 64)
@@ -108,12 +113,55 @@ func (h meterImportHandlers) importUM31History(w http.ResponseWriter, r *http.Re
 		}
 		buildingID = &id
 	}
-	items, err := h.store.ListUM31ImportHistory(r.Context(), buildingID, 50)
+	items, err := h.store.ListMeterImportHistory(r.Context(), buildingID, 50)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h meterImportHandlers) importPulsar(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportSize)
+	if err := r.ParseMultipartForm(maxImportSize); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart body: "+err.Error())
+		return
+	}
+	buildingID, err := strconv.ParseInt(r.FormValue("building_id"), 10, 64)
+	if err != nil || buildingID <= 0 {
+		writeError(w, http.StatusUnprocessableEntity, "building_id: must be a positive integer")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, `field "file" with an xlsx file is required`)
+		return
+	}
+	defer file.Close()
+	readingDate, rows, rowIssues, err := xlsximport.ParsePulsar(file)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	confirmHighUsage, err := strconv.ParseBool(r.FormValue("confirm_high_usage"))
+	if err != nil && strings.TrimSpace(r.FormValue("confirm_high_usage")) != "" {
+		writeError(w, http.StatusUnprocessableEntity, "confirm_high_usage: must be true or false")
+		return
+	}
+	result, err := h.store.ImportPulsarReadings(r.Context(), buildingID, readingDate, filepath.Base(header.Filename), rowIssues, rows, confirmHighUsage)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if result.RequiresHighUsageConfirmation {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":               "unusually high meter usage requires confirmation",
+			"high_usage_warnings": result.HighUsageWarnings,
+			"issues":              result.Issues,
+		})
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
 }
 
 func formDate(w http.ResponseWriter, r *http.Request, field string, required bool) (*model.Date, bool) {

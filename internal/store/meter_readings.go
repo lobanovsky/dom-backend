@@ -98,7 +98,7 @@ func (s *MeterReadings) Restore(ctx context.Context, id int64) (model.MeterReadi
 	defer rollback(ctx, tx)
 	var fromUndoneImport bool
 	err = tx.QueryRow(ctx, `SELECT COALESCE(i.undone_at IS NOT NULL, false)
-		FROM meter_readings r LEFT JOIN um31_import_runs i ON i.id=r.import_run_id
+		FROM meter_readings r LEFT JOIN meter_reading_import_runs i ON i.id=r.import_run_id
 		WHERE r.id=$1 AND r.deleted_at IS NOT NULL`, id).Scan(&fromUndoneImport)
 	if err == pgx.ErrNoRows {
 		return model.MeterReading{}, &Error{ErrNotFound, "not found"}

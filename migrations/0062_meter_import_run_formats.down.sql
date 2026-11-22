@@ -1,0 +1,4 @@
+ALTER INDEX meter_readings_import_run_id_idx RENAME TO meter_readings_import_run_idx;
+ALTER TABLE meter_reading_import_runs DROP COLUMN import_format, DROP COLUMN resource;
+ALTER INDEX meter_reading_import_runs_building_created_idx RENAME TO um31_import_runs_building_created_idx;
+ALTER TABLE meter_reading_import_runs RENAME TO um31_import_runs;

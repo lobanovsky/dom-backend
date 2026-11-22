@@ -54,8 +54,8 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 	period := rows[0].ReadingDate.FirstOfMonth()
 	readingDate := rows[0].ReadingDate
 	var importRunID int64
-	if err := tx.QueryRow(ctx, `INSERT INTO um31_import_runs (building_id, file_name, period, result, issues)
-		VALUES ($1,$2,$3,'{}'::jsonb,'[]'::jsonb) RETURNING id`, buildingID, fileName, period).Scan(&importRunID); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO meter_reading_import_runs (building_id, resource, import_format, file_name, period, result, issues)
+		VALUES ($1,'electricity','um31',$2,$3,'{}'::jsonb,'[]'::jsonb) RETURNING id`, buildingID, fileName, period).Scan(&importRunID); err != nil {
 		return result, mapErr(err)
 	}
 	fileMeters := make(map[string]model.UM31ReadingImportRow, len(rows))
@@ -163,7 +163,7 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_estimated", Message: fmt.Sprintf("Показание файла ниже предыдущего фактического; вместо него записано расчётное %.3f кВт·ч.", readingTotal(estimated, m.Tariffs))})
 			continue
 		}
-		if warning, ok, err := highUsageWarning(ctx, tx, m, in); err != nil {
+		if warning, ok, err := highUsageWarning(ctx, tx, m, in, "кВт·ч"); err != nil {
 			return result, mapErr(err)
 		} else if ok {
 			result.HighUsageWarnings = append(result.HighUsageWarnings, warning)
@@ -218,16 +218,8 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 		result.RequiresHighUsageConfirmation = true
 		return result, nil // отложенный rollback: предупреждения показываем до фиксации показаний
 	}
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
+	if err := saveMeterImportResult(ctx, tx, importRunID, result); err != nil {
 		return result, err
-	}
-	issuesJSON, err := json.Marshal(result.Issues)
-	if err != nil {
-		return result, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE um31_import_runs SET result=$2, issues=$3, reading_count=$4 WHERE id=$1`, importRunID, resultJSON, issuesJSON, result.Readings); err != nil {
-		return result, mapErr(err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -236,9 +228,9 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 	return result, nil
 }
 
-func (s *MeterReadings) ListUM31ImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, building_id, file_name, period, created_at, result, issues, undone_at, reading_count
-		FROM um31_import_runs WHERE ($1::bigint IS NULL OR building_id=$1)
+func (s *MeterReadings) ListMeterImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, building_id, resource, import_format, file_name, period, created_at, result, issues, undone_at, reading_count
+		FROM meter_reading_import_runs WHERE ($1::bigint IS NULL OR building_id=$1)
 		ORDER BY created_at DESC, id DESC LIMIT $2`, buildingID, limit)
 	if err != nil {
 		return nil, mapErr(err)
@@ -249,7 +241,7 @@ func (s *MeterReadings) ListUM31ImportHistory(ctx context.Context, buildingID *i
 		var item model.MeterImportHistoryItem
 		var resultJSON, issuesJSON []byte
 		var readingCount int
-		if err := rows.Scan(&item.ID, &item.BuildingID, &item.FileName, &item.Period, &item.CreatedAt, &resultJSON, &issuesJSON, &item.UndoneAt, &readingCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.BuildingID, &item.Resource, &item.Format, &item.FileName, &item.Period, &item.CreatedAt, &resultJSON, &issuesJSON, &item.UndoneAt, &readingCount); err != nil {
 			return nil, mapErr(err)
 		}
 		if err := json.Unmarshal(resultJSON, &item.Result); err != nil {
@@ -264,9 +256,9 @@ func (s *MeterReadings) ListUM31ImportHistory(ctx context.Context, buildingID *i
 	return items, mapErr(rows.Err())
 }
 
-// UndoUM31Import удаляет только показания, созданные выбранным импортом.
+// UndoMeterImport удаляет только показания, созданные выбранным импортом.
 // Отмена запрещена, если записи меняли вручную или после них появились новые показания.
-func (s *MeterReadings) UndoUM31Import(ctx context.Context, importRunID int64) (int, error) {
+func (s *MeterReadings) UndoMeterImport(ctx context.Context, importRunID int64) (int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, mapErr(err)
@@ -275,7 +267,7 @@ func (s *MeterReadings) UndoUM31Import(ctx context.Context, importRunID int64) (
 
 	var expected int
 	var undoneAt *time.Time
-	if err := tx.QueryRow(ctx, `SELECT reading_count, undone_at FROM um31_import_runs WHERE id=$1 FOR UPDATE`, importRunID).Scan(&expected, &undoneAt); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT reading_count, undone_at FROM meter_reading_import_runs WHERE id=$1 FOR UPDATE`, importRunID).Scan(&expected, &undoneAt); err != nil {
 		return 0, mapErr(err)
 	}
 	if undoneAt != nil {
@@ -329,7 +321,7 @@ func (s *MeterReadings) UndoUM31Import(ctx context.Context, importRunID int64) (
 	if err != nil {
 		return 0, mapErr(err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE um31_import_runs SET undone_at=now() WHERE id=$1`, importRunID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE meter_reading_import_runs SET undone_at=now() WHERE id=$1`, importRunID); err != nil {
 		return 0, mapErr(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -402,7 +394,7 @@ func readingTotal(r model.MeterReading, tariffs int) float64 {
 	return total
 }
 
-func highUsageWarning(ctx context.Context, tx pgx.Tx, m um31Meter, in model.MeterReading) (model.HighUsageWarning, bool, error) {
+func highUsageWarning(ctx context.Context, tx pgx.Tx, m um31Meter, in model.MeterReading, unit string) (model.HighUsageWarning, bool, error) {
 	previousMonth := model.Date{Time: in.Period.Time.AddDate(0, -1, 0)}
 	monthBefore := model.Date{Time: in.Period.Time.AddDate(0, -2, 0)}
 	readings := func(period model.Date) ([3]*float64, bool, error) {
@@ -438,7 +430,7 @@ func highUsageWarning(ctx context.Context, tx pgx.Tx, m um31Meter, in model.Mete
 	if currentUsage <= previousUsage*3 && !(previousUsage == 0 && currentUsage > 0) {
 		return model.HighUsageWarning{}, false, nil
 	}
-	return model.HighUsageWarning{MeterSerial: m.Serial, Premises: m.PremisesNumber, PreviousUsage: previousUsage, CurrentUsage: currentUsage}, true, nil
+	return model.HighUsageWarning{MeterSerial: m.Serial, Premises: m.PremisesNumber, PreviousUsage: previousUsage, CurrentUsage: currentUsage, Unit: unit}, true, nil
 }
 
 func insertUM31Reading(ctx context.Context, tx pgx.Tx, in model.MeterReading, importRunID int64) error {

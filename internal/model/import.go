@@ -77,6 +77,8 @@ type MeterImportHistoryItem struct {
 	FileName   string                   `json:"file_name"`
 	Period     Date                     `json:"period"`
 	CreatedAt  time.Time                `json:"created_at"`
+	UndoneAt   *time.Time               `json:"undone_at,omitempty"`
+	CanUndo    bool                     `json:"can_undo"`
 	Result     MeterReadingImportResult `json:"result"`
 	Issues     []MeterImportIssue       `json:"issues"`
 }

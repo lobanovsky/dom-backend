@@ -17,6 +17,7 @@ type MeterReadingImportStore interface {
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
 	ListUM31ImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error)
+	UndoUM31Import(ctx context.Context, importRunID int64) (int, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
@@ -25,6 +26,20 @@ func (h meterImportHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
 	mux.HandleFunc("GET /api/v1/meter-readings/import-um31/history", h.importUM31History)
+	mux.HandleFunc("POST /api/v1/meter-readings/import-um31/history/{id}/undo", h.undoUM31Import)
+}
+
+func (h meterImportHandlers) undoUM31Import(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	removed, err := h.store.UndoUM31Import(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"removed_readings": removed})
 }
 
 func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) {

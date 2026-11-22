@@ -77,7 +77,7 @@ func (s *MeterReadings) Update(ctx context.Context, id int64, in model.MeterRead
 		return model.MeterReading{}, err
 	}
 	tag, err := tx.Exec(ctx,
-		`UPDATE meter_readings SET meter_id = $2, reading_date = $3, period = $4, t1 = $5, t2 = $6, t3 = $7, source = $8, comment = $9, updated_at = now()
+		`UPDATE meter_readings SET meter_id = $2, reading_date = $3, period = $4, t1 = $5, t2 = $6, t3 = $7, source = $8, comment = $9, import_run_id = NULL, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL`,
 		id, in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Source, in.Comment)
 	if err := checkDeleted(tag, err); err != nil {
@@ -96,6 +96,19 @@ func (s *MeterReadings) Restore(ctx context.Context, id int64) (model.MeterReadi
 		return model.MeterReading{}, mapErr(err)
 	}
 	defer rollback(ctx, tx)
+	var fromUndoneImport bool
+	err = tx.QueryRow(ctx, `SELECT COALESCE(i.undone_at IS NOT NULL, false)
+		FROM meter_readings r LEFT JOIN um31_import_runs i ON i.id=r.import_run_id
+		WHERE r.id=$1 AND r.deleted_at IS NOT NULL`, id).Scan(&fromUndoneImport)
+	if err == pgx.ErrNoRows {
+		return model.MeterReading{}, &Error{ErrNotFound, "not found"}
+	}
+	if err != nil {
+		return model.MeterReading{}, mapErr(err)
+	}
+	if fromUndoneImport {
+		return model.MeterReading{}, invalid("cannot restore a reading from an undone import")
+	}
 	cur, err := one[model.MeterReading](tx.Query(ctx, readingSelect+` WHERE r.id = $1 AND r.deleted_at IS NOT NULL`, id))
 	if err != nil {
 		return model.MeterReading{}, err

@@ -49,12 +49,32 @@ func (r MeterReadingImportRow) Tariffs() int {
 
 // MeterReadingImportResult — что создано при загрузке показаний.
 type MeterReadingImportResult struct {
-	MetersCreated          int      `json:"meters_created"`
-	Readings               int      `json:"readings"`
-	EstimatedReadings      int      `json:"estimated_readings"`
-	SkippedExisting        int      `json:"skipped_existing"`
-	SkippedNoHistory       int      `json:"skipped_no_history"`
-	SkippedNoHistoryMeters []string `json:"skipped_no_history_meters,omitempty"`
+	MetersCreated                 int                    `json:"meters_created"`
+	Readings                      int                    `json:"readings"`
+	EstimatedReadings             int                    `json:"estimated_readings"`
+	SkippedExisting               int                    `json:"skipped_existing"`
+	SkippedNoHistory              int                    `json:"skipped_no_history"`
+	SkippedNoHistoryMeters        []string               `json:"skipped_no_history_meters,omitempty"`
+	LowerReadingEstimates         []LowerReadingEstimate `json:"lower_reading_estimates,omitempty"`
+	HighUsageWarnings             []HighUsageWarning     `json:"high_usage_warnings,omitempty"`
+	RequiresHighUsageConfirmation bool                   `json:"-"`
+}
+
+// LowerReadingEstimate — показание файла ниже последнего фактического, вместо него записано среднее.
+type LowerReadingEstimate struct {
+	MeterSerial     string  `json:"meter_serial"`
+	Premises        string  `json:"premises"`
+	PreviousReading float64 `json:"previous_reading"`
+	FileReading     float64 `json:"file_reading"`
+	AppliedReading  float64 `json:"applied_reading"`
+}
+
+// HighUsageWarning — расход за месяц превысил втрое расход предыдущего месяца.
+type HighUsageWarning struct {
+	MeterSerial   string  `json:"meter_serial"`
+	Premises      string  `json:"premises"`
+	PreviousUsage float64 `json:"previous_usage"`
+	CurrentUsage  float64 `json:"current_usage"`
 }
 
 // UM31ReadingImportRow — показание из файла УМ-31RTU.

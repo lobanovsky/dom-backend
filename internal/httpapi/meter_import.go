@@ -14,7 +14,7 @@ import (
 
 type MeterReadingImportStore interface {
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
-	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
+	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
 }
 
 type meterImportHandlers struct{ store MeterReadingImportStore }
@@ -58,9 +58,22 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "file contains invalid rows, nothing was imported", "rows": rowErrs})
 		return
 	}
-	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, rows)
+	confirmHighUsage, err := strconv.ParseBool(r.FormValue("confirm_high_usage"))
+	if err != nil && strings.TrimSpace(r.FormValue("confirm_high_usage")) != "" {
+		writeError(w, http.StatusUnprocessableEntity, "confirm_high_usage: must be true or false")
+		return
+	}
+	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, confirmHighUsage, rows)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if res.RequiresHighUsageConfirmation {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":                   "unusually high meter usage requires confirmation",
+			"high_usage_warnings":     res.HighUsageWarnings,
+			"lower_reading_estimates": res.LowerReadingEstimates,
+		})
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)

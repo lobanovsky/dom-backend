@@ -40,6 +40,7 @@ type Meter struct {
 	BuildingName        *string  `json:"building_name" db:"building_name"`
 	PremisesKind        *string  `json:"premises_kind" db:"premises_kind"`
 	PremisesNumber      *string  `json:"premises_number" db:"premises_number"`
+	PremisesFloor       *int     `json:"premises_floor" db:"premises_floor"`
 	LastReadingDate     *Date    `json:"last_reading_date" db:"last_reading_date"`
 	LastReadingPeriod   *Date    `json:"last_reading_period" db:"last_reading_period"`
 	LastT1              *float64 `json:"last_t1" db:"last_t1"`

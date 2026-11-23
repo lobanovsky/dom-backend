@@ -3,7 +3,9 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"dom-backend/internal/model"
 	"dom-backend/internal/xlsxexport"
@@ -13,6 +15,103 @@ const maxMeterCatalogExport = 100000
 
 type meterCatalogExportStore interface {
 	List(context.Context, model.MeterFilter, int, int) ([]model.Meter, error)
+}
+
+// electricityPaperForm выгружает действующие квартирные электросчётчики
+// в бланк для записи показаний на бумаге.
+func (h meterCatalogExportHandlers) electricityPaperForm(w http.ResponseWriter, r *http.Request) {
+	buildingID, err := strconv.ParseInt(r.URL.Query().Get("building_id"), 10, 64)
+	if err != nil || buildingID <= 0 || len(r.URL.Query()) != 1 {
+		writeError(w, http.StatusUnprocessableEntity, "building_id: must be a positive integer")
+		return
+	}
+	scope, resource, active := "individual", "electricity", true
+	items, err := h.s.List(r.Context(), model.MeterFilter{Scope: &scope, BuildingID: &buildingID, Resource: &resource, Active: &active}, maxMeterCatalogExport+1, 0)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	rows := make([]model.Meter, 0, len(items))
+	for _, item := range items {
+		if item.PremisesKind != nil && *item.PremisesKind == "apartment" {
+			rows = append(rows, item)
+		}
+	}
+	if len(rows) > maxMeterCatalogExport {
+		writeError(w, http.StatusUnprocessableEntity, "too many meters for export")
+		return
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		fi, fj := rows[i].PremisesFloor, rows[j].PremisesFloor
+		if fi == nil || fj == nil {
+			if fi == nil && fj != nil {
+				return false
+			}
+			if fi != nil && fj == nil {
+				return true
+			}
+		} else if *fi != *fj {
+			return *fi < *fj
+		}
+		ni, nj := "", ""
+		if rows[i].PremisesNumber != nil {
+			ni = *rows[i].PremisesNumber
+		}
+		if rows[j].PremisesNumber != nil {
+			nj = *rows[j].PremisesNumber
+		}
+		if ni != nj {
+			if ai, err := strconv.ParseInt(ni, 10, 64); err == nil {
+				if aj, err := strconv.ParseInt(nj, 10, 64); err == nil {
+					return ai < aj
+				}
+			}
+			return strings.ToLower(ni) < strings.ToLower(nj)
+		}
+		return rows[i].SerialNumber < rows[j].SerialNumber
+	})
+	columns := []xlsxexport.Column{
+		{Title: "Этаж", Width: 10}, {Title: "Квартира", Width: 14}, {Title: "Номер электросчётчика", Width: 24},
+		{Title: "Предыдущее показание Т1", Width: 22}, {Title: "Новое показание Т1", Width: 20},
+		{Title: "Предыдущее показание Т2", Width: 22}, {Title: "Новое показание Т2", Width: 20},
+		{Title: "Предыдущее показание Т3", Width: 22}, {Title: "Новое показание Т3", Width: 20},
+	}
+	dataRows := make([][]any, 0, len(rows))
+	for _, meter := range rows {
+		floor, premise := any(nil), any("")
+		if meter.PremisesFloor != nil {
+			floor = *meter.PremisesFloor
+		}
+		if meter.PremisesNumber != nil {
+			premise = *meter.PremisesNumber
+		}
+		t1, t2, t3 := any(meter.InitialT1), any(nil), any(nil)
+		if meter.LastT1 != nil {
+			t1 = *meter.LastT1
+		}
+		if meter.Tariffs >= 2 {
+			t2 = any(meter.InitialT2)
+			if meter.LastT2 != nil {
+				t2 = *meter.LastT2
+			}
+		}
+		if meter.Tariffs >= 3 {
+			t3 = any(meter.InitialT3)
+			if meter.LastT3 != nil {
+				t3 = *meter.LastT3
+			}
+		}
+		dataRows = append(dataRows, []any{floor, premise, meter.SerialNumber, t1, nil, t2, nil, t3, nil})
+	}
+	data, err := xlsxexport.Build("Показания электросчётчиков", columns, dataRows)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", `attachment; filename="electricity-readings-paper-form.xlsx"`)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
 }
 
 type meterCatalogExportHandlers struct{ s meterCatalogExportStore }

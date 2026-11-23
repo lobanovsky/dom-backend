@@ -25,8 +25,8 @@ func (h meterCatalogExportHandlers) electricityPaperForm(w http.ResponseWriter, 
 		writeError(w, http.StatusUnprocessableEntity, "building_id: must be a positive integer")
 		return
 	}
-	scope, resource, active := "individual", "electricity", true
-	items, err := h.s.List(r.Context(), model.MeterFilter{Scope: &scope, BuildingID: &buildingID, Resource: &resource, Active: &active}, maxMeterCatalogExport+1, 0)
+	scope, resource, active, broken := "individual", "electricity", true, false
+	items, err := h.s.List(r.Context(), model.MeterFilter{Scope: &scope, BuildingID: &buildingID, Resource: &resource, Active: &active, Broken: &broken}, maxMeterCatalogExport+1, 0)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -134,7 +134,7 @@ func (h meterCatalogExportHandlers) export(w http.ResponseWriter, r *http.Reques
 	cols := []xlsxexport.Column{
 		{Title: "Дом", Width: 34}, {Title: "Вид помещения", Width: 20}, {Title: "Номер помещения", Width: 18},
 		{Title: "Ресурс", Width: 18}, {Title: "Номер счётчика", Width: 24}, {Title: "Название", Width: 24},
-		{Title: "Модель", Width: 22}, {Title: "Показания передавать вручную", Width: 28},
+		{Title: "Модель", Width: 22}, {Title: "Сломан", Width: 12}, {Title: "Показания передавать вручную", Width: 28},
 		{Title: "Введён в эксплуатацию", Width: 20, Kind: xlsxexport.Date}, {Title: "Окончание работы", Width: 18, Kind: xlsxexport.Date},
 		{Title: "Последнее показание", Width: 18, Kind: xlsxexport.Date}, {Title: "Расчётный месяц", Width: 18, Kind: xlsxexport.Date},
 		{Title: "Т1", Width: 14}, {Title: "Т2", Width: 14}, {Title: "Т3", Width: 14}, {Title: "Комментарий", Width: 40},
@@ -154,7 +154,7 @@ func (h meterCatalogExportHandlers) export(w http.ResponseWriter, r *http.Reques
 		}
 		rows = append(rows, []any{
 			building, premisesKind, premisesNumber, meterResourceName(m.Resource), m.SerialNumber, stringValue(m.Name), stringValue(m.Model),
-			yesNo(m.ManualReadingRequired), meterDate(m.InstalledAt), optionalMeterDate(m.RemovedAt), optionalMeterDate(m.LastReadingDate),
+			yesNo(m.Broken), yesNo(m.ManualReadingRequired), meterDate(m.InstalledAt), optionalMeterDate(m.RemovedAt), optionalMeterDate(m.LastReadingDate),
 			optionalMeterDate(m.LastReadingPeriod), meterNumber(m.LastT1), meterNumber(m.LastT2), meterNumber(m.LastT3), stringValue(m.Comment),
 		})
 	}

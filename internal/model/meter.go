@@ -24,6 +24,7 @@ type Meter struct {
 	Model                 *string `json:"model" db:"model"`
 	Comment               *string `json:"comment" db:"comment"`
 	ManualReadingRequired bool    `json:"manual_reading_required" db:"manual_reading_required"`
+	Broken                bool    `json:"broken" db:"broken"`
 	Coefficient           float64 `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
 	InstalledAt           Date    `json:"installed_at" db:"installed_at"`
 	RemovedAt             *Date   `json:"removed_at" db:"removed_at"`

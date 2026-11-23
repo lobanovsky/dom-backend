@@ -147,6 +147,7 @@ type MeterFilter struct {
 	ReadingPeriod         *Date
 	HasReading            *bool
 	ManualReadingRequired *bool
+	Broken                *bool
 	Q                     *string // подстрока в номере или названии счётчика
 	PremisesNumber        *string // точный номер помещения (без учёта регистра)
 }

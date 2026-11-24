@@ -14,6 +14,7 @@ import (
 )
 
 type MeterReadingImportStore interface {
+	ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error)
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportPulsarReadings(ctx context.Context, buildingID int64, readingDate model.Date, fileName string, parseErrors []model.ImportRowError, rows []model.PulsarReadingImportRow, confirmHighUsage bool) (model.MeterReadingImportResult, error)
@@ -24,6 +25,7 @@ type MeterReadingImportStore interface {
 type meterImportHandlers struct{ store MeterReadingImportStore }
 
 func (h meterImportHandlers) register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/meter-readings/apply-defaults", h.applyDefaults)
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-pulsar", h.importPulsar)
@@ -32,6 +34,24 @@ func (h meterImportHandlers) register(mux *http.ServeMux) {
 	// Старые URL оставлены для закладок и уже выпущенного frontend.
 	mux.HandleFunc("GET /api/v1/meter-readings/import-um31/history", h.importHistory)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31/history/{id}/undo", h.undoImport)
+}
+
+func (h meterImportHandlers) applyDefaults(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) != 0 {
+		writeError(w, http.StatusBadRequest, "unexpected query parameters")
+		return
+	}
+	var body struct{}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.store.ApplyDefaultReadings(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h meterImportHandlers) undoImport(w http.ResponseWriter, r *http.Request) {

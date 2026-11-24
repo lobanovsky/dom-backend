@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +27,101 @@ const readingSelect = `SELECT r.id, r.meter_id, r.reading_date, r.period, r.t1, 
 type MeterReadings struct{ pool *pgxpool.Pool }
 
 func NewMeterReadings(pool *pgxpool.Pool) *MeterReadings { return &MeterReadings{pool} }
+
+// ApplyDefaultReadings adds configured average monthly consumption to the latest earlier reading
+// (or to the meter's initial value) for active manual meters that have no reading this month.
+func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	var today, period model.Date
+	if err := tx.QueryRow(ctx, `SELECT (now() AT TIME ZONE 'Europe/Moscow')::date, date_trunc('month', now() AT TIME ZONE 'Europe/Moscow')::date`).Scan(&today, &period); err != nil {
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	var unconfigured int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM meters m
+		WHERE m.deleted_at IS NULL AND m.manual_reading_required
+		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
+		  AND NOT EXISTS (SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period=$1)
+		  AND (m.default_t1 IS NULL OR (m.tariffs >= 2 AND m.default_t2 IS NULL) OR (m.tariffs >= 3 AND m.default_t3 IS NULL))`, period, today).Scan(&unconfigured); err != nil {
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT m.id, m.tariffs,
+		       m.default_t1, m.default_t2, m.default_t3,
+		       COALESCE(prev.t1, m.initial_t1), COALESCE(prev.t2, m.initial_t2), COALESCE(prev.t3, m.initial_t3)
+		FROM meters m
+		LEFT JOIN LATERAL (
+			SELECT r.t1, r.t2, r.t3 FROM meter_readings r
+			WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period < $1
+			ORDER BY r.period DESC, r.reading_date DESC LIMIT 1
+		) prev ON true
+		WHERE m.deleted_at IS NULL AND m.manual_reading_required
+		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
+		  AND m.default_t1 IS NOT NULL
+		  AND (m.tariffs < 2 OR m.default_t2 IS NOT NULL)
+		  AND (m.tariffs < 3 OR m.default_t3 IS NOT NULL)
+		  AND NOT EXISTS (SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period=$1)
+		ORDER BY m.id FOR UPDATE OF m`, period, today)
+	if err != nil {
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	type candidate struct {
+		id       int64
+		tariffs  int
+		defaults [3]*float64
+		previous [3]float64
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.tariffs,
+			&c.defaults[0], &c.defaults[1], &c.defaults[2],
+			&c.previous[0], &c.previous[1], &c.previous[2]); err != nil {
+			rows.Close()
+			return model.MeterDefaultReadingsResult{}, mapErr(err)
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	rows.Close()
+	result := model.MeterDefaultReadingsResult{Skipped: len(candidates), Unconfigured: unconfigured}
+	for _, c := range candidates {
+		values := [3]float64{}
+		for i := 0; i < c.tariffs; i++ {
+			values[i] = c.previous[i] + *c.defaults[i]
+		}
+		comment := "Подставлено среднее значение по умолчанию"
+		in := model.MeterReading{MeterID: c.id, ReadingDate: today, Period: period, T1: values[0], Source: "manual", Comment: &comment}
+		if c.tariffs >= 2 {
+			in.T2 = &values[1]
+		}
+		if c.tariffs >= 3 {
+			in.T3 = &values[2]
+		}
+		in.SetDefaults()
+		if err := checkReading(ctx, tx, in, 0, false); err != nil {
+			if errors.Is(err, ErrInvalid) {
+				continue
+			}
+			return model.MeterDefaultReadingsResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO meter_readings (meter_id, reading_date, period, t1, t2, t3, source, comment) VALUES ($1,$2,$3,$4,$5,$6,'manual',$7)`, in.MeterID, in.ReadingDate, in.Period, in.T1, in.T2, in.T3, in.Comment); err != nil {
+			return model.MeterDefaultReadingsResult{}, mapErr(err)
+		}
+		result.Applied++
+		result.Skipped--
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.MeterDefaultReadingsResult{}, mapErr(err)
+	}
+	return result, nil
+}
 
 func (s *MeterReadings) List(ctx context.Context, f model.MeterReadingFilter, limit, offset int) ([]model.MeterReading, error) {
 	return collect[model.MeterReading](s.pool.Query(ctx,

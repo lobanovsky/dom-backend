@@ -15,24 +15,27 @@ var (
 // Активность, просроченная поверка, адрес и последнее показание вычисляются сервером и при записи игнорируются.
 type Meter struct {
 	Meta
-	BuildingID            *int64  `json:"building_id" db:"building_id"`
-	PremisesID            *int64  `json:"premises_id" db:"premises_id"`
-	Resource              string  `json:"resource" db:"resource"`
-	Tariffs               int     `json:"tariffs" db:"tariffs"` // у электросчётчика 1–3, у водяного всегда 1
-	SerialNumber          string  `json:"serial_number" db:"serial_number"`
-	Name                  *string `json:"name" db:"name"` // название для различения счётчиков (например, «ИТП»); не уникально
-	Model                 *string `json:"model" db:"model"`
-	Comment               *string `json:"comment" db:"comment"`
-	ManualReadingRequired bool    `json:"manual_reading_required" db:"manual_reading_required"`
-	Broken                bool    `json:"broken" db:"broken"`
-	Coefficient           float64 `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
-	InstalledAt           Date    `json:"installed_at" db:"installed_at"`
-	RemovedAt             *Date   `json:"removed_at" db:"removed_at"`
-	VerifiedAt            *Date   `json:"verified_at" db:"verified_at"`
-	NextVerificationAt    *Date   `json:"next_verification_at" db:"next_verification_at"`
-	InitialT1             float64 `json:"initial_t1" db:"initial_t1"`
-	InitialT2             float64 `json:"initial_t2" db:"initial_t2"`
-	InitialT3             float64 `json:"initial_t3" db:"initial_t3"`
+	BuildingID            *int64   `json:"building_id" db:"building_id"`
+	PremisesID            *int64   `json:"premises_id" db:"premises_id"`
+	Resource              string   `json:"resource" db:"resource"`
+	Tariffs               int      `json:"tariffs" db:"tariffs"` // у электросчётчика 1–3, у водяного всегда 1
+	SerialNumber          string   `json:"serial_number" db:"serial_number"`
+	Name                  *string  `json:"name" db:"name"` // название для различения счётчиков (например, «ИТП»); не уникально
+	Model                 *string  `json:"model" db:"model"`
+	Comment               *string  `json:"comment" db:"comment"`
+	ManualReadingRequired bool     `json:"manual_reading_required" db:"manual_reading_required"`
+	DefaultT1             *float64 `json:"default_t1" db:"default_t1"`
+	DefaultT2             *float64 `json:"default_t2" db:"default_t2"`
+	DefaultT3             *float64 `json:"default_t3" db:"default_t3"`
+	Broken                bool     `json:"broken" db:"broken"`
+	Coefficient           float64  `json:"coefficient" db:"coefficient"` // коэффициент трансформации: расход = разность показаний × коэффициент
+	InstalledAt           Date     `json:"installed_at" db:"installed_at"`
+	RemovedAt             *Date    `json:"removed_at" db:"removed_at"`
+	VerifiedAt            *Date    `json:"verified_at" db:"verified_at"`
+	NextVerificationAt    *Date    `json:"next_verification_at" db:"next_verification_at"`
+	InitialT1             float64  `json:"initial_t1" db:"initial_t1"`
+	InitialT2             float64  `json:"initial_t2" db:"initial_t2"`
+	InitialT3             float64  `json:"initial_t3" db:"initial_t3"`
 
 	Active              bool     `json:"active" db:"active"`
 	VerificationOverdue bool     `json:"verification_overdue" db:"verification_overdue"`
@@ -52,6 +55,12 @@ type Meter struct {
 	LastDeltaT3         *float64 `json:"last_delta_t3" db:"last_delta_t3"`
 }
 
+type MeterDefaultReadingsResult struct {
+	Applied      int `json:"applied"`
+	Skipped      int `json:"skipped"`
+	Unconfigured int `json:"unconfigured"`
+}
+
 // SetDefaults подставляет значения по умолчанию и обнуляет начальные показания неиспользуемых тарифов.
 func (m *Meter) SetDefaults() {
 	if m.Tariffs == 0 {
@@ -65,6 +74,12 @@ func (m *Meter) SetDefaults() {
 	}
 	if m.Tariffs < 3 {
 		m.InitialT3 = 0
+	}
+	if m.Tariffs < 2 {
+		m.DefaultT2 = nil
+	}
+	if m.Tariffs < 3 {
+		m.DefaultT3 = nil
 	}
 }
 
@@ -97,6 +112,17 @@ func (m Meter) Validate() error {
 	} else {
 		coefficient = decimals("coefficient", m.Coefficient, 3)
 	}
+	var defaults error
+	for _, item := range []struct {
+		name  string
+		value *float64
+	}{{"default_t1", m.DefaultT1}, {"default_t2", m.DefaultT2}, {"default_t3", m.DefaultT3}} {
+		if item.value != nil {
+			if err := reading(item.name, *item.value); err != nil {
+				defaults = firstErr(defaults, err)
+			}
+		}
+	}
 	return firstErr(
 		scope,
 		oneOf("resource", m.Resource, MeterResources),
@@ -104,6 +130,7 @@ func (m Meter) Validate() error {
 		required("serial_number", m.SerialNumber),
 		name,
 		coefficient,
+		defaults,
 		requiredDate("installed_at", m.InstalledAt),
 		removed,
 		next,

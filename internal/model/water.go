@@ -44,16 +44,27 @@ func (v WaterContractUpdate) Validate() error {
 	return nil
 }
 
+type WaterNegativeMeter struct {
+	ID       int64   `json:"id"`
+	Serial   string  `json:"serial"`
+	Resource string  `json:"resource"`
+	Location string  `json:"location"`
+	Previous float64 `json:"previous"`
+	Current  float64 `json:"current"`
+	Volume   float64 `json:"volume"`
+}
+
 type WaterBalance struct {
-	CommonNeedsWaterPrice  *float64 `json:"common_needs_water_price"`
-	CommonNeedsWaterAmount *float64 `json:"common_needs_water_amount"`
-	ApartmentHot           *float64 `json:"apartment_hot"`
-	ApartmentCold          *float64 `json:"apartment_cold"`
-	OfficeCold             *float64 `json:"office_cold"`
-	OfficeHot              *float64 `json:"office_hot"`
-	Inlet                  *float64 `json:"inlet"`
-	CommonMeters           *float64 `json:"common_meters"`
-	CommonNeeds            *float64 `json:"common_needs"`
+	NegativeMeters         []WaterNegativeMeter `json:"negative_meters"`
+	CommonNeedsWaterPrice  *float64             `json:"common_needs_water_price"`
+	CommonNeedsWaterAmount *float64             `json:"common_needs_water_amount"`
+	ApartmentHot           *float64             `json:"apartment_hot"`
+	ApartmentCold          *float64             `json:"apartment_cold"`
+	OfficeCold             *float64             `json:"office_cold"`
+	OfficeHot              *float64             `json:"office_hot"`
+	Inlet                  *float64             `json:"inlet"`
+	CommonMeters           *float64             `json:"common_meters"`
+	CommonNeeds            *float64             `json:"common_needs"`
 }
 
 type WaterResidentAmounts struct {

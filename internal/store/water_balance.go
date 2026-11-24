@@ -16,7 +16,10 @@ WITH inlet AS (
  SELECT id,building_id FROM meters
  WHERE resource='cold_water' AND serial_number=$2 AND deleted_at IS NULL AND building_id IS NOT NULL
 ), selected AS (
- SELECT m.*, CASE
+ SELECT m.*, CASE p.kind
+  WHEN 'apartment' THEN 'Квартира № ' || p.number
+  WHEN 'commercial' THEN 'Офис № ' || p.number
+  ELSE COALESCE(m.name,'Общедомовой счётчик') END AS location, CASE
   WHEN m.id IN (SELECT id FROM inlet) THEN 'inlet'
   WHEN p.id IS NULL THEN 'common'
   ELSE p.kind || '_' || m.resource END AS category
@@ -28,7 +31,9 @@ WITH inlet AS (
   OR (m.building_id IN (SELECT building_id FROM inlet) AND (m.id IN (SELECT id FROM inlet) OR m.serial_number IN ('864041','145558')))
  )
 ), volumes AS (
- SELECT m.category, CASE WHEN prev.t1 IS NOT NULL OR m.installed_at>=($1::date-interval '1 month')::date
+ SELECT m.category, m.id, m.serial_number AS serial, m.resource, m.location,
+ COALESCE(prev.t1,m.initial_t1) AS previous, r.t1 AS current,
+ CASE WHEN prev.t1 IS NOT NULL OR m.installed_at>=($1::date-interval '1 month')::date
  THEN (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient END AS volume
  FROM selected m
  LEFT JOIN LATERAL (
@@ -50,8 +55,10 @@ SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),
  (SELECT volume FROM totals WHERE category='commercial_cold_water'),
  (SELECT volume FROM totals WHERE category='commercial_hot_water'),
  (SELECT volume FROM totals WHERE category='inlet'),
- (SELECT volume FROM totals WHERE category='common')`, period, waterBalanceInletSerial).Scan(
-		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.Inlet, &result.CommonMeters,
+ (SELECT volume FROM totals WHERE category='common'),
+ (SELECT COALESCE(jsonb_agg(to_jsonb(v) - 'category' ORDER BY location, resource, serial), '[]'::jsonb)
+  FROM volumes v WHERE volume < 0)`, period, waterBalanceInletSerial).Scan(
+		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.Inlet, &result.CommonMeters, &result.NegativeMeters,
 	)
 	if err != nil {
 		return result, err

@@ -261,7 +261,8 @@ ORDER BY c.id,m.id`, period))
 		}
 	}
 	result.Total = math.Round(result.Total*100) / 100
-	return result, nil
+	result.Operations, err = s.electricityOperations(ctx, period)
+	return result, err
 }
 
 func calculateElectricityMeter(row electricityCalcRow) model.ElectricityMeterResult {

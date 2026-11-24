@@ -33,11 +33,25 @@ type ElectricityContractUpdate struct {
 	Prices     []ElectricityContractPrice `json:"prices"`
 }
 
+type ElectricityVolumeGroup struct {
+	Volume  [3]float64 `json:"volume"`
+	Missing [3]int     `json:"missing"`
+	Meters  int        `json:"meters"`
+}
+
+type ElectricityOperations struct {
+	House      ElectricityVolumeGroup `json:"house"`
+	Heating    ElectricityVolumeGroup `json:"heating"`
+	Apartments ElectricityVolumeGroup `json:"apartments"`
+	Billable   [3]*float64            `json:"billable"`
+}
+
 type ElectricityCalculation struct {
-	Period    string                      `json:"period"`
-	Complete  bool                        `json:"complete"`
-	Total     float64                     `json:"total"`
-	Contracts []ElectricityContractResult `json:"contracts"`
+	Operations ElectricityOperations       `json:"operations"`
+	Period     string                      `json:"period"`
+	Complete   bool                        `json:"complete"`
+	Total      float64                     `json:"total"`
+	Contracts  []ElectricityContractResult `json:"contracts"`
 }
 
 type ElectricityContractResult struct {

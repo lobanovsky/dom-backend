@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Electricity) electricityOperations(ctx context.Context, period model.Date) (model.ElectricityOperations, error) {
-	var result model.ElectricityOperations
+	result := model.ElectricityOperations{CommercialPremises: []model.CommercialElectricityVolume{}}
 	rows, err := s.pool.Query(ctx, `
 WITH common AS (
  SELECT id, building_id, serial_number FROM meters
@@ -30,11 +30,13 @@ WITH common AS (
  AND p.building_id IN (SELECT building_id FROM common)
  AND m.installed_at<($1::date+interval '1 month') AND (m.removed_at IS NULL OR m.removed_at >= $1)
 )
-SELECT selected.group_id, m.tariffs,
+SELECT selected.group_id, m.tariffs, COALESCE(p.id,0), COALESCE(p.number,''), COALESCE(b.name,b.address,''),
  (r.t1-COALESCE(prev.t1,m.initial_t1))*m.coefficient,
  (r.t2-COALESCE(prev.t2,m.initial_t2))*m.coefficient,
  (r.t3-COALESCE(prev.t3,m.initial_t3))*m.coefficient
 FROM selected JOIN meters m ON m.id=selected.id
+LEFT JOIN premises p ON p.id=m.premises_id
+LEFT JOIN buildings b ON b.id=p.building_id
 LEFT JOIN LATERAL (
  SELECT t1,t2,t3,reading_date FROM meter_readings
  WHERE meter_id=m.id AND deleted_at IS NULL AND period=$1
@@ -45,7 +47,8 @@ LEFT JOIN LATERAL (
  SELECT t1,t2,t3 FROM meter_readings
  WHERE meter_id=m.id AND deleted_at IS NULL AND reading_date<r.reading_date
  ORDER BY reading_date DESC,id DESC LIMIT 1
-) prev ON true`, period)
+) prev ON true
+ORDER BY b.address, substring(p.number from '\d+')::numeric, p.number, p.id, m.id`, period)
 	if err != nil {
 		return result, err
 	}
@@ -54,11 +57,28 @@ LEFT JOIN LATERAL (
 		&result.House, &result.Heating, &result.Apartments, &result.Parking,
 		&result.CommercialIndividual, &result.CommercialCommon,
 	}
+	byPremises := make(map[int64]int)
 	for rows.Next() {
 		var group, tariffs int
 		var values [3]*float64
-		if err := rows.Scan(&group, &tariffs, &values[0], &values[1], &values[2]); err != nil {
+		var premisesID int64
+		var number, building string
+		if err := rows.Scan(&group, &tariffs, &premisesID, &number, &building, &values[0], &values[1], &values[2]); err != nil {
 			return result, err
+		}
+		if group == 4 {
+			index, found := byPremises[premisesID]
+			if !found {
+				index = len(result.CommercialPremises)
+				byPremises[premisesID] = index
+				result.CommercialPremises = append(result.CommercialPremises, model.CommercialElectricityVolume{Number: number, Building: building})
+			}
+			item := &result.CommercialPremises[index]
+			if values[0] == nil {
+				item.Missing++
+			} else {
+				item.Volume += *values[0]
+			}
 		}
 		target := groups[group]
 		target.Meters++

@@ -44,7 +44,18 @@ func (v WaterContractUpdate) Validate() error {
 	return nil
 }
 
+type WaterBalance struct {
+	ApartmentHot  *float64 `json:"apartment_hot"`
+	ApartmentCold *float64 `json:"apartment_cold"`
+	OfficeCold    *float64 `json:"office_cold"`
+	OfficeHot     *float64 `json:"office_hot"`
+	Inlet         *float64 `json:"inlet"`
+	CommonMeters  *float64 `json:"common_meters"`
+	CommonNeeds   *float64 `json:"common_needs"`
+}
+
 type WaterCalculation struct {
+	Balance     *WaterBalance         `json:"balance"`
 	Period      string                `json:"period"`
 	Complete    bool                  `json:"complete"`
 	WaterAmount float64               `json:"water_amount"`

@@ -187,5 +187,7 @@ SELECT *,water_amount+sewer_amount amount FROM amounts ORDER BY contract_id,mete
 	result.WaterAmount = math.Round(result.WaterAmount*100) / 100
 	result.SewerAmount = math.Round(result.SewerAmount*100) / 100
 	result.Total = math.Round((result.WaterAmount+result.SewerAmount)*100) / 100
-	return result, nil
+	balance, err := s.waterBalance(ctx, period)
+	result.Balance = &balance
+	return result, err
 }

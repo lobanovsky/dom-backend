@@ -40,11 +40,13 @@ type ElectricityVolumeGroup struct {
 }
 
 type ElectricityOperations struct {
-	Parking    ElectricityVolumeGroup `json:"parking"`
-	House      ElectricityVolumeGroup `json:"house"`
-	Heating    ElectricityVolumeGroup `json:"heating"`
-	Apartments ElectricityVolumeGroup `json:"apartments"`
-	Billable   [3]*float64            `json:"billable"`
+	CommercialIndividual ElectricityVolumeGroup `json:"commercial_individual"`
+	CommercialCommon     ElectricityVolumeGroup `json:"commercial_common"`
+	Parking              ElectricityVolumeGroup `json:"parking"`
+	House                ElectricityVolumeGroup `json:"house"`
+	Heating              ElectricityVolumeGroup `json:"heating"`
+	Apartments           ElectricityVolumeGroup `json:"apartments"`
+	Billable             [3]*float64            `json:"billable"`
 }
 
 type ElectricityCalculation struct {

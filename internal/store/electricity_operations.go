@@ -21,8 +21,12 @@ WITH common AS (
  WHERE building_id IS NOT NULL AND deleted_at IS NULL AND resource='electricity'
  AND serial_number IN ('023260210667','023260210792')
  UNION ALL
- SELECT m.id, 2 FROM meters m JOIN premises p ON p.id=m.premises_id
- WHERE p.deleted_at IS NULL AND p.kind='apartment' AND m.deleted_at IS NULL AND m.resource='electricity'
+ SELECT id, 5 FROM meters
+ WHERE building_id IS NOT NULL AND deleted_at IS NULL AND resource='electricity'
+ AND serial_number IN ('023260084425','023260085002')
+ UNION ALL
+ SELECT m.id, CASE WHEN p.kind='apartment' THEN 2 ELSE 4 END FROM meters m JOIN premises p ON p.id=m.premises_id
+ WHERE p.deleted_at IS NULL AND p.kind IN ('apartment','commercial') AND m.deleted_at IS NULL AND m.resource='electricity'
  AND p.building_id IN (SELECT building_id FROM common)
  AND m.installed_at<($1::date+interval '1 month') AND (m.removed_at IS NULL OR m.removed_at >= $1)
 )
@@ -46,7 +50,10 @@ LEFT JOIN LATERAL (
 		return result, err
 	}
 	defer rows.Close()
-	groups := [4]*model.ElectricityVolumeGroup{&result.House, &result.Heating, &result.Apartments, &result.Parking}
+	groups := [...]*model.ElectricityVolumeGroup{
+		&result.House, &result.Heating, &result.Apartments, &result.Parking,
+		&result.CommercialIndividual, &result.CommercialCommon,
+	}
 	for rows.Next() {
 		var group, tariffs int
 		var values [3]*float64
@@ -56,7 +63,7 @@ LEFT JOIN LATERAL (
 		target := groups[group]
 		target.Meters++
 		for i := range values {
-			if i >= tariffs && group == 2 {
+			if i >= tariffs && (group == 2 || group == 4) {
 				continue
 			}
 			if values[i] == nil {

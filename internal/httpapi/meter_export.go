@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"dom-backend/internal/model"
 	"dom-backend/internal/xlsxexport"
@@ -52,13 +54,29 @@ func (h meterExportHandlers) export(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	data, err := xlsxexport.BuildSheets(sheets)
-	if err != nil {
+	var data bytes.Buffer
+	archive := zip.NewWriter(&data)
+	for _, sheet := range sheets {
+		workbook, err := xlsxexport.Build(sheet.Name, sheet.Columns, sheet.Rows)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		entry, err := archive.Create(fmt.Sprintf("%s-%s.xlsx", sheet.Name, period.Format("2006-01")))
+		if err == nil {
+			_, err = entry.Write(workbook)
+		}
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	if err := archive.Close(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="meter-readings-%s.xlsx"`, period.Format("2006-01")))
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	w.Write(data)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="meter-readings-%s.zip"`, period.Format("2006-01")))
+	w.Header().Set("Content-Length", strconv.Itoa(data.Len()))
+	_, _ = w.Write(data.Bytes())
 }

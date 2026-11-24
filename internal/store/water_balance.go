@@ -21,14 +21,13 @@ WITH inlet AS (
   WHEN 'commercial' THEN 'Офис № ' || p.number
   ELSE COALESCE(m.name,'Общедомовой счётчик') END AS location, CASE
   WHEN m.id IN (SELECT id FROM inlet) THEN 'inlet'
-  WHEN p.id IS NULL THEN 'common'
   ELSE p.kind || '_' || m.resource END AS category
  FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
  WHERE m.deleted_at IS NULL AND m.resource IN ('cold_water','hot_water')
  AND m.installed_at < ($1::date+interval '1 month') AND (m.removed_at IS NULL OR m.removed_at >= $1)
  AND (
   (p.deleted_at IS NULL AND p.kind IN ('apartment','commercial') AND p.building_id IN (SELECT building_id FROM inlet))
-  OR (m.building_id IN (SELECT building_id FROM inlet) AND (m.id IN (SELECT id FROM inlet) OR m.serial_number IN ('864041','145558')))
+  OR m.id IN (SELECT id FROM inlet)
  )
 ), volumes AS (
  SELECT m.category, m.id, m.serial_number AS serial, m.resource, m.location,
@@ -46,7 +45,7 @@ WITH inlet AS (
  ) prev ON true
 ), totals AS (
  SELECT category, CASE WHEN count(*)=count(volume) AND (category IN ('apartment_hot_water','apartment_cold_water') OR min(volume)>=0)
- AND (category NOT IN ('common','inlet') OR count(*)=CASE WHEN category='common' THEN 2 ELSE 1 END)
+ AND (category <> 'inlet' OR count(*)=1)
  THEN sum(CASE WHEN category IN ('apartment_hot_water','apartment_cold_water') THEN greatest(volume,0) ELSE volume END) END AS volume
  FROM volumes GROUP BY category
 )
@@ -55,18 +54,17 @@ SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),
  (SELECT volume FROM totals WHERE category='commercial_cold_water'),
  (SELECT volume FROM totals WHERE category='commercial_hot_water'),
  (SELECT volume FROM totals WHERE category='inlet'),
- (SELECT volume FROM totals WHERE category='common'),
  (SELECT COALESCE(jsonb_agg(to_jsonb(v) - 'category' ORDER BY location, resource, serial), '[]'::jsonb)
   FROM volumes v WHERE volume < 0)`, period, waterBalanceInletSerial).Scan(
-		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.Inlet, &result.CommonMeters, &result.NegativeMeters,
+		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.Inlet, &result.NegativeMeters,
 	)
 	if err != nil {
 		return result, err
 	}
 	if result.Inlet != nil && result.ApartmentHot != nil && result.ApartmentCold != nil &&
-		result.OfficeCold != nil && result.OfficeHot != nil && result.CommonMeters != nil {
+		result.OfficeCold != nil && result.OfficeHot != nil {
 		value := *result.Inlet - *result.ApartmentHot - *result.ApartmentCold -
-			*result.OfficeCold - *result.OfficeHot - *result.CommonMeters
+			*result.OfficeCold - *result.OfficeHot
 		value = math.Round(value*1000) / 1000
 		result.CommonNeeds = &value
 	}

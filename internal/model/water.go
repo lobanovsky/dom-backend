@@ -63,7 +63,6 @@ type WaterBalance struct {
 	OfficeCold             *float64             `json:"office_cold"`
 	OfficeHot              *float64             `json:"office_hot"`
 	Inlet                  *float64             `json:"inlet"`
-	CommonMeters           *float64             `json:"common_meters"`
 	CommonNeeds            *float64             `json:"common_needs"`
 }
 

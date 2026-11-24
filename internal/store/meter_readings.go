@@ -31,16 +31,21 @@ func NewMeterReadings(pool *pgxpool.Pool) *MeterReadings { return &MeterReadings
 // ApplyDefaultReadings adds configured average monthly consumption to the latest earlier reading
 // (or to the meter's initial value) for active manual meters that have no reading this month.
 func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error) {
-	return s.applyDefaultReadings(ctx, "m.manual_reading_required", false)
+	return s.applyDefaultReadings(ctx, "m.manual_reading_required", false, nil)
+}
+
+// ApplyMeterDefaultReading добавляет показание за текущий месяц одному счётчику.
+func (s *MeterReadings) ApplyMeterDefaultReading(ctx context.Context, id int64) (model.MeterDefaultReadingsResult, error) {
+	return s.applyDefaultReadings(ctx, "(m.manual_reading_required OR m.broken)", false, &id)
 }
 
 // ApplyBrokenDefaultReadings автоматически фиксирует значения неисправных счётчиков
 // начиная с 20-го числа московского месяца.
 func (s *MeterReadings) ApplyBrokenDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error) {
-	return s.applyDefaultReadings(ctx, "m.broken", true)
+	return s.applyDefaultReadings(ctx, "m.broken", true, nil)
 }
 
-func (s *MeterReadings) applyDefaultReadings(ctx context.Context, meterCondition string, afterDay20 bool) (model.MeterDefaultReadingsResult, error) {
+func (s *MeterReadings) applyDefaultReadings(ctx context.Context, meterCondition string, afterDay20 bool, meterID *int64) (model.MeterDefaultReadingsResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.MeterDefaultReadingsResult{}, mapErr(err)
@@ -58,12 +63,19 @@ func (s *MeterReadings) applyDefaultReadings(ctx context.Context, meterCondition
 			return model.MeterDefaultReadingsResult{}, mapErr(err)
 		}
 	}
+	if meterID != nil {
+		// Читаем историю после блокировки счётчика, чтобы учесть параллельную запись.
+		var lockedID int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM meters WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, meterID).Scan(&lockedID); err != nil {
+			return model.MeterDefaultReadingsResult{}, mapErr(err)
+		}
+	}
 	var unconfigured int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM meters m
-		WHERE m.deleted_at IS NULL AND `+meterCondition+`
+		WHERE m.deleted_at IS NULL AND ($3::bigint IS NULL OR m.id=$3) AND `+meterCondition+`
 		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
 		  AND NOT EXISTS (SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period=$1)
-		  AND (m.default_t1 IS NULL OR (m.tariffs >= 2 AND m.default_t2 IS NULL) OR (m.tariffs >= 3 AND m.default_t3 IS NULL))`, period, today).Scan(&unconfigured); err != nil {
+		  AND (m.default_t1 IS NULL OR (m.tariffs >= 2 AND m.default_t2 IS NULL) OR (m.tariffs >= 3 AND m.default_t3 IS NULL))`, period, today, meterID).Scan(&unconfigured); err != nil {
 		return model.MeterDefaultReadingsResult{}, mapErr(err)
 	}
 	rows, err := tx.Query(ctx, `
@@ -76,13 +88,13 @@ func (s *MeterReadings) applyDefaultReadings(ctx context.Context, meterCondition
 			WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period < $1
 			ORDER BY r.period DESC, r.reading_date DESC LIMIT 1
 		) prev ON true
-		WHERE m.deleted_at IS NULL AND `+meterCondition+`
+		WHERE m.deleted_at IS NULL AND ($3::bigint IS NULL OR m.id=$3) AND `+meterCondition+`
 		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
 		  AND m.default_t1 IS NOT NULL
 		  AND (m.tariffs < 2 OR m.default_t2 IS NOT NULL)
 		  AND (m.tariffs < 3 OR m.default_t3 IS NOT NULL)
 		  AND NOT EXISTS (SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period=$1)
-		ORDER BY m.id FOR UPDATE OF m`, period, today)
+		ORDER BY m.id FOR UPDATE OF m`, period, today, meterID)
 	if err != nil {
 		return model.MeterDefaultReadingsResult{}, mapErr(err)
 	}

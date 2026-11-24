@@ -14,6 +14,7 @@ import (
 )
 
 type MeterReadingImportStore interface {
+	ApplyMeterDefaultReading(context.Context, int64) (model.MeterDefaultReadingsResult, error)
 	ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error)
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
@@ -26,6 +27,7 @@ type meterImportHandlers struct{ store MeterReadingImportStore }
 
 func (h meterImportHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/meter-readings/apply-defaults", h.applyDefaults)
+	mux.HandleFunc("POST /api/v1/meters/{id}/apply-defaults", h.applyMeterDefaults)
 	mux.HandleFunc("POST /api/v1/meter-readings/import", h.importFile)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-um31", h.importUM31)
 	mux.HandleFunc("POST /api/v1/meter-readings/import-pulsar", h.importPulsar)
@@ -46,6 +48,23 @@ func (h meterImportHandlers) applyDefaults(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	result, err := h.store.ApplyDefaultReadings(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h meterImportHandlers) applyMeterDefaults(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct{}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	result, err := h.store.ApplyMeterDefaultReading(r.Context(), id)
 	if err != nil {
 		writeErr(w, err)
 		return

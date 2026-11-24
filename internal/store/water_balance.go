@@ -7,12 +7,14 @@ import (
 	"dom-backend/internal/model"
 )
 
+const waterBalanceInletSerial = "146301425"
+
 func (s *Water) waterBalance(ctx context.Context, period model.Date) (model.WaterBalance, error) {
 	var result model.WaterBalance
 	err := s.pool.QueryRow(ctx, `
 WITH inlet AS (
  SELECT id,building_id FROM meters
- WHERE resource='cold_water' AND serial_number='146301425' AND deleted_at IS NULL AND building_id IS NOT NULL
+ WHERE resource='cold_water' AND serial_number=$2 AND deleted_at IS NULL AND building_id IS NOT NULL
 ), selected AS (
  SELECT m.*, CASE
   WHEN m.id IN (SELECT id FROM inlet) THEN 'inlet'
@@ -48,7 +50,7 @@ SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),
  (SELECT volume FROM totals WHERE category='commercial_cold_water'),
  (SELECT volume FROM totals WHERE category='commercial_hot_water'),
  (SELECT volume FROM totals WHERE category='inlet'),
- (SELECT volume FROM totals WHERE category='common')`, period).Scan(
+ (SELECT volume FROM totals WHERE category='common')`, period, waterBalanceInletSerial).Scan(
 		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.Inlet, &result.CommonMeters,
 	)
 	if err != nil {

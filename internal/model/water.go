@@ -45,13 +45,15 @@ func (v WaterContractUpdate) Validate() error {
 }
 
 type WaterBalance struct {
-	ApartmentHot  *float64 `json:"apartment_hot"`
-	ApartmentCold *float64 `json:"apartment_cold"`
-	OfficeCold    *float64 `json:"office_cold"`
-	OfficeHot     *float64 `json:"office_hot"`
-	Inlet         *float64 `json:"inlet"`
-	CommonMeters  *float64 `json:"common_meters"`
-	CommonNeeds   *float64 `json:"common_needs"`
+	CommonNeedsWaterPrice  *float64 `json:"common_needs_water_price"`
+	CommonNeedsWaterAmount *float64 `json:"common_needs_water_amount"`
+	ApartmentHot           *float64 `json:"apartment_hot"`
+	ApartmentCold          *float64 `json:"apartment_cold"`
+	OfficeCold             *float64 `json:"office_cold"`
+	OfficeHot              *float64 `json:"office_hot"`
+	Inlet                  *float64 `json:"inlet"`
+	CommonMeters           *float64 `json:"common_meters"`
+	CommonNeeds            *float64 `json:"common_needs"`
 }
 
 type WaterCalculation struct {

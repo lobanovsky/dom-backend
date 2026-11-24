@@ -39,7 +39,7 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 	}
 
 	meters := make(map[string]um31Meter)
-	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.resource, m.tariffs, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,'')
+	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.resource, m.tariffs, m.coefficient, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,'')
 		FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
 		WHERE m.resource IN ('cold_water','hot_water') AND m.deleted_at IS NULL
 		  AND (m.building_id=$1 OR p.building_id=$1)
@@ -51,7 +51,7 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 	for rowsDB.Next() {
 		var m um31Meter
 		var resource string
-		if err := rowsDB.Scan(&m.ID, &m.Serial, &resource, &m.Tariffs, &m.PremisesID, &m.PremisesNumber, &m.Kind); err != nil {
+		if err := rowsDB.Scan(&m.ID, &m.Serial, &resource, &m.Tariffs, &m.Coefficient, &m.PremisesID, &m.PremisesNumber, &m.Kind); err != nil {
 			rowsDB.Close()
 			return result, mapErr(err)
 		}

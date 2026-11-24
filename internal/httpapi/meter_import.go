@@ -16,7 +16,7 @@ import (
 type MeterReadingImportStore interface {
 	ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error)
 	ImportReadings(ctx context.Context, buildingID int64, resource string, date, period model.Date, installedAt *model.Date, rows []model.MeterReadingImportRow) (model.MeterReadingImportResult, error)
-	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
+	ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error)
 	ImportPulsarReadings(ctx context.Context, buildingID int64, readingDate model.Date, fileName string, parseErrors []model.ImportRowError, rows []model.PulsarReadingImportRow, confirmHighUsage bool) (model.MeterReadingImportResult, error)
 	ListMeterImportHistory(ctx context.Context, buildingID *int64, limit int) ([]model.MeterImportHistoryItem, error)
 	UndoMeterImport(ctx context.Context, importRunID int64) (int, error)
@@ -100,23 +100,9 @@ func (h meterImportHandlers) importUM31(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "В файле нет корректных строк с показаниями счётчиков.", "rows": rowErrs})
 		return
 	}
-	confirmHighUsage, err := strconv.ParseBool(r.FormValue("confirm_high_usage"))
-	if err != nil && strings.TrimSpace(r.FormValue("confirm_high_usage")) != "" {
-		writeError(w, http.StatusUnprocessableEntity, "confirm_high_usage: must be true or false")
-		return
-	}
-	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, confirmHighUsage, filepath.Base(header.Filename), rowErrs, rows)
+	res, err := h.store.ImportUM31Readings(r.Context(), buildingID, averageMonths, filepath.Base(header.Filename), rowErrs, rows)
 	if err != nil {
 		writeErr(w, err)
-		return
-	}
-	if res.RequiresHighUsageConfirmation {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":                   "unusually high meter usage requires confirmation",
-			"high_usage_warnings":     res.HighUsageWarnings,
-			"lower_reading_estimates": res.LowerReadingEstimates,
-			"issues":                  res.Issues,
-		})
 		return
 	}
 	writeJSON(w, http.StatusCreated, res)

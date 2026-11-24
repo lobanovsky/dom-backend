@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,12 +18,14 @@ import (
 const um31EstimateCommentPrefix = "Расчётное показание по среднемесячному расходу"
 
 type um31Meter struct {
-	ID             int64
-	Serial         string
-	Tariffs        int
-	PremisesID     *int64
-	PremisesNumber string
-	Kind           string
+	ID                    int64
+	Serial                string
+	Tariffs               int
+	Coefficient           float64
+	PremisesID            *int64
+	PremisesNumber        string
+	Kind                  string
+	ManualReadingRequired bool
 }
 
 type um31History struct {
@@ -30,9 +33,9 @@ type um31History struct {
 	Values [3]*float64
 }
 
-// ImportUM31Readings загружает фактические показания УМ-31RTU и добавляет расчётные показания
-// по среднему месячному расходу для действующих электросчётчиков без строки в файле.
-func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, confirmHighUsage bool, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error) {
+// ImportUM31Readings загружает показания УМ-31RTU и добавляет расчётные показания
+// по среднему расходу для действующих автоматических электросчётчиков без строки в файле.
+func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64, averageMonths int, fileName string, parseErrors []model.ImportRowError, rows []model.UM31ReadingImportRow) (model.MeterReadingImportResult, error) {
 	var result model.MeterReadingImportResult
 	if averageMonths < 1 || averageMonths > 12 || len(rows) == 0 {
 		return result, invalid("average_months: must be between 1 and 12")
@@ -59,9 +62,6 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 		return result, mapErr(err)
 	}
 	fileMeters := make(map[string]model.UM31ReadingImportRow, len(rows))
-	for _, parseErr := range parseErrors {
-		result.Issues = append(result.Issues, model.MeterImportIssue{Row: parseErr.Row, Kind: "invalid_row", Message: parseErr.Error})
-	}
 	for _, row := range rows {
 		if row.ReadingDate.FirstOfMonth() != period {
 			return result, rowErr(row.Row, invalid("all readings must be from one month"))
@@ -73,7 +73,7 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 	}
 
 	meters := make(map[string]um31Meter)
-	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.tariffs, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,'')
+	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.tariffs, m.coefficient, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,''), m.manual_reading_required
 		FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
 		WHERE m.resource='electricity' AND m.deleted_at IS NULL
 		  AND (m.building_id=$1 OR p.building_id=$1)
@@ -84,7 +84,7 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 	}
 	for rowsDB.Next() {
 		var m um31Meter
-		if err := rowsDB.Scan(&m.ID, &m.Serial, &m.Tariffs, &m.PremisesID, &m.PremisesNumber, &m.Kind); err != nil {
+		if err := rowsDB.Scan(&m.ID, &m.Serial, &m.Tariffs, &m.Coefficient, &m.PremisesID, &m.PremisesNumber, &m.Kind, &m.ManualReadingRequired); err != nil {
 			rowsDB.Close()
 			return result, mapErr(err)
 		}
@@ -95,6 +95,15 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 		return result, mapErr(err)
 	}
 	rowsDB.Close()
+	for _, parseErr := range parseErrors {
+		if parseErr.Serial != "" {
+			meter, exists := meters[parseErr.Serial]
+			if !exists || meter.ManualReadingRequired {
+				continue
+			}
+		}
+		result.Issues = append(result.Issues, model.MeterImportIssue{Row: parseErr.Row, Serial: parseErr.Serial, Kind: "invalid_row", Message: parseErr.Error})
+	}
 
 	for _, row := range rows {
 		m, ok := meters[row.Serial]
@@ -104,7 +113,6 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 				FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
 				WHERE m.resource='electricity' AND m.serial_number=$1 AND m.deleted_at IS NULL`, row.Serial, buildingID).Scan(&belongsToBuilding)
 			if err == pgx.ErrNoRows {
-				result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "unknown_meter", Message: "Счётчик с таким серийным номером не найден; строка пропущена."})
 				continue
 			}
 			if err != nil {
@@ -115,6 +123,9 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 				continue
 			}
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "meter_not_active", Message: "Счётчик не действует; строка пропущена."})
+			continue
+		}
+		if m.ManualReadingRequired {
 			continue
 		}
 		in, err := um31Input(m, row)
@@ -131,20 +142,20 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "already_imported", Message: "За этот месяц показание уже было внесено; строка пропущена."})
 			continue
 		}
-		belowPrevious, previousReading, err := isBelowPreviousActual(ctx, tx, m, in)
+		belowPrevious, previousReading, err := isBelowPreviousReading(ctx, tx, m, in)
 		if err != nil {
 			return result, mapErr(err)
 		}
 		if belowPrevious {
-			estimated, ok, err := estimateUM31Reading(ctx, tx, m, row.ReadingDate, period, averageMonths)
-			if err != nil {
-				return result, mapErr(err)
+			comment := "Показание УМ-31RTU ниже системного; сохранено системное показание, расход за месяц принят равным 0."
+			applied := model.MeterReading{MeterID: m.ID, ReadingDate: row.ReadingDate, Period: period, T1: previousReading[0], Source: "import", Comment: &comment}
+			if m.Tariffs >= 2 {
+				applied.T2 = &previousReading[1]
 			}
-			if !ok {
-				result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_without_history", Message: "Показание ниже предыдущего фактического, но истории недостаточно для среднего; строка пропущена."})
-				continue
+			if m.Tariffs >= 3 {
+				applied.T3 = &previousReading[2]
 			}
-			if err := insertUM31Reading(ctx, tx, estimated, importRunID); err != nil {
+			if err := insertUM31Reading(ctx, tx, applied, importRunID); err != nil {
 				return result, rowErr(row.Row, err)
 			}
 			result.Readings++
@@ -158,16 +169,27 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 			}
 			result.LowerReadingEstimates = append(result.LowerReadingEstimates, model.LowerReadingEstimate{
 				MeterSerial: m.Serial, Premises: m.PremisesNumber, PreviousReading: previousTotal,
-				FileReading: readingTotal(in, m.Tariffs), AppliedReading: readingTotal(estimated, m.Tariffs),
+				FileReading: readingTotal(in, m.Tariffs), AppliedReading: readingTotal(applied, m.Tariffs),
 			})
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_estimated", Message: fmt.Sprintf("Показание файла ниже предыдущего фактического; вместо него записано расчётное %.3f кВт·ч.", readingTotal(estimated, m.Tariffs))})
+			apartment := ""
+			if m.PremisesNumber != "" {
+				apartment = "Квартира " + m.PremisesNumber + ", "
+			}
+			comparison := um31ReadingComparison(previousReading, in, m.Tariffs)
+			message := fmt.Sprintf("%s%s; записано системное показание, расход за месяц принят равным 0.", apartment, comparison)
+			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_zero_consumption", Message: message})
 			continue
 		}
 		if warning, ok, err := highUsageWarning(ctx, tx, m, in, "кВт·ч"); err != nil {
 			return result, mapErr(err)
 		} else if ok {
 			result.HighUsageWarnings = append(result.HighUsageWarnings, warning)
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "high_usage", Message: fmt.Sprintf("Расход %.3f кВт·ч больше чем втрое превышает прошлый месяц (%.3f кВт·ч).", warning.CurrentUsage, warning.PreviousUsage)})
+			apartment := ""
+			if warning.Premises != "" {
+				apartment = "Квартира " + warning.Premises + ", "
+			}
+			message := fmt.Sprintf("%sпотребление %.3f → %.3f кВт·ч (больше чем в 3 раза за предыдущий месяц); показание записано.", apartment, warning.PreviousUsage, warning.CurrentUsage)
+			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "high_usage", Message: message})
 		}
 		if err := insertUM31Reading(ctx, tx, in, importRunID); err != nil {
 			if errors.Is(err, ErrInvalid) {
@@ -180,6 +202,9 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 	}
 
 	for _, m := range meters {
+		if m.ManualReadingRequired {
+			continue
+		}
 		if _, found := fileMeters[m.Serial]; found {
 			continue
 		}
@@ -214,10 +239,6 @@ func (s *MeterReadings) ImportUM31Readings(ctx context.Context, buildingID int64
 		result.EstimatedReadings++
 	}
 	sort.Strings(result.SkippedNoHistoryMeters)
-	if len(result.HighUsageWarnings) > 0 && !confirmHighUsage {
-		result.RequiresHighUsageConfirmation = true
-		return result, nil // отложенный rollback: предупреждения показываем до фиксации показаний
-	}
 	if err := saveMeterImportResult(ctx, tx, importRunID, result); err != nil {
 		return result, err
 	}
@@ -355,12 +376,11 @@ func um31Input(m um31Meter, row model.UM31ReadingImportRow) (model.MeterReading,
 	return model.MeterReading{MeterID: m.ID, ReadingDate: row.ReadingDate, Period: row.ReadingDate.FirstOfMonth(), T1: *values[0], T2: values[1], T3: values[2], Source: "import"}, nil
 }
 
-func isBelowPreviousActual(ctx context.Context, tx pgx.Tx, m um31Meter, in model.MeterReading) (bool, [3]float64, error) {
+func isBelowPreviousReading(ctx context.Context, tx pgx.Tx, m um31Meter, in model.MeterReading) (bool, [3]float64, error) {
 	var previous [3]*float64
 	err := tx.QueryRow(ctx, `SELECT t1,t2,t3 FROM meter_readings
 		WHERE meter_id=$1 AND deleted_at IS NULL AND reading_date<$2
-		  AND NOT (source='import' AND COALESCE(comment,'') LIKE $3)
-		ORDER BY reading_date DESC LIMIT 1`, m.ID, in.ReadingDate, um31EstimateCommentPrefix+"%").Scan(&previous[0], &previous[1], &previous[2])
+		ORDER BY reading_date DESC LIMIT 1`, m.ID, in.ReadingDate).Scan(&previous[0], &previous[1], &previous[2])
 	if err == pgx.ErrNoRows {
 		if err := tx.QueryRow(ctx, `SELECT initial_t1,initial_t2,initial_t3 FROM meters WHERE id=$1`, m.ID).Scan(&previous[0], &previous[1], &previous[2]); err != nil {
 			return false, [3]float64{}, err
@@ -394,6 +414,18 @@ func readingTotal(r model.MeterReading, tariffs int) float64 {
 	return total
 }
 
+func um31ReadingComparison(system [3]float64, file model.MeterReading, tariffs int) string {
+	fileValues := [3]*float64{&file.T1, file.T2, file.T3}
+	parts := make([]string, 0, tariffs)
+	for i := 0; i < tariffs; i++ {
+		if model.Milli(system[i]) <= model.Milli(*fileValues[i]) {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("Т%d в системе %.3f > в файле %.3f", i+1, system[i], *fileValues[i]))
+	}
+	return strings.Join(parts, "; ")
+}
+
 func highUsageWarning(ctx context.Context, tx pgx.Tx, m um31Meter, in model.MeterReading, unit string) (model.HighUsageWarning, bool, error) {
 	previousMonth := model.Date{Time: in.Period.Time.AddDate(0, -1, 0)}
 	monthBefore := model.Date{Time: in.Period.Time.AddDate(0, -2, 0)}
@@ -424,8 +456,8 @@ func highUsageWarning(ctx context.Context, tx pgx.Tx, m um31Meter, in model.Mete
 		if currentDelta < 0 || previousDelta < 0 {
 			return model.HighUsageWarning{}, false, nil
 		}
-		currentUsage += currentDelta
-		previousUsage += previousDelta
+		currentUsage += currentDelta * m.Coefficient
+		previousUsage += previousDelta * m.Coefficient
 	}
 	if currentUsage <= previousUsage*3 && !(previousUsage == 0 && currentUsage > 0) {
 		return model.HighUsageWarning{}, false, nil

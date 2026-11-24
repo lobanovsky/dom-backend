@@ -102,7 +102,7 @@ func ParseUM31(r io.ReadSeeker) ([]model.UM31ReadingImportRow, []model.ImportRow
 			}
 		}
 		if rowErr != nil {
-			errs = append(errs, model.ImportRowError{Row: i + 1, Error: rowErr.Error()})
+			errs = append(errs, model.ImportRowError{Row: i + 1, Serial: row.Serial, Error: rowErr.Error()})
 			continue
 		}
 		seen[row.Serial] = row.Row

@@ -13,13 +13,12 @@ import (
 )
 
 var (
-	pulsarDateRE      = regexp.MustCompile(`(?i)(?:на\s+)?(\d{1,2}\.\d{1,2}\.\d{4})\s*$`)
-	pulsarSerialRE    = regexp.MustCompile(`№\s*([0-9]+)`)
-	pulsarApartmentRE = regexp.MustCompile(`(?i)^квартира\s*№?\s*([0-9]+(?:[-/][0-9]+)?)$`)
+	pulsarDateRE   = regexp.MustCompile(`(?i)(?:на\s+)?(\d{1,2}\.\d{1,2}\.\d{4})\s*$`)
+	pulsarSerialRE = regexp.MustCompile(`№\s*([0-9]+)`)
 )
 
 // ParsePulsar читает выгрузку Пульсара: дата находится в строке отчёта,
-// ниже таблица с колонками «Объект», «Счётчик», «Показание».
+// ниже таблица с колонками «Счётчик», «Показание». Колонка объекта игнорируется.
 func ParsePulsar(r io.Reader) (model.Date, []model.PulsarReadingImportRow, []model.ImportRowError, error) {
 	f, err := excelize.OpenReader(r)
 	if err != nil {
@@ -53,18 +52,13 @@ func ParsePulsar(r io.Reader) (model.Date, []model.PulsarReadingImportRow, []mod
 			}
 			return strings.Join(strings.Fields(cells[index]), " ")
 		}
-		premises, err := parsePulsarPremises(cell(columns[0]))
-		if err != nil {
-			issues = append(issues, model.ImportRowError{Row: i + 1, Error: err.Error()})
-			continue
-		}
-		resource, serial, err := parsePulsarMeter(cell(columns[1]))
+		resource, serial, err := parsePulsarMeter(cell(columns[0]))
 		if err != nil {
 			issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Error: err.Error()})
 			continue
 		}
-		row := model.PulsarReadingImportRow{Row: i + 1, Premises: premises, Resource: resource, Serial: serial}
-		readingText := cell(columns[2])
+		row := model.PulsarReadingImportRow{Row: i + 1, Resource: resource, Serial: serial}
+		readingText := cell(columns[1])
 		if readingText != "" {
 			value, err := parseReading(readingText)
 			if err != nil {
@@ -91,10 +85,10 @@ func ParsePulsar(r io.Reader) (model.Date, []model.PulsarReadingImportRow, []mod
 	return date, rows, issues, nil
 }
 
-func pulsarHeader(data [][]string) (model.Date, int, [3]int, error) {
+func pulsarHeader(data [][]string) (model.Date, int, [2]int, error) {
 	var date model.Date
 	headerRow := -1
-	columns := [3]int{-1, -1, -1}
+	columns := [2]int{-1, -1}
 	for i, row := range data {
 		for _, cell := range row {
 			if match := pulsarDateRE.FindStringSubmatch(strings.TrimSpace(cell)); len(match) == 2 {
@@ -104,18 +98,16 @@ func pulsarHeader(data [][]string) (model.Date, int, [3]int, error) {
 				}
 			}
 		}
-		found := [3]int{-1, -1, -1}
+		found := [2]int{-1, -1}
 		for col, cell := range row {
 			switch strings.ToLower(strings.TrimSpace(cell)) {
-			case "объект":
-				found[0] = col
 			case "счётчик", "счетчик":
-				found[1] = col
+				found[0] = col
 			case "показание":
-				found[2] = col
+				found[1] = col
 			}
 		}
-		if found[0] >= 0 && found[1] >= 0 && found[2] >= 0 {
+		if found[0] >= 0 && found[1] >= 0 {
 			headerRow, columns = i, found
 			break
 		}
@@ -124,20 +116,9 @@ func pulsarHeader(data [][]string) (model.Date, int, [3]int, error) {
 		return model.Date{}, 0, columns, fmt.Errorf("В заголовке отчёта не найдена дата в формате ДД.ММ.ГГГГ.")
 	}
 	if headerRow < 0 {
-		return model.Date{}, 0, columns, fmt.Errorf("В файле не найдена строка заголовков «Объект», «Счётчик», «Показание».")
+		return model.Date{}, 0, columns, fmt.Errorf("В файле не найдена строка заголовков «Счётчик», «Показание».")
 	}
 	return date, headerRow, columns, nil
-}
-
-func parsePulsarPremises(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if match := pulsarApartmentRE.FindStringSubmatch(value); len(match) == 2 {
-		return match[1], nil
-	}
-	if value != "" && strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
-		return value, nil
-	}
-	return "", fmt.Errorf("Не удалось определить номер квартиры в колонке «Объект».")
 }
 
 func parsePulsarMeter(value string) (string, string, error) {

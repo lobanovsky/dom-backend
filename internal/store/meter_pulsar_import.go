@@ -13,7 +13,7 @@ import (
 
 // ImportPulsarReadings импортирует переданные Пульсаром показания ХВС и ГВС.
 // Пустые показания и проблемные строки сохраняются в журнале, но не блокируют остальные.
-func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int64, readingDate model.Date, fileName string, parseErrors []model.ImportRowError, rows []model.PulsarReadingImportRow, confirmHighUsage bool) (model.MeterReadingImportResult, error) {
+func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int64, readingDate model.Date, fileName string, parseErrors []model.ImportRowError, rows []model.PulsarReadingImportRow, _ bool) (model.MeterReadingImportResult, error) {
 	var result model.MeterReadingImportResult
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -86,10 +86,6 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "meter_not_active", Message: "Счётчик выведен из эксплуатации или ещё не введён; строка пропущена."})
 			continue
 		}
-		if m.PremisesNumber != row.Premises {
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "premises_mismatch", Message: fmt.Sprintf("В файле указана квартира %s, а счётчик привязан к квартире %s; строка пропущена.", row.Premises, m.PremisesNumber)})
-			continue
-		}
 		if row.Reading == nil {
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "missing_reading", Message: "Пульсар не передал показание; строка пропущена."})
 			continue
@@ -107,11 +103,15 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 		if err != nil {
 			return result, mapErr(err)
 		}
-		if model.Milli(*row.Reading) < model.Milli(previous) {
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading", Message: fmt.Sprintf("Показание %.3f м³ ниже предыдущего %.3f м³; строка пропущена для проверки.", *row.Reading, previous)})
-			continue
+		value := *row.Reading
+		var comment *string
+		if model.Milli(value) < model.Milli(previous) {
+			value = previous
+			text := "Пульсар: значение ниже предыдущего; принято предыдущее показание, расход за период принят равным 0."
+			comment = &text
+			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_zero_consumption", Message: fmt.Sprintf("Показание %.3f м³ ниже предыдущего %.3f м³; записано предыдущее значение, расход 0.", *row.Reading, previous)})
 		}
-		in := model.MeterReading{MeterID: m.ID, ReadingDate: readingDate, Period: period, T1: *row.Reading, Source: "import"}
+		in := model.MeterReading{MeterID: m.ID, ReadingDate: readingDate, Period: period, T1: value, Source: "import", Comment: comment}
 		if err := insertPulsarReading(ctx, tx, in, importRunID); err != nil {
 			if errors.Is(err, ErrInvalid) {
 				result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "invalid_reading", Message: err.Error()})
@@ -128,10 +128,6 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 		result.Readings++
 	}
 
-	if len(result.HighUsageWarnings) > 0 && !confirmHighUsage {
-		result.RequiresHighUsageConfirmation = true
-		return result, nil
-	}
 	if err := saveMeterImportResult(ctx, tx, importRunID, result); err != nil {
 		return result, err
 	}
@@ -160,8 +156,8 @@ func insertPulsarReading(ctx context.Context, tx pgx.Tx, in model.MeterReading, 
 	if err := checkReading(ctx, tx, in, 0, false); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO meter_readings (meter_id, reading_date, period, t1, source, import_run_id)
-		VALUES ($1,$2,$3,$4,$5,$6)`, in.MeterID, in.ReadingDate, in.Period, in.T1, in.Source, importRunID)
+	_, err := tx.Exec(ctx, `INSERT INTO meter_readings (meter_id, reading_date, period, t1, source, comment, import_run_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, in.MeterID, in.ReadingDate, in.Period, in.T1, in.Source, in.Comment, importRunID)
 	return err
 }
 

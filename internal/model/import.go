@@ -116,7 +116,6 @@ type UM31ReadingImportRow struct {
 // PulsarReadingImportRow — показание воды из выгрузки Пульсара.
 type PulsarReadingImportRow struct {
 	Row      int
-	Premises string
 	Resource string
 	Serial   string
 	Reading  *float64

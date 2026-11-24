@@ -17,9 +17,10 @@ type ImportRow struct {
 
 // ImportRowError — ошибка в конкретной строке файла.
 type ImportRowError struct {
-	Row    int    `json:"row"`
-	Serial string `json:"serial,omitempty"`
-	Error  string `json:"error"`
+	Resource string `json:"-"`
+	Row      int    `json:"row"`
+	Serial   string `json:"serial,omitempty"`
+	Error    string `json:"error"`
 }
 
 // ImportResult — что создано при импорте.

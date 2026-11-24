@@ -34,12 +34,9 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 		VALUES ($1,'water','pulsar',$2,$3,'{}'::jsonb,'[]'::jsonb) RETURNING id`, buildingID, fileName, period).Scan(&importRunID); err != nil {
 		return result, mapErr(err)
 	}
-	for _, rowErr := range parseErrors {
-		result.Issues = append(result.Issues, model.MeterImportIssue{Row: rowErr.Row, Serial: rowErr.Serial, Kind: "invalid_row", Message: rowErr.Error})
-	}
 
 	meters := make(map[string]um31Meter)
-	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.resource, m.tariffs, m.coefficient, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,'')
+	rowsDB, err := tx.Query(ctx, `SELECT m.id, m.serial_number, m.resource, m.tariffs, m.coefficient, m.manual_reading_required, m.premises_id, COALESCE(p.number,''), COALESCE(p.kind,'')
 		FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
 		WHERE m.resource IN ('cold_water','hot_water') AND m.deleted_at IS NULL
 		  AND (m.building_id=$1 OR p.building_id=$1)
@@ -51,7 +48,7 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 	for rowsDB.Next() {
 		var m um31Meter
 		var resource string
-		if err := rowsDB.Scan(&m.ID, &m.Serial, &resource, &m.Tariffs, &m.Coefficient, &m.PremisesID, &m.PremisesNumber, &m.Kind); err != nil {
+		if err := rowsDB.Scan(&m.ID, &m.Serial, &resource, &m.Tariffs, &m.Coefficient, &m.ManualReadingRequired, &m.PremisesID, &m.PremisesNumber, &m.Kind); err != nil {
 			rowsDB.Close()
 			return result, mapErr(err)
 		}
@@ -63,6 +60,15 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 		return result, mapErr(err)
 	}
 	rowsDB.Close()
+	for _, rowErr := range parseErrors {
+		if rowErr.Resource != "" {
+			meter, found := meters[pulsarMeterKey(rowErr.Resource, rowErr.Serial)]
+			if !found || meter.ManualReadingRequired {
+				continue
+			}
+		}
+		result.Issues = append(result.Issues, model.MeterImportIssue{Row: rowErr.Row, Serial: rowErr.Serial, Kind: "invalid_row", Message: rowErr.Error})
+	}
 
 	for _, row := range rows {
 		key := pulsarMeterKey(row.Resource, row.Serial)
@@ -73,7 +79,6 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 				FROM meters m LEFT JOIN premises p ON p.id=m.premises_id
 				WHERE m.resource=$1 AND m.serial_number=$2 AND m.deleted_at IS NULL`, row.Resource, row.Serial, buildingID).Scan(&belongs)
 			if err == pgx.ErrNoRows {
-				result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "unknown_meter", Message: "Счётчик с таким серийным номером не найден; строка пропущена."})
 				continue
 			}
 			if err != nil {
@@ -84,6 +89,9 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 				continue
 			}
 			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "meter_not_active", Message: "Счётчик выведен из эксплуатации или ещё не введён; строка пропущена."})
+			continue
+		}
+		if m.ManualReadingRequired {
 			continue
 		}
 		if row.Reading == nil {
@@ -104,12 +112,16 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 			return result, mapErr(err)
 		}
 		value := *row.Reading
+		location := ""
+		if m.PremisesNumber != "" {
+			location = "Помещение " + m.PremisesNumber + ": "
+		}
 		var comment *string
 		if model.Milli(value) < model.Milli(previous) {
 			value = previous
 			text := "Пульсар: значение ниже предыдущего; принято предыдущее показание, расход за период принят равным 0."
 			comment = &text
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_zero_consumption", Message: fmt.Sprintf("Показание %.3f м³ ниже предыдущего %.3f м³; записано предыдущее значение, расход 0.", *row.Reading, previous)})
+			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "lower_reading_zero_consumption", Message: fmt.Sprintf("%sв системе %.3f > в файле %.3f м³; записано системное показание, расход 0.", location, previous, *row.Reading)})
 		}
 		in := model.MeterReading{MeterID: m.ID, ReadingDate: readingDate, Period: period, T1: value, Source: "import", Comment: comment}
 		if err := insertPulsarReading(ctx, tx, in, importRunID); err != nil {
@@ -123,7 +135,7 @@ func (s *MeterReadings) ImportPulsarReadings(ctx context.Context, buildingID int
 			return result, mapErr(err)
 		} else if ok {
 			result.HighUsageWarnings = append(result.HighUsageWarnings, warning)
-			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "high_usage", Message: fmt.Sprintf("Расход %.3f м³ больше чем втрое превышает прошлый месяц (%.3f м³).", warning.CurrentUsage, warning.PreviousUsage)})
+			result.Issues = append(result.Issues, model.MeterImportIssue{Row: row.Row, Serial: row.Serial, Kind: "high_usage", Message: fmt.Sprintf("%sрасход %.3f → %.3f м³; превышение более чем втрое, показание записано.", location, warning.PreviousUsage, warning.CurrentUsage)})
 		}
 		result.Readings++
 	}

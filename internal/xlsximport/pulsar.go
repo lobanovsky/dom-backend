@@ -52,7 +52,11 @@ func ParsePulsar(r io.Reader) (model.Date, []model.PulsarReadingImportRow, []mod
 			}
 			return strings.Join(strings.Fields(cells[index]), " ")
 		}
-		resource, serial, err := parsePulsarMeter(cell(columns[0]))
+		meterText := cell(columns[0])
+		if meterText == "" {
+			continue
+		}
+		resource, serial, err := parsePulsarMeter(meterText)
 		if err != nil {
 			issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Error: err.Error()})
 			continue
@@ -66,14 +70,14 @@ func ParsePulsar(r io.Reader) (model.Date, []model.PulsarReadingImportRow, []mod
 				if strings.Contains(err.Error(), "must not be negative") {
 					message = "Показание не может быть отрицательным."
 				}
-				issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Error: message})
+				issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Resource: resource, Error: message})
 				continue
 			}
 			row.Reading = &value
 		}
 		key := resource + ":" + serial
 		if previous, ok := seen[key]; ok {
-			issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Error: fmt.Sprintf("Повторный счётчик: уже указан в строке %d; строка пропущена.", previous)})
+			issues = append(issues, model.ImportRowError{Row: i + 1, Serial: serial, Resource: resource, Error: fmt.Sprintf("Повторный счётчик: уже указан в строке %d; строка пропущена.", previous)})
 			continue
 		}
 		seen[key] = row.Row

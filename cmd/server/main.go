@@ -86,6 +86,46 @@ func run(log *slog.Logger) error {
 	ownerships := store.NewOwnerships(pool)
 	accounts := store.NewAccounts(pool)
 	meterReadings := store.NewMeterReadings(pool)
+	go func() {
+		moscow := time.FixedZone("Europe/Moscow", 3*60*60)
+		lastRunDate := ""
+		lastUnconfiguredLogDate := ""
+		apply := func() {
+			now := time.Now().In(moscow)
+			date := now.Format("2006-01-02")
+			if now.Day() < 20 || date == lastRunDate {
+				return
+			}
+			work, cancel := context.WithTimeout(ctx, time.Minute)
+			result, err := meterReadings.ApplyBrokenDefaultReadings(work)
+			cancel()
+			if err != nil {
+				log.Error("расчётные показания сломанных счётчиков: ошибка", "err", err)
+				return
+			}
+			if result.Unconfigured == 0 {
+				lastRunDate = date
+			}
+			if result.Applied > 0 {
+				log.Info("расчётные показания сломанных счётчиков", "added", result.Applied, "skipped", result.Skipped)
+			}
+			if result.Unconfigured > 0 && lastUnconfiguredLogDate != date {
+				log.Info("для сломанных счётчиков не задан средний расход", "count", result.Unconfigured)
+				lastUnconfiguredLogDate = date
+			}
+		}
+		apply()
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				apply()
+			}
+		}
+	}()
 	accountServices := store.NewAccountServices(pool)
 	tariffs := store.NewTariffs(pool)
 	paymentRules := store.NewPaymentRules(pool)

@@ -404,9 +404,13 @@ func (s *Residents) SubmitReading(ctx context.Context, a model.ResidentAccount, 
 func writeResidentReading(ctx context.Context, tx pgx.Tx, a model.ResidentAccount, in model.MeterReading, expected *int64, premises *int64, shared *model.ResidentWindow) (int64, error) {
 	// Сначала счётчик, как в административном хранилище: единый порядок блокировок.
 	var meter, building int64
-	err := tx.QueryRow(ctx, `SELECT m.id,p.building_id FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND ($3::bigint IS NULL OR p.id=$3) AND m.deleted_at IS NULL AND `+residentMeterActive+` AND `+residentOwns+` FOR UPDATE OF m`, a.PersonID, in.MeterID, premises).Scan(&meter, &building)
+	var broken bool
+	err := tx.QueryRow(ctx, `SELECT m.id,p.building_id,m.broken FROM meters m JOIN premises p ON p.id=m.premises_id WHERE m.id=$2 AND ($3::bigint IS NULL OR p.id=$3) AND m.deleted_at IS NULL AND `+residentMeterActive+` AND `+residentOwns+` FOR UPDATE OF m`, a.PersonID, in.MeterID, premises).Scan(&meter, &building, &broken)
 	if err != nil {
 		return 0, mapErr(err)
+	}
+	if broken {
+		return 0, &Error{ErrConflict, "broken meter cannot accept resident readings; contact management"}
 	}
 	var window model.ResidentWindow
 	if shared != nil {

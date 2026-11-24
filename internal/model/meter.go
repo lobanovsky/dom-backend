@@ -123,6 +123,17 @@ func (m Meter) Validate() error {
 			}
 		}
 	}
+	if m.Broken {
+		if m.DefaultT1 == nil {
+			defaults = firstErr(defaults, invalid("default_t1", "is required for a broken meter"))
+		}
+		if m.Tariffs >= 2 && m.DefaultT2 == nil {
+			defaults = firstErr(defaults, invalid("default_t2", "is required for a broken meter"))
+		}
+		if m.Tariffs >= 3 && m.DefaultT3 == nil {
+			defaults = firstErr(defaults, invalid("default_t3", "is required for a broken meter"))
+		}
+	}
 	return firstErr(
 		scope,
 		oneOf("resource", m.Resource, MeterResources),

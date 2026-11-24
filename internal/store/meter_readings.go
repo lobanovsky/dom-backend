@@ -31,6 +31,16 @@ func NewMeterReadings(pool *pgxpool.Pool) *MeterReadings { return &MeterReadings
 // ApplyDefaultReadings adds configured average monthly consumption to the latest earlier reading
 // (or to the meter's initial value) for active manual meters that have no reading this month.
 func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error) {
+	return s.applyDefaultReadings(ctx, "m.manual_reading_required", false)
+}
+
+// ApplyBrokenDefaultReadings автоматически фиксирует значения неисправных счётчиков
+// начиная с 20-го числа московского месяца.
+func (s *MeterReadings) ApplyBrokenDefaultReadings(ctx context.Context) (model.MeterDefaultReadingsResult, error) {
+	return s.applyDefaultReadings(ctx, "m.broken", true)
+}
+
+func (s *MeterReadings) applyDefaultReadings(ctx context.Context, meterCondition string, afterDay20 bool) (model.MeterDefaultReadingsResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return model.MeterDefaultReadingsResult{}, mapErr(err)
@@ -40,9 +50,17 @@ func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDe
 	if err := tx.QueryRow(ctx, `SELECT (now() AT TIME ZONE 'Europe/Moscow')::date, date_trunc('month', now() AT TIME ZONE 'Europe/Moscow')::date`).Scan(&today, &period); err != nil {
 		return model.MeterDefaultReadingsResult{}, mapErr(err)
 	}
+	if afterDay20 && today.Day() < 20 {
+		return model.MeterDefaultReadingsResult{}, nil
+	}
+	if afterDay20 {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('broken-meter-defaults:' || $1::date::text, 0))`, period); err != nil {
+			return model.MeterDefaultReadingsResult{}, mapErr(err)
+		}
+	}
 	var unconfigured int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM meters m
-		WHERE m.deleted_at IS NULL AND m.manual_reading_required
+		WHERE m.deleted_at IS NULL AND `+meterCondition+`
 		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
 		  AND NOT EXISTS (SELECT 1 FROM meter_readings r WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period=$1)
 		  AND (m.default_t1 IS NULL OR (m.tariffs >= 2 AND m.default_t2 IS NULL) OR (m.tariffs >= 3 AND m.default_t3 IS NULL))`, period, today).Scan(&unconfigured); err != nil {
@@ -58,7 +76,7 @@ func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDe
 			WHERE r.meter_id=m.id AND r.deleted_at IS NULL AND r.period < $1
 			ORDER BY r.period DESC, r.reading_date DESC LIMIT 1
 		) prev ON true
-		WHERE m.deleted_at IS NULL AND m.manual_reading_required
+		WHERE m.deleted_at IS NULL AND `+meterCondition+`
 		  AND m.installed_at <= $2 AND (m.removed_at IS NULL OR m.removed_at >= $2)
 		  AND m.default_t1 IS NOT NULL
 		  AND (m.tariffs < 2 OR m.default_t2 IS NOT NULL)
@@ -97,6 +115,9 @@ func (s *MeterReadings) ApplyDefaultReadings(ctx context.Context) (model.MeterDe
 			values[i] = c.previous[i] + *c.defaults[i]
 		}
 		comment := "Подставлено среднее значение по умолчанию"
+		if afterDay20 {
+			comment = "Расчётное показание неисправного счётчика по среднему расходу по умолчанию"
+		}
 		in := model.MeterReading{MeterID: c.id, ReadingDate: today, Period: period, T1: values[0], Source: "manual", Comment: &comment}
 		if c.tariffs >= 2 {
 			in.T2 = &values[1]

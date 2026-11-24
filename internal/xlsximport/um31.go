@@ -62,11 +62,14 @@ func ParseUM31(r io.ReadSeeker) ([]model.UM31ReadingImportRow, []model.ImportRow
 		// Выгрузка УМ-31RTU может содержать строки без привязанного счётчика.
 		// Они не являются показаниями для импорта и не должны блокировать файл.
 		if row.Serial == "" {
-			errs = append(errs, model.ImportRowError{Row: i + 1, Error: "Не указан серийный номер счётчика; строка пропущена."})
 			continue
 		}
-		rowErr := error(nil)
-		row.ReadingDate, rowErr = parseUM31Date(cell(indexes[1]))
+		dateText := cell(indexes[1])
+		if dateText == "" {
+			continue
+		}
+		var rowErr error
+		row.ReadingDate, rowErr = parseUM31Date(dateText)
 		for t := range row.T {
 			if rowErr != nil {
 				break
@@ -129,7 +132,7 @@ func normalizeSerial(s string) string {
 }
 
 func parseUM31Date(s string) (model.Date, error) {
-	for _, layout := range []string{"02.01.2006 15:04", "02.01.2006 15:04:05", "2.1.2006 15:04", "2.1.2006 15:04:05"} {
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", time.RFC3339, "02.01.2006 15:04", "02.01.2006 15:04:05", "2.1.2006 15:04", "2.1.2006 15:04:05"} {
 		if t, err := time.ParseInLocation(layout, s, um31Location); err == nil {
 			return model.Date{Time: t}, nil
 		}

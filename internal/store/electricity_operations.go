@@ -17,6 +17,10 @@ WITH common AS (
 ), selected AS (
  SELECT id, CASE WHEN serial_number IN ('023260208838','023260210672') THEN 0 ELSE 1 END AS group_id FROM common
  UNION ALL
+ SELECT id, 3 FROM meters
+ WHERE building_id IS NOT NULL AND deleted_at IS NULL AND resource='electricity'
+ AND serial_number IN ('023260210667','023260210792')
+ UNION ALL
  SELECT m.id, 2 FROM meters m JOIN premises p ON p.id=m.premises_id
  WHERE p.deleted_at IS NULL AND p.kind='apartment' AND m.deleted_at IS NULL AND m.resource='electricity'
  AND p.building_id IN (SELECT building_id FROM common)
@@ -42,7 +46,7 @@ LEFT JOIN LATERAL (
 		return result, err
 	}
 	defer rows.Close()
-	groups := [3]*model.ElectricityVolumeGroup{&result.House, &result.Heating, &result.Apartments}
+	groups := [4]*model.ElectricityVolumeGroup{&result.House, &result.Heating, &result.Apartments, &result.Parking}
 	for rows.Next() {
 		var group, tariffs int
 		var values [3]*float64

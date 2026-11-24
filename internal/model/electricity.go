@@ -40,6 +40,7 @@ type ElectricityVolumeGroup struct {
 }
 
 type ElectricityOperations struct {
+	Parking    ElectricityVolumeGroup `json:"parking"`
 	House      ElectricityVolumeGroup `json:"house"`
 	Heating    ElectricityVolumeGroup `json:"heating"`
 	Apartments ElectricityVolumeGroup `json:"apartments"`

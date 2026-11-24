@@ -45,9 +45,9 @@ WITH inlet AS (
   ORDER BY period DESC,reading_date DESC,id DESC LIMIT 1
  ) prev ON true
 ), totals AS (
- SELECT category, CASE WHEN count(*)=count(volume) AND min(volume)>=0
+ SELECT category, CASE WHEN count(*)=count(volume) AND (category IN ('apartment_hot_water','apartment_cold_water') OR min(volume)>=0)
  AND (category NOT IN ('common','inlet') OR count(*)=CASE WHEN category='common' THEN 2 ELSE 1 END)
- THEN sum(volume) END AS volume
+ THEN sum(CASE WHEN category IN ('apartment_hot_water','apartment_cold_water') THEN greatest(volume,0) ELSE volume END) END AS volume
  FROM volumes GROUP BY category
 )
 SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),

@@ -198,6 +198,10 @@ SELECT *,water_amount+sewer_amount amount FROM amounts ORDER BY contract_id,mete
 			break
 		}
 	}
+	if err != nil {
+		return result, err
+	}
 	result.Balance = &balance
+	result.ResidentCharges, err = s.waterResidentCharges(ctx, period, balance)
 	return result, err
 }

@@ -56,14 +56,31 @@ type WaterBalance struct {
 	CommonNeeds            *float64 `json:"common_needs"`
 }
 
+type WaterResidentAmounts struct {
+	Cold  *float64 `json:"cold"`
+	Hot   *float64 `json:"hot"`
+	Sewer *float64 `json:"sewer"`
+	Total *float64 `json:"total"`
+}
+
+type WaterResidentCharges struct {
+	ColdPrice  *float64             `json:"cold_price"`
+	HotPrice   *float64             `json:"hot_price"`
+	SewerPrice *float64             `json:"sewer_price"`
+	Apartments WaterResidentAmounts `json:"apartments"`
+	Offices    WaterResidentAmounts `json:"offices"`
+	Total      *float64             `json:"total"`
+}
+
 type WaterCalculation struct {
-	Balance     *WaterBalance         `json:"balance"`
-	Period      string                `json:"period"`
-	Complete    bool                  `json:"complete"`
-	WaterAmount float64               `json:"water_amount"`
-	SewerAmount float64               `json:"sewer_amount"`
-	Total       float64               `json:"total"`
-	Contracts   []WaterContractResult `json:"contracts"`
+	ResidentCharges WaterResidentCharges  `json:"resident_charges"`
+	Balance         *WaterBalance         `json:"balance"`
+	Period          string                `json:"period"`
+	Complete        bool                  `json:"complete"`
+	WaterAmount     float64               `json:"water_amount"`
+	SewerAmount     float64               `json:"sewer_amount"`
+	Total           float64               `json:"total"`
+	Contracts       []WaterContractResult `json:"contracts"`
 }
 
 type WaterContractResult struct {

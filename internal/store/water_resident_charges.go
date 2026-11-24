@@ -9,13 +9,11 @@ import (
 
 func (s *Water) waterResidentCharges(ctx context.Context, period model.Date, balance model.WaterBalance) (model.WaterResidentCharges, error) {
 	var result model.WaterResidentCharges
-	var hotBase, hotHeating *float64
 	err := s.pool.QueryRow(ctx, `
 WITH prices AS (
  SELECT CASE
   WHEN meter_resource='cold_water' AND lower(name)='хвс' THEN 'cold'
   WHEN meter_resource='hot_water' AND lower(name)='хвс для гвс' THEN 'hot_base'
-  WHEN meter_resource='hot_water' AND lower(name) IN ('подогев хвс для гвс','подогрев хвс для гвс') THEN 'hot_heating'
   WHEN calc_method='sum_volumes' AND lower(name)='водоотведение' THEN 'sewer'
  END AS kind, service_unit_price_on(id,$1) AS price
  FROM services
@@ -29,16 +27,11 @@ WITH prices AS (
 )
 SELECT (SELECT price FROM unique_prices WHERE kind='cold'),
  (SELECT price FROM unique_prices WHERE kind='hot_base'),
- (SELECT price FROM unique_prices WHERE kind='hot_heating'),
  (SELECT price FROM unique_prices WHERE kind='sewer')`, period, waterBalanceInletSerial).Scan(
-		&result.ColdPrice, &hotBase, &hotHeating, &result.SewerPrice,
+		&result.ColdPrice, &result.HotPrice, &result.SewerPrice,
 	)
 	if err != nil {
 		return result, err
-	}
-	if hotBase != nil && hotHeating != nil {
-		price := *hotBase + *hotHeating
-		result.HotPrice = &price
 	}
 	charges := func(cold, hot *float64) model.WaterResidentAmounts {
 		var out model.WaterResidentAmounts

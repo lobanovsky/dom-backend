@@ -42,8 +42,7 @@ func (h meterImportHandlers) applyDefaults(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body struct{}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	result, err := h.store.ApplyDefaultReadings(r.Context())

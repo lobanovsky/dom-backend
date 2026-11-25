@@ -192,5 +192,9 @@ SELECT *,water_amount+sewer_amount amount FROM amounts ORDER BY contract_id,mete
 		return result, err
 	}
 	result.ResidentCharges, err = s.waterResidentCharges(ctx, period, result.Volumes)
+	if err != nil {
+		return result, err
+	}
+	err = s.pool.QueryRow(ctx, `SELECT (SELECT sent_at FROM hot_water_report_sends WHERE period=$1)`, period).Scan(&result.HotWaterReportSentAt)
 	return result, err
 }

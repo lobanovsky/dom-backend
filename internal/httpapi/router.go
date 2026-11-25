@@ -1,18 +1,21 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"dom-backend/internal/auth"
 	"dom-backend/internal/model"
 )
 
 type Deps struct {
-	Residents       ResidentStore
-	Gate            GateStore
-	ResidentOptions ResidentOptions
-	Auth            *auth.Auth
-	Users           UserStore
+	SendHotWaterReport func(context.Context, time.Time, []byte) error
+	Residents          ResidentStore
+	Gate               GateStore
+	ResidentOptions    ResidentOptions
+	Auth               *auth.Auth
+	Users              UserStore
 
 	Organizations  OrganizationStore
 	Buildings      BuildingStore
@@ -86,7 +89,7 @@ func NewRouter(d Deps) http.Handler {
 		api.HandleFunc("GET /api/v1/meter-readings/export", meterExportHandlers{d.MeterReadingExport}.export)
 	}
 	if d.Water != nil {
-		waterHandlers{d.Water}.register(api)
+		waterHandlers{s: d.Water, sendReport: d.SendHotWaterReport}.register(api)
 	}
 	if d.Electricity != nil {
 		electricityHandlers{d.Electricity}.register(api)

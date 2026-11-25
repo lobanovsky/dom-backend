@@ -189,6 +189,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var sendHotWaterReport func(context.Context, time.Time, []byte) error
+	if residentConfig.Enabled() {
+		sendHotWaterReport = residentConfig.SendHotWaterReport
+	}
 	residents := store.NewResidents(pool)
 	if residentConfig.Enabled() {
 		go func() {
@@ -233,6 +237,7 @@ func run(log *slog.Logger) error {
 			MeterReadingExport:   meterReadings,
 			Electricity:          store.NewElectricity(pool),
 			Water:                store.NewWater(pool),
+			SendHotWaterReport:   sendHotWaterReport,
 			AccountServices:      accountServices,
 			AccountServiceBulk:   accountServices,
 			Services:             store.NewServices(pool),

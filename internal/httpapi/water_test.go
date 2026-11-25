@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"dom-backend/internal/model"
 )
@@ -32,7 +33,7 @@ func (f *fakeWater) CalculateWater(_ context.Context, p model.Date) (model.Water
 func TestWaterHandlers(t *testing.T) {
 	f := &fakeWater{}
 	mux := http.NewServeMux()
-	waterHandlers{f}.register(mux)
+	waterHandlers{s: f}.register(mux)
 	for _, path := range []string{"/api/v1/water-contracts/calculation", "/api/v1/water-contracts/calculation?period=2026-13", "/api/v1/water-contracts/calculation?period=2026-11&x=1"} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
@@ -60,7 +61,7 @@ func (f *fakeWater) ArchiveWaterContract(context.Context, int64) error { return 
 func TestWaterWriteValidation(t *testing.T) {
 	f := &fakeWater{}
 	mux := http.NewServeMux()
-	waterHandlers{f}.register(mux)
+	waterHandlers{s: f}.register(mux)
 	for _, body := range []string{`{}`, `{"name":"Дом","water_tariff_id":1,"sewer_tariff_id":2,"meter_ids":[3,3]}`, `{"name":"Дом","water_tariff_id":1,"sewer_tariff_id":2,"meter_ids":[3],"prices":[]}`} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("PUT", "/api/v1/water-contracts/1", strings.NewReader(body)))
@@ -73,4 +74,8 @@ func TestWaterWriteValidation(t *testing.T) {
 	if w.Code != 200 || f.contractID != 7 || f.update.WaterTariffID != 1 || f.update.SewerTariffID != 2 {
 		t.Fatalf("update: %d %+v", w.Code, f)
 	}
+}
+
+func (f *fakeWater) SendHotWaterReport(ctx context.Context, _ model.Date, send func(context.Context) error) (time.Time, error) {
+	return time.Now(), send(ctx)
 }

@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 import "strings"
 
 // WaterContract — договор Мосводоканала; оба тарифа берутся из справочника.
@@ -68,14 +70,15 @@ type WaterResidentCharges struct {
 }
 
 type WaterCalculation struct {
-	Volumes         WaterVolumes          `json:"-"`
-	ResidentCharges WaterResidentCharges  `json:"resident_charges"`
-	Period          string                `json:"period"`
-	Complete        bool                  `json:"complete"`
-	WaterAmount     float64               `json:"water_amount"`
-	SewerAmount     float64               `json:"sewer_amount"`
-	Total           float64               `json:"total"`
-	Contracts       []WaterContractResult `json:"contracts"`
+	HotWaterReportSentAt *time.Time            `json:"hot_water_report_sent_at"`
+	Volumes              WaterVolumes          `json:"-"`
+	ResidentCharges      WaterResidentCharges  `json:"resident_charges"`
+	Period               string                `json:"period"`
+	Complete             bool                  `json:"complete"`
+	WaterAmount          float64               `json:"water_amount"`
+	SewerAmount          float64               `json:"sewer_amount"`
+	Total                float64               `json:"total"`
+	Contracts            []WaterContractResult `json:"contracts"`
 }
 
 type WaterContractResult struct {

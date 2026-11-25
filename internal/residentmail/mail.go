@@ -51,6 +51,43 @@ func Load() (Config, error) {
 }
 func (c Config) Enabled() bool { return c.Addr != "" }
 func (c Config) Send(ctx context.Context, to, link, firstName, middleName string) error {
+	subject := base64.StdEncoding.EncodeToString([]byte(`Личный кабинет ТСН "МР17дом1"`))
+	greeting := strings.TrimSpace(firstName + " " + middleName)
+	if greeting == "" {
+		greeting = "собственник"
+	}
+	headers := []string{
+		"From: " + c.From,
+		"To: " + to,
+		"Subject: =?UTF-8?B?" + subject + "?=",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: 8bit",
+	}
+	body := []string{
+		"Здравствуйте, " + greeting + "!",
+		"",
+		"Вам доступен личный кабинет собственника ТСН «МР17дом1».",
+		"",
+		"В личном кабинете можно:",
+		"— управлять доступом во двор и паркинг;",
+		"— передавать показания счётчиков.",
+		"Функционал кабинета будет расширяться.",
+		"",
+		"Задайте пароль по ссылке:",
+		link,
+		"",
+		"Пользуйтесь кабинетом — мы создали его для вашего удобства.",
+		"",
+		"С уважением,",
+		"Правление ТСН «МР17ДОМ1»",
+		"Наш сайт http://mr17dom1.ru",
+	}
+	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + strings.Join(body, "\r\n") + "\r\n"
+	return c.sendMessage(ctx, []string{to}, []byte(msg))
+}
+
+func (c Config) sendMessage(ctx context.Context, recipients []string, msg []byte) error {
 	host, _, err := net.SplitHostPort(c.Addr)
 	if err != nil {
 		return err
@@ -95,58 +132,22 @@ func (c Config) Send(ctx context.Context, to, link, firstName, middleName string
 	if err = client.Mail(c.From); err != nil {
 		return fmt.Errorf("SMTP envelope sender: %w", err)
 	}
-	if err = client.Rcpt(to); err != nil {
-		return fmt.Errorf("SMTP resident recipient: %w", err)
-	}
-	// Скрытая копия передаётся SMTP-серверу отдельным получателем; Bcc-заголовка в письме нет.
-	if err = client.Rcpt(auditBCC); err != nil {
-		return fmt.Errorf("SMTP audit BCC recipient: %w", err)
+	for _, recipient := range append(append([]string(nil), recipients...), auditBCC) {
+		if err = client.Rcpt(recipient); err != nil {
+			return fmt.Errorf("SMTP recipient: %w", err)
+		}
 	}
 	w, err := client.Data()
 	if err != nil {
 		return fmt.Errorf("SMTP begin message: %w", err)
 	}
-	subject := base64.StdEncoding.EncodeToString([]byte(`Личный кабинет ТСН "МР17дом1"`))
-	greeting := strings.TrimSpace(firstName + " " + middleName)
-	if greeting == "" {
-		greeting = "собственник"
-	}
-	headers := []string{
-		"From: " + c.From,
-		"To: " + to,
-		"Subject: =?UTF-8?B?" + subject + "?=",
-		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=UTF-8",
-		"Content-Transfer-Encoding: 8bit",
-	}
-	body := []string{
-		"Здравствуйте, " + greeting + "!",
-		"",
-		"Вам доступен личный кабинет собственника ТСН «МР17дом1».",
-		"",
-		"В личном кабинете можно:",
-		"— управлять доступом во двор и паркинг;",
-		"— передавать показания счётчиков.",
-		"Функционал кабинета будет расширяться.",
-		"",
-		"Задайте пароль по ссылке:",
-		link,
-		"",
-		"Пользуйтесь кабинетом — мы создали его для вашего удобства.",
-		"",
-		"С уважением,",
-		"Правление ТСН «МР17ДОМ1»",
-		"Наш сайт http://mr17dom1.ru",
-	}
-	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + strings.Join(body, "\r\n") + "\r\n"
-	if _, err = w.Write([]byte(msg)); err != nil {
+	if _, err = w.Write(msg); err != nil {
 		return fmt.Errorf("SMTP write message: %w", err)
 	}
 	if err = w.Close(); err != nil {
 		return fmt.Errorf("SMTP server rejected message data: %w", err)
 	}
-	if err = client.Quit(); err != nil {
-		return fmt.Errorf("SMTP close session: %w", err)
-	}
+	// После подтверждения DATA письмо принято, даже если соединение оборвалось на QUIT.
+	_ = client.Quit()
 	return nil
 }

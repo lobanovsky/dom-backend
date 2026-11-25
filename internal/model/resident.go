@@ -18,6 +18,22 @@ type ResidentProperty struct {
 	ShareDen int    `json:"share_den" db:"share_den"`
 }
 
+// ResidentDebtSummary — задолженность по действующим объектам собственника на дату последнего импорта.
+type ResidentDebtSummary struct {
+	Period *Date          `json:"period"`
+	Total  float64        `json:"total"`
+	Items  []ResidentDebt `json:"items"`
+}
+
+type ResidentDebt struct {
+	Address      string  `json:"address" db:"address"`
+	PremisesKind string  `json:"premises_kind" db:"premises_kind"`
+	PremisesNo   string  `json:"premises_number" db:"premises_number"`
+	Purpose      string  `json:"purpose" db:"purpose"`
+	AccountNo    string  `json:"account_number" db:"account_number"`
+	Debt         float64 `json:"debt" db:"debt"`
+}
+
 type ResidentWindow struct {
 	Enabled     bool  `json:"enabled" db:"enabled"`
 	ServerDate  Date  `json:"server_date" db:"-"`

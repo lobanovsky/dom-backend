@@ -32,6 +32,7 @@ type ResidentStore interface {
 	ChangePassword(context.Context, int64, string, string) error
 	Profile(context.Context, int64) (model.Person, error)
 	Properties(context.Context, int64) ([]model.ResidentProperty, error)
+	Debts(context.Context, int64) (model.ResidentDebtSummary, error)
 	Meters(context.Context, int64) ([]model.Meter, error)
 	Windows(context.Context, int64) ([]model.ResidentWindow, error)
 	Readings(context.Context, model.ResidentAccount, int64, int, int) ([]model.ResidentReading, error)
@@ -104,6 +105,7 @@ func (h *residentHandlers) register(mux, admin *http.ServeMux) {
 	}
 	private.HandleFunc("GET /api/v1/resident/me", h.me)
 	private.HandleFunc("GET /api/v1/resident/properties", h.properties)
+	private.HandleFunc("GET /api/v1/resident/debts", h.debts)
 	private.HandleFunc("GET /api/v1/resident/meters", h.meters)
 	private.HandleFunc("GET /api/v1/resident/windows", h.windows)
 	private.HandleFunc("GET /api/v1/resident/meters/{id}/readings", h.readings)
@@ -349,6 +351,14 @@ func (h *residentHandlers) me(w http.ResponseWriter, r *http.Request) {
 }
 func (h *residentHandlers) properties(w http.ResponseWriter, r *http.Request) {
 	v, e := h.store.Properties(r.Context(), residentAccount(r).PersonID)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+func (h *residentHandlers) debts(w http.ResponseWriter, r *http.Request) {
+	v, e := h.store.Debts(r.Context(), residentAccount(r).PersonID)
 	if e != nil {
 		writeErr(w, e)
 		return

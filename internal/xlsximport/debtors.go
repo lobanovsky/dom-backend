@@ -48,6 +48,7 @@ func ParseDebtors(r io.Reader) ([]model.DebtorImportRow, error) {
 	}
 	result := make([]model.DebtorImportRow, 0, len(rows)-header-1)
 	seen := make(map[string]bool)
+	accountRows := 0
 	for i := header + 1; i < len(rows); i++ {
 		row := rows[i]
 		if accountCol >= len(row) || debtCol >= len(row) {
@@ -65,6 +66,7 @@ func ParseDebtors(r io.Reader) ([]model.DebtorImportRow, error) {
 		if account == "" {
 			continue
 		}
+		accountRows++
 		debtText := strings.TrimSpace(strings.ReplaceAll(row[debtCol], ",", "."))
 		debt, err := strconv.ParseFloat(debtText, 64)
 		if err != nil || math.IsNaN(debt) || math.IsInf(debt, 0) {
@@ -79,8 +81,8 @@ func ParseDebtors(r io.Reader) ([]model.DebtorImportRow, error) {
 		}
 		result = append(result, model.DebtorImportRow{AccountNumber: account, Debt: debt})
 	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("в файле не найдено положительной задолженности")
+	if accountRows == 0 {
+		return nil, fmt.Errorf("в файле не найдено строк с лицевыми счетами")
 	}
 	return result, nil
 }

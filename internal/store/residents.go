@@ -334,6 +334,35 @@ func (s *Residents) Properties(ctx context.Context, person int64) ([]model.Resid
  AND o.valid_from<=(now() AT TIME ZONE 'Europe/Moscow')::date AND (o.valid_to IS NULL OR o.valid_to>=(now() AT TIME ZONE 'Europe/Moscow')::date)
  WHERE `+residentOwns+` ORDER BY p.building_id,p.kind,substring(p.number from '\d+')::numeric NULLS LAST,p.number`, person))
 }
+
+func (s *Residents) Debts(ctx context.Context, person int64) (model.ResidentDebtSummary, error) {
+	var period model.Date
+	err := s.pool.QueryRow(ctx, `SELECT period FROM debtor_reports ORDER BY period DESC LIMIT 1`).Scan(&period)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ResidentDebtSummary{Items: []model.ResidentDebt{}}, nil
+	}
+	if err != nil {
+		return model.ResidentDebtSummary{}, mapErr(err)
+	}
+	items, err := collect[model.ResidentDebt](s.pool.Query(ctx, `SELECT b.address,k.name AS premises_kind,p.number AS premises_number,
+		a.purpose,a.number AS account_number,x.debt::float8 AS debt
+		FROM debtor_report_rows x
+		JOIN personal_accounts a ON a.number=x.account_number AND a.deleted_at IS NULL
+		JOIN premises p ON p.id=a.premises_id AND p.deleted_at IS NULL
+		JOIN buildings b ON b.id=p.building_id AND b.deleted_at IS NULL
+		JOIN premises_kinds k ON k.code=p.kind AND k.deleted_at IS NULL
+		WHERE x.period=$1 AND `+strings.ReplaceAll(residentOwns, "$1", "$2")+`
+		ORDER BY x.debt DESC,b.address,p.kind,substring(p.number from '\d+')::numeric NULLS LAST,p.number,a.purpose`, period, person))
+	if err != nil {
+		return model.ResidentDebtSummary{}, err
+	}
+	summary := model.ResidentDebtSummary{Period: &period, Items: items}
+	for _, item := range items {
+		summary.Total += item.Debt
+	}
+	return summary, nil
+}
+
 func (s *Residents) Meters(ctx context.Context, person int64) ([]model.Meter, error) {
 	// Служебные комментарии счётчика не входят в ответ кабинета.
 	meters, err := collect[model.Meter](s.pool.Query(ctx, strings.ReplaceAll(meterSelect, "CURRENT_DATE", "(now() AT TIME ZONE 'Europe/Moscow')::date")+` WHERE m.deleted_at IS NULL AND `+residentOwns+` ORDER BY p.id,array_position(ARRAY['cold_water','hot_water','electricity'],m.resource),m.id`, person))

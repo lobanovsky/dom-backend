@@ -331,3 +331,13 @@ func (s *AccountServices) PeriodApply(ctx context.Context, req model.AccountServ
 	}
 	return model.AccountServicePeriodResult{Changed: int(tag.RowsAffected())}, nil
 }
+
+func (s *AccountServices) BulkRemove(ctx context.Context, req model.AccountServiceBulkRemoveRequest) (int64, error) {
+	if err := req.Validate(); err != nil {
+		return 0, err
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE account_services x SET deleted_at=now(), updated_at=now()
+ FROM personal_accounts a JOIN premises p ON p.id=a.premises_id
+ WHERE a.id=x.account_id AND x.deleted_at IS NULL AND x.service_id=$1 AND p.kind=$2`, req.ServiceID, req.PremisesKind)
+	return tag.RowsAffected(), mapErr(err)
+}

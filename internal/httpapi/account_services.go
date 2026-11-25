@@ -9,6 +9,7 @@ import (
 
 // AccountServiceBulkStore — массовые операции над назначениями услуг (обычный CRUD идёт через crudHandlers).
 type AccountServiceBulkStore interface {
+	BulkRemove(context.Context, model.AccountServiceBulkRemoveRequest) (int64, error)
 	BulkPreview(ctx context.Context, req model.AccountServiceBulkRequest) (model.AccountServiceBulkPreview, error)
 	BulkAssign(ctx context.Context, req model.AccountServiceBulkRequest) (model.AccountServiceBulkResult, error)
 	BulkClose(ctx context.Context, req model.AccountServiceCloseRequest) (model.AccountServiceCloseResult, error)
@@ -19,6 +20,7 @@ type AccountServiceBulkStore interface {
 type accountServiceBulkHandlers struct{ s AccountServiceBulkStore }
 
 func (h accountServiceBulkHandlers) register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/account-services/bulk-remove", h.remove)
 	mux.HandleFunc("POST /api/v1/account-services/bulk/preview", h.preview)
 	mux.HandleFunc("POST /api/v1/account-services/bulk", h.assign)
 	mux.HandleFunc("POST /api/v1/account-services/bulk-close", h.close)
@@ -89,4 +91,17 @@ func (h accountServiceBulkHandlers) periodApply(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (h accountServiceBulkHandlers) remove(w http.ResponseWriter, r *http.Request) {
+	var req model.AccountServiceBulkRemoveRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	count, err := h.s.BulkRemove(r.Context(), req)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"removed": count})
 }

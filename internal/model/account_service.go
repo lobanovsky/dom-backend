@@ -150,3 +150,12 @@ type AccountServicePeriodPreview struct {
 type AccountServicePeriodResult struct {
 	Changed int `json:"changed"`
 }
+
+type AccountServiceBulkRemoveRequest struct {
+	ServiceID    int64  `json:"service_id"`
+	PremisesKind string `json:"premises_kind"`
+}
+
+func (r AccountServiceBulkRemoveRequest) Validate() error {
+	return firstErr(positiveInt("service_id", intPtr(r.ServiceID)), required("premises_kind", r.PremisesKind), kindCode("premises_kind", r.PremisesKind))
+}

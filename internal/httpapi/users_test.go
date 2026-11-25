@@ -183,6 +183,29 @@ func loginAs(t *testing.T, h http.Handler, user, password string) *http.Cookie {
 	return nil
 }
 
+func TestDebtorReportPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		viewer       bool
+	}{
+		{http.MethodGet, "/api/v1/debtors", true},
+		{http.MethodHead, "/api/v1/debtors/reports", true},
+		{http.MethodGet, "/api/v1/debtors/export", true},
+		{http.MethodPost, "/api/v1/debtors/import", false},
+		{http.MethodDelete, "/api/v1/debtors/reports/2026-10", false},
+	} {
+		if got := allowed(model.User{Role: model.RoleViewer}, tc.method, tc.path); got != tc.viewer {
+			t.Errorf("viewer %s %s: allowed = %t, want %t", tc.method, tc.path, got, tc.viewer)
+		}
+		if !allowed(model.User{Role: model.RoleAdmin}, tc.method, tc.path) {
+			t.Errorf("admin %s %s: denied", tc.method, tc.path)
+		}
+		if allowed(model.User{Role: model.RoleGuard}, tc.method, tc.path) {
+			t.Errorf("guard %s %s: allowed", tc.method, tc.path)
+		}
+	}
+}
+
 func TestViewerIsReadOnly(t *testing.T) {
 	h, _ := usersRouter(t)
 	viewer := loginAs(t, h, "viewer", "viewerpw1")

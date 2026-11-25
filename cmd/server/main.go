@@ -237,6 +237,7 @@ func run(log *slog.Logger) error {
 			MeterReadingExport:   meterReadings,
 			Electricity:          store.NewElectricity(pool),
 			Water:                store.NewWater(pool),
+			Debtors:              store.NewDebtors(pool),
 			SendHotWaterReport:   sendHotWaterReport,
 			AccountServices:      accountServices,
 			AccountServiceBulk:   accountServices,

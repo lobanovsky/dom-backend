@@ -58,6 +58,7 @@ type Deps struct {
 	MeterReadingExport   MeterReadingExportStore
 	Electricity          ElectricityStore
 	Water                WaterStore
+	Debtors              DebtorsStore
 	Properties           PropertiesStore
 	Sber                 SberStore
 	SberSyncer           SberSyncer
@@ -93,6 +94,9 @@ func NewRouter(d Deps) http.Handler {
 	}
 	if d.Electricity != nil {
 		electricityHandlers{d.Electricity}.register(api)
+	}
+	if d.Debtors != nil {
+		debtorHandlers{d.Debtors}.register(api)
 	}
 	api.HandleFunc("GET /api/v1/auth/me", a.me)
 	api.HandleFunc("PUT /api/v1/auth/password", a.changePassword)

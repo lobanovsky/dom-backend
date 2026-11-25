@@ -7,7 +7,7 @@ import (
 	"dom-backend/internal/model"
 )
 
-func (s *Water) waterResidentCharges(ctx context.Context, period model.Date, balance model.WaterBalance) (model.WaterResidentCharges, error) {
+func (s *Water) waterResidentCharges(ctx context.Context, period model.Date, volumes model.WaterVolumes) (model.WaterResidentCharges, error) {
 	var result model.WaterResidentCharges
 	err := s.pool.QueryRow(ctx, `
 WITH prices AS (
@@ -27,38 +27,39 @@ WITH prices AS (
 )
 SELECT (SELECT price FROM unique_prices WHERE kind='cold'),
  (SELECT price FROM unique_prices WHERE kind='hot_base'),
- (SELECT price FROM unique_prices WHERE kind='sewer')`, period, waterBalanceInletSerial).Scan(
+ (SELECT price FROM unique_prices WHERE kind='sewer')`, period, waterInletSerial).Scan(
 		&result.ColdPrice, &result.HotPrice, &result.SewerPrice,
 	)
 	if err != nil {
 		return result, err
 	}
-	charges := func(cold, hot *float64) model.WaterResidentAmounts {
-		var out model.WaterResidentAmounts
-		amount := func(volume, price *float64) *float64 {
-			if volume == nil || price == nil {
+	sum := func(values ...*float64) *float64 {
+		total := 0.0
+		for _, value := range values {
+			if value == nil {
 				return nil
 			}
-			value := math.Round(*volume**price*100) / 100
-			return &value
+			total += *value
 		}
-		out.Cold = amount(cold, result.ColdPrice)
-		out.Hot = amount(hot, result.HotPrice)
-		if cold != nil && hot != nil {
-			volume := *cold + *hot
-			out.Sewer = amount(&volume, result.SewerPrice)
-		}
-		if out.Cold != nil && out.Hot != nil && out.Sewer != nil {
-			total := math.Round((*out.Cold+*out.Hot+*out.Sewer)*100) / 100
-			out.Total = &total
-		}
-		return out
+		return &total
 	}
-	result.Apartments = charges(balance.ApartmentCold, balance.ApartmentHot)
-	result.Offices = charges(balance.OfficeCold, balance.OfficeHot)
-	if result.Apartments.Total != nil && result.Offices.Total != nil {
-		total := math.Round((*result.Apartments.Total+*result.Offices.Total)*100) / 100
-		result.Total = &total
+	amount := func(volume, price *float64) *float64 {
+		if volume == nil || price == nil {
+			return nil
+		}
+		value := math.Round(*volume**price*100) / 100
+		return &value
+	}
+	result.ParkingCold = volumes.ParkingCold
+	result.ColdVolume = sum(volumes.ApartmentCold, volumes.OfficeCold, volumes.ParkingCold)
+	result.HotVolume = sum(volumes.ApartmentHot, volumes.OfficeHot)
+	result.SewerVolume = sum(result.ColdVolume, result.HotVolume)
+	result.Amounts.Cold = amount(result.ColdVolume, result.ColdPrice)
+	result.Amounts.Hot = amount(result.HotVolume, result.HotPrice)
+	result.Amounts.Sewer = amount(result.SewerVolume, result.SewerPrice)
+	result.Total = sum(result.Amounts.Cold, result.Amounts.Hot, result.Amounts.Sewer)
+	if result.Total != nil {
+		*result.Total = math.Round(*result.Total*100) / 100
 	}
 	return result, nil
 }

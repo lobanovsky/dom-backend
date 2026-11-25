@@ -44,47 +44,32 @@ func (v WaterContractUpdate) Validate() error {
 	return nil
 }
 
-type WaterNegativeMeter struct {
-	ID       int64   `json:"id"`
-	Serial   string  `json:"serial"`
-	Resource string  `json:"resource"`
-	Location string  `json:"location"`
-	Previous float64 `json:"previous"`
-	Current  float64 `json:"current"`
-	Volume   float64 `json:"volume"`
-}
-
-type WaterBalance struct {
-	NegativeMeters         []WaterNegativeMeter `json:"negative_meters"`
-	CommonNeedsWaterPrice  *float64             `json:"common_needs_water_price"`
-	CommonNeedsWaterAmount *float64             `json:"common_needs_water_amount"`
-	ApartmentHot           *float64             `json:"apartment_hot"`
-	ApartmentCold          *float64             `json:"apartment_cold"`
-	OfficeCold             *float64             `json:"office_cold"`
-	OfficeHot              *float64             `json:"office_hot"`
-	Inlet                  *float64             `json:"inlet"`
-	CommonNeeds            *float64             `json:"common_needs"`
+type WaterVolumes struct {
+	ApartmentHot, ApartmentCold, OfficeCold, OfficeHot, ParkingCold *float64
+	ReportApartmentHot, ReportOfficeHot                             *float64
 }
 
 type WaterResidentAmounts struct {
 	Cold  *float64 `json:"cold"`
 	Hot   *float64 `json:"hot"`
 	Sewer *float64 `json:"sewer"`
-	Total *float64 `json:"total"`
 }
 
 type WaterResidentCharges struct {
-	ColdPrice  *float64             `json:"cold_price"`
-	HotPrice   *float64             `json:"hot_price"`
-	SewerPrice *float64             `json:"sewer_price"`
-	Apartments WaterResidentAmounts `json:"apartments"`
-	Offices    WaterResidentAmounts `json:"offices"`
-	Total      *float64             `json:"total"`
+	ColdVolume  *float64             `json:"cold_volume"`
+	HotVolume   *float64             `json:"hot_volume"`
+	SewerVolume *float64             `json:"sewer_volume"`
+	ParkingCold *float64             `json:"parking_cold"`
+	Amounts     WaterResidentAmounts `json:"amounts"`
+	ColdPrice   *float64             `json:"cold_price"`
+	HotPrice    *float64             `json:"hot_price"`
+	SewerPrice  *float64             `json:"sewer_price"`
+	Total       *float64             `json:"total"`
 }
 
 type WaterCalculation struct {
+	Volumes         WaterVolumes          `json:"-"`
 	ResidentCharges WaterResidentCharges  `json:"resident_charges"`
-	Balance         *WaterBalance         `json:"balance"`
 	Period          string                `json:"period"`
 	Complete        bool                  `json:"complete"`
 	WaterAmount     float64               `json:"water_amount"`

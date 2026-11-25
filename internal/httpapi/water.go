@@ -95,12 +95,12 @@ func (h waterHandlers) hotWaterReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	balance := result.Balance
-	if balance == nil || balance.ApartmentHot == nil || balance.OfficeHot == nil {
+	volumes := result.Volumes
+	if volumes.ReportApartmentHot == nil || volumes.ReportOfficeHot == nil {
 		writeError(w, http.StatusUnprocessableEntity, "Не хватает данных ГВС за выбранный месяц для формирования справки.")
 		return
 	}
-	data, err := hotwaterreport.Render(period, *balance.ApartmentHot, *balance.OfficeHot)
+	data, err := hotwaterreport.Render(period, *volumes.ReportApartmentHot, *volumes.ReportOfficeHot)
 	if err != nil {
 		writeErr(w, err)
 		return

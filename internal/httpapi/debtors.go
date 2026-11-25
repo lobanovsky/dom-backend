@@ -52,15 +52,27 @@ func (h debtorHandlers) deleteReport(w http.ResponseWriter, r *http.Request) {
 func (h debtorHandlers) export(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	period, err := parseDebtorPeriod(q.Get("period"))
-	if err != nil || len(q) == 0 || len(q["period"]) != 1 || len(q["category"]) > 1 || len(q["q"]) > 1 || len(q) != 1+boolInt(len(q["category"]) == 1)+boolInt(len(q["q"]) == 1) {
+	if err != nil || len(q["period"]) != 1 || len(q["categories"]) > 1 || len(q["q"]) > 1 {
 		writeError(w, http.StatusBadRequest, "period=YYYY-MM, optional category and q are required")
 		return
 	}
-	category, search := q.Get("category"), strings.ToLower(strings.TrimSpace(q.Get("q")))
-	validCategories := map[string]bool{"": true, "all": true, "other": true, "utilities:apartment": true, "utilities:parking_space": true, "capital_repair:apartment": true, "capital_repair:parking_space": true}
-	if !validCategories[category] {
-		writeError(w, http.StatusBadRequest, "category: unknown value")
-		return
+	for key := range q {
+		if key != "period" && key != "categories" && key != "q" {
+			writeError(w, http.StatusBadRequest, "unexpected query parameter")
+			return
+		}
+	}
+	search := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	validCategories := map[string]bool{"other": true, "utilities:apartment": true, "utilities:parking_space": true, "capital_repair:apartment": true, "capital_repair:parking_space": true}
+	selectedCategories := make(map[string]bool)
+	if q.Has("categories") {
+		for _, category := range strings.Split(q.Get("categories"), ",") {
+			if !validCategories[category] {
+				writeError(w, http.StatusBadRequest, "categories: unknown value")
+				return
+			}
+			selectedCategories[category] = true
+		}
 	}
 	items, err := h.store.List(r.Context(), period)
 	if err != nil {
@@ -70,7 +82,7 @@ func (h debtorHandlers) export(w http.ResponseWriter, r *http.Request) {
 	cols := []xlsxexport.Column{{Title: "Лицевой счёт", Width: 18}, {Title: "Номер помещения", Width: 22}, {Title: "Тип счёта", Width: 28}, {Title: "Собственник", Width: 38}, {Title: "Телефон", Width: 24}, {Title: "Email", Width: 36}, {Title: "Долг", Width: 18, Kind: xlsxexport.Money}}
 	rows := make([][]any, 0, len(items))
 	for _, item := range items {
-		if category != "" && category != "all" && debtorCategory(item) != category {
+		if len(selectedCategories) > 0 && !selectedCategories[debtorCategory(item)] {
 			continue
 		}
 		if search != "" && !debtorContains(item, search) {
@@ -105,10 +117,8 @@ func debtorCategoryLabel(row model.DebtorReportRow) string {
 		kind = "Квартира"
 	case "parking_space":
 		kind = "Машиноместо"
-	case "commercial":
+	default:
 		kind = "Коммерческое помещение"
-	case "":
-		kind = "Помещение не найдено"
 	}
 	purpose := "ЖКУ"
 	if debtorString(row.Purpose) == "capital_repair" {
@@ -142,13 +152,6 @@ func formatDebtorPhones(phones []string) string {
 		formatted = append(formatted, phone)
 	}
 	return strings.Join(formatted, ", ")
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func debtorString(value *string) string {

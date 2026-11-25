@@ -72,6 +72,11 @@ func (s *Debtors) ListReports(ctx context.Context) ([]model.DebtorReport, error)
 		FROM debtor_reports r ORDER BY r.period DESC`))
 }
 
+func (s *Debtors) DeleteReport(ctx context.Context, period model.Date) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM debtor_reports WHERE period=$1`, period)
+	return checkDeleted(tag, err)
+}
+
 func (s *Debtors) List(ctx context.Context, period model.Date) ([]model.DebtorReportRow, error) {
 	return collect[model.DebtorReportRow](s.pool.Query(ctx, `SELECT x.account_number,x.debt::float8 AS debt,
 		a.id AS account_id,a.purpose,p.id AS premises_id,p.kind AS premises_kind,p.number AS premises_number,

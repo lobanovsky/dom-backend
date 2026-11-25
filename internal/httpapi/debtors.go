@@ -18,6 +18,7 @@ import (
 type DebtorsStore interface {
 	Import(context.Context, model.Date, string, []model.DebtorImportRow) (model.DebtorImportResult, error)
 	ListReports(context.Context) ([]model.DebtorReport, error)
+	DeleteReport(context.Context, model.Date) error
 	List(context.Context, model.Date) ([]model.DebtorReportRow, error)
 }
 
@@ -25,9 +26,27 @@ type debtorHandlers struct{ store DebtorsStore }
 
 func (h debtorHandlers) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/debtors/reports", h.reports)
+	mux.HandleFunc("DELETE /api/v1/debtors/reports/{period}", h.deleteReport)
 	mux.HandleFunc("GET /api/v1/debtors", h.list)
 	mux.HandleFunc("GET /api/v1/debtors/export", h.export)
 	mux.HandleFunc("POST /api/v1/debtors/import", h.importFile)
+}
+
+func (h debtorHandlers) deleteReport(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) != 0 {
+		writeError(w, http.StatusBadRequest, "unexpected query parameters")
+		return
+	}
+	period, err := parseDebtorPeriod(r.PathValue("period"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "period must have format YYYY-MM")
+		return
+	}
+	if err := h.store.DeleteReport(r.Context(), period); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h debtorHandlers) export(w http.ResponseWriter, r *http.Request) {

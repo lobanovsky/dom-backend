@@ -39,8 +39,7 @@ WITH inlet AS (
  ) prev ON true
 ), totals AS (
  SELECT category, CASE WHEN count(*)=count(volume) THEN sum(volume) END AS volume,
- CASE WHEN count(*)=count(volume) THEN sum(greatest(volume,0)) END AS nonnegative_volume,
- CASE WHEN count(*)=count(volume) AND min(volume)>=0 THEN sum(volume) END AS report_volume
+ CASE WHEN count(*)=count(volume) THEN sum(greatest(volume,0)) END AS report_volume
  FROM volumes GROUP BY category
 )
 SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),
@@ -48,7 +47,7 @@ SELECT (SELECT volume FROM totals WHERE category='apartment_hot_water'),
  (SELECT volume FROM totals WHERE category='commercial_cold_water'),
  (SELECT volume FROM totals WHERE category='commercial_hot_water'),
  (SELECT volume FROM totals WHERE category='parking'),
- (SELECT nonnegative_volume FROM totals WHERE category='apartment_hot_water'),
+ (SELECT report_volume FROM totals WHERE category='apartment_hot_water'),
  (SELECT report_volume FROM totals WHERE category='commercial_hot_water')`, period, waterInletSerial).Scan(
 		&result.ApartmentHot, &result.ApartmentCold, &result.OfficeCold, &result.OfficeHot, &result.ParkingCold,
 		&result.ReportApartmentHot, &result.ReportOfficeHot,

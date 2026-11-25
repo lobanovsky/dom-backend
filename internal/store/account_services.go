@@ -341,3 +341,45 @@ func (s *AccountServices) BulkRemove(ctx context.Context, req model.AccountServi
  WHERE a.id=x.account_id AND x.deleted_at IS NULL AND x.service_id=$1 AND p.kind=$2`, req.ServiceID, req.PremisesKind)
 	return tag.RowsAffected(), mapErr(err)
 }
+
+func (s *AccountServices) SaveKinds(ctx context.Context, req model.AccountServiceKindsRequest) (int64, error) {
+	if err := req.Validate(); err != nil {
+		return 0, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	defer rollback(ctx, tx)
+	// Пока меняются правила услуги, параллельная запись не должна создать несовместимое назначение.
+	if req.ExpectedRemoved != nil {
+		if _, err := tx.Exec(ctx, `LOCK TABLE account_services IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+			return 0, mapErr(err)
+		}
+	}
+	var id int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM services WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, req.ServiceID).Scan(&id); err != nil {
+		return 0, mapErr(err)
+	}
+	const matching = ` FROM personal_accounts a JOIN premises p ON p.id=a.premises_id
+ WHERE x.account_id=a.id AND x.service_id=$1 AND x.deleted_at IS NULL AND NOT (p.kind=ANY($2::text[]))`
+	if req.ExpectedRemoved == nil {
+		var count int64
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM account_services x JOIN personal_accounts a ON a.id=x.account_id
+   JOIN premises p ON p.id=a.premises_id
+   WHERE x.service_id=$1 AND x.deleted_at IS NULL AND NOT (p.kind=ANY($2::text[]))`, id, req.PremisesKinds).Scan(&count)
+		return count, mapErr(err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE account_services x SET deleted_at=now(), updated_at=now()`+matching, id, req.PremisesKinds)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	count := tag.RowsAffected()
+	if count != *req.ExpectedRemoved {
+		return 0, &Error{ErrConflict, "assignments changed; preview again"}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE services SET premises_kinds=$2,updated_at=now() WHERE id=$1`, id, req.PremisesKinds); err != nil {
+		return 0, mapErr(err)
+	}
+	return count, mapErr(tx.Commit(ctx))
+}

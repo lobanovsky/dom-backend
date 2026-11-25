@@ -159,3 +159,22 @@ type AccountServiceBulkRemoveRequest struct {
 func (r AccountServiceBulkRemoveRequest) Validate() error {
 	return firstErr(positiveInt("service_id", intPtr(r.ServiceID)), required("premises_kind", r.PremisesKind), kindCode("premises_kind", r.PremisesKind))
 }
+
+// AccountServiceKindsRequest: без expected_removed выполняется только предпросмотр.
+type AccountServiceKindsRequest struct {
+	ServiceID       int64    `json:"service_id"`
+	PremisesKinds   []string `json:"premises_kinds"`
+	ExpectedRemoved *int64   `json:"expected_removed"`
+}
+
+func (r AccountServiceKindsRequest) Validate() error {
+	if len(r.PremisesKinds) == 0 {
+		return invalid("premises_kinds", "select at least one kind")
+	}
+	for _, kind := range r.PremisesKinds {
+		if err := kindCode("premises_kinds", kind); err != nil {
+			return err
+		}
+	}
+	return positiveInt("service_id", intPtr(r.ServiceID))
+}

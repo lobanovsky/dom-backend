@@ -39,22 +39,13 @@ type ElectricityVolumeGroup struct {
 	Meters  int        `json:"meters"`
 }
 
-type CommercialElectricityVolume struct {
-	Number   string  `json:"number"`
-	Building string  `json:"building"`
-	Volume   float64 `json:"volume"`
-	Missing  int     `json:"missing"`
-}
-
 type ElectricityOperations struct {
-	CommercialPremises   []CommercialElectricityVolume `json:"commercial_premises"`
-	CommercialIndividual ElectricityVolumeGroup        `json:"commercial_individual"`
-	CommercialCommon     ElectricityVolumeGroup        `json:"commercial_common"`
-	Parking              ElectricityVolumeGroup        `json:"parking"`
-	House                ElectricityVolumeGroup        `json:"house"`
-	Heating              ElectricityVolumeGroup        `json:"heating"`
-	Apartments           ElectricityVolumeGroup        `json:"apartments"`
-	Billable             [3]*float64                   `json:"billable"`
+	Offices    [2]*float64            `json:"offices"` // Офис-5, Офис-8.
+	Parking    ElectricityVolumeGroup `json:"parking"`
+	House      ElectricityVolumeGroup `json:"house"`
+	Heating    ElectricityVolumeGroup `json:"heating"`
+	Apartments ElectricityVolumeGroup `json:"apartments"`
+	Billable   [3]*float64            `json:"billable"`
 }
 
 type ElectricityCalculation struct {

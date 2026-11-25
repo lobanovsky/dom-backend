@@ -21,11 +21,6 @@ WITH common AS (
  WHERE building_id IS NOT NULL AND deleted_at IS NULL AND resource='electricity'
  AND serial_number IN ('023260210667','023260210792')
  UNION ALL
- SELECT m.id, CASE WHEN m.serial_number='023260085002' THEN 4 ELSE 5 END
- FROM meters m JOIN premises p ON p.id=m.premises_id
- WHERE p.deleted_at IS NULL AND p.kind='commercial' AND m.deleted_at IS NULL AND m.resource='electricity'
- AND m.serial_number IN ('023260085002','023260084425')
- UNION ALL
  SELECT m.id, 2 FROM meters m JOIN premises p ON p.id=m.premises_id
  WHERE p.deleted_at IS NULL AND p.kind='apartment' AND m.deleted_at IS NULL AND m.resource='electricity'
  AND p.building_id IN (SELECT building_id FROM common)
@@ -59,10 +54,6 @@ LEFT JOIN LATERAL (
 		var values [3]*float64
 		if err := rows.Scan(&group, &tariffs, &values[0], &values[1], &values[2]); err != nil {
 			return result, err
-		}
-		if group >= len(groups) {
-			result.Offices[group-len(groups)] = values[0]
-			continue
 		}
 		target := groups[group]
 		target.Meters++

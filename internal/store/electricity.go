@@ -103,12 +103,12 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 		seen[meterID] = true
 		var ok bool
 		var meterTariffs int
-		err := tx.QueryRow(ctx, `SELECT resource='electricity' AND building_id IS NOT NULL AND premises_id IS NULL AND deleted_at IS NULL, tariffs FROM meters WHERE id=$1`, meterID).Scan(&ok, &meterTariffs)
+		err := tx.QueryRow(ctx, `SELECT m.resource='electricity' AND (m.building_id IS NOT NULL OR (p.kind='commercial' AND p.deleted_at IS NULL)) AND m.deleted_at IS NULL, m.tariffs FROM meters m LEFT JOIN premises p ON p.id=m.premises_id WHERE m.id=$1`, meterID).Scan(&ok, &meterTariffs)
 		if err != nil {
 			return mapErr(err)
 		}
 		if !ok {
-			return invalid("meter_ids: must be active common electricity meters")
+			return invalid("meter_ids: must be common or commercial electricity meters")
 		}
 		if meterTariffs > maxTariffs {
 			maxTariffs = meterTariffs
@@ -133,7 +133,7 @@ func (s *Electricity) writeElectricityContract(ctx context.Context, id int64, in
 		}
 		var valid bool
 		err := tx.QueryRow(ctx, `SELECT t.unit='kwh' AND t.deleted_at IS NULL AND NOT EXISTS(
-      SELECT 1 FROM meters m JOIN buildings b ON b.id=m.building_id WHERE m.id=ANY($2::bigint[]) AND b.organization_id<>t.organization_id
+      SELECT 1 FROM meters m LEFT JOIN premises p ON p.id=m.premises_id JOIN buildings b ON b.id=COALESCE(m.building_id,p.building_id) WHERE m.id=ANY($2::bigint[]) AND b.organization_id<>t.organization_id
    ) FROM tariffs t WHERE t.id=$1 FOR SHARE OF t`, *tariffID, in.MeterIDs).Scan(&valid)
 		if err != nil {
 			if err == pgx.ErrNoRows {

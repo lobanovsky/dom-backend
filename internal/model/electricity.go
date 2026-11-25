@@ -40,7 +40,6 @@ type ElectricityVolumeGroup struct {
 }
 
 type ElectricityOperations struct {
-	Offices    [2]*float64            `json:"offices"` // Офис-5, Офис-8.
 	Parking    ElectricityVolumeGroup `json:"parking"`
 	House      ElectricityVolumeGroup `json:"house"`
 	Heating    ElectricityVolumeGroup `json:"heating"`
